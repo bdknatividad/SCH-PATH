@@ -22,8 +22,9 @@ const dbConfig = {
   queueLimit: 0,
   enableKeepAlive: true,
   keepAliveInitialDelay: 0,
+  connectTimeout: 15000,
   dateStrings: true,
-  ...(process.env.DB_SSL === 'true' ? { ssl: { rejectUnauthorized: true } } : {}),
+  ...(process.env.DB_SSL === 'true' ? { ssl: { minVersion: 'TLSv1.2' } } : {}),
 };
 
 /**
@@ -45,7 +46,15 @@ async function testConnection() {
     connection.release();
     return true;
   } catch (error) {
-    console.error('❌ Database connection failed:', error.message);
+    console.error('❌ Database connection failed:', {
+      code: error.code || 'UNKNOWN',
+      errno: error.errno || 'UNKNOWN',
+      message: error.message || 'No error message returned',
+      host: dbConfig.host,
+      port: dbConfig.port,
+      database: dbConfig.database,
+      ssl: process.env.DB_SSL === 'true',
+    });
     throw error;
   }
 }
