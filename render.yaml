@@ -3,8 +3,8 @@ services:
     name: sch-path
     runtime: node
     plan: free
-    buildCommand: npm ci --prefix backend && npm ci --prefix frontend && npm run build --prefix frontend
-    startCommand: npm start --prefix backend
+    buildCommand: cd backend && npm ci && cd ../frontend && npm ci && npm run build
+    startCommand: cd backend && npm start
     healthCheckPath: /api/health
     envVars:
       - key: NODE_ENV
