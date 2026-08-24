@@ -1,0 +1,4 @@
+node_modules
+data/sch.db
+data/sch.db-wal
+data/sch.db-shm

@@ -1,0 +1,25 @@
+{
+  "users": [
+    {
+      "id": "U001",
+      "username": "centerhead",
+      "password": "centerhead123",
+      "role": "centerhead",
+      "accessibleModules": [
+        "Dashboard",
+        "Child Records",
+        "Activities",
+        "Assessments",
+        "Reports",
+        "Account Management"
+      ],
+      "status": "Active",
+      "createdDate": "2025-01-01"
+    }
+  ],
+  "children": [],
+  "staff": [],
+  "activities": [],
+  "assessments": [],
+  "reports": []
+}

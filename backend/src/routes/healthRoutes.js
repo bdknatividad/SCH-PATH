@@ -1,0 +1,60 @@
+/**
+ * Health Record Routes
+ * @module routes/healthRoutes
+ * @description Health record and vital signs endpoints
+ */
+
+const express = require('express');
+const router = express.Router();
+const healthController = require('../controllers/healthController');
+const { asyncHandler } = require('../middleware/errorHandler');
+
+/**
+ * GET /api/health
+ * Get all health records
+ */
+router.get('/', asyncHandler(healthController.getAll));
+
+/**
+ * GET /api/health/resident/:residentId
+ * Get health records by resident
+ */
+router.get('/resident/:residentId', asyncHandler(healthController.getByResident));
+
+/**
+ * GET /api/health/resident/:residentId/latest
+ * Get latest health record for resident
+ */
+router.get('/resident/:residentId/latest', asyncHandler(healthController.getLatest));
+
+/**
+ * GET /api/health/resident/:residentId/stats
+ * Get health statistics for resident
+ */
+router.get('/resident/:residentId/stats', asyncHandler(healthController.getStats));
+
+/**
+ * GET /api/health/:id
+ * Get health record by ID
+ */
+router.get('/:id', asyncHandler(healthController.getById));
+
+/**
+ * POST /api/health
+ * Create new health record
+ */
+router.post('/', asyncHandler(healthController.create));
+
+/**
+ * PUT /api/health/:id
+ * Update health record
+ */
+router.put('/:id', asyncHandler(healthController.update));
+
+/**
+ * DELETE /api/health/:id
+ * Delete health record
+ */
+router.delete('/:id', asyncHandler(healthController.delete));
+
+module.exports = router;

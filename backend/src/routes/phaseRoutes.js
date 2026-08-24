@@ -1,0 +1,84 @@
+/**
+ * Phase Progress Routes
+ * @module routes/phaseRoutes
+ * @description Phase progression tracking endpoints
+ */
+
+const express = require('express');
+const router = express.Router();
+const phaseController = require('../controllers/phaseController');
+const { asyncHandler } = require('../middleware/errorHandler');
+
+/**
+ * GET /api/phases
+ * Get all phase progress records
+ */
+router.get('/', asyncHandler(phaseController.getAll));
+
+/**
+ * GET /api/phases/resident/:residentId
+ * Get phase progress by resident
+ */
+router.get('/resident/:residentId', asyncHandler(phaseController.getByResident));
+
+/**
+ * GET /api/phases/resident/:residentId/current
+ * Get current phase for resident
+ */
+router.get('/resident/:residentId/current', asyncHandler(phaseController.getCurrent));
+
+/**
+ * GET /api/phases/requirements
+ * Get all phase requirements (must be before /:id)
+ */
+router.get('/requirements', asyncHandler(phaseController.getRequirements));
+
+/**
+ * GET /api/phases/:id
+ * Get phase progress by ID
+ */
+router.get('/:id', asyncHandler(phaseController.getById));
+
+/**
+ * POST /api/phases
+ * Create new phase progress record
+ */
+router.post('/', asyncHandler(phaseController.create));
+
+/**
+ * PUT /api/phases/:id
+ * Update phase progress
+ */
+router.put('/:id', asyncHandler(phaseController.update));
+
+/**
+ * POST /api/phases/:id/complete
+ * Mark phase as completed
+ */
+router.post('/:id/complete', asyncHandler(phaseController.complete));
+
+/**
+ * POST /api/phases/:id/demote
+ * Demote child to previous phase due to violations
+ */
+router.post('/:id/demote', asyncHandler(phaseController.demote));
+
+/**
+ * POST /api/phases/:id/validate
+ * Validate phase completion
+ */
+router.post('/:id/validate', asyncHandler(phaseController.validate));
+
+/**
+ * POST /api/phases/:id/task
+ * Toggle a checklist task on a phase
+ */
+router.post('/:id/task', asyncHandler(phaseController.toggleTask));
+
+/**
+ * DELETE /api/phases/:id
+ * Delete phase progress record
+ */
+router.delete('/:id', asyncHandler(phaseController.delete));
+
+module.exports = router;
