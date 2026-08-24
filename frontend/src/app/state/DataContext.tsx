@@ -720,22 +720,16 @@ export function DataProvider({ children: childrenProp }: { children: ReactNode }
     }
     
     try {
-      const response = await fetch(`http://localhost:5000/api/alerts/${id}/read`, {
+      const result = await request<{ data?: Alert }>(`/alerts/${id}/read`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ readBy }),
       });
-      if (!response.ok) throw new Error('Failed to mark alert as read');
-      const result = await response.json();
       setAlerts(prev => prev.map(a => a.id === id ? (result.data || { ...a, isRead: true, readBy, readAt: new Date().toISOString() }) : a));
       
       // Recalculate unread count from all alerts
-      const allAlertsResponse = await fetch('http://localhost:5000/api/alerts');
-      if (allAlertsResponse.ok) {
-        const allAlertsData = await allAlertsResponse.json();
-        const unreadCount = (allAlertsData.data || []).filter((a: Alert) => !a.isRead).length;
-        setUnreadAlertsCount(unreadCount);
-      }
+      const allAlertsData = await request<{ data?: Alert[] }>('/alerts');
+      const unreadCount = (allAlertsData.data || []).filter((a: Alert) => !a.isRead).length;
+      setUnreadAlertsCount(unreadCount);
     } catch (err) {
       setAlerts(previous);
       setUnreadAlertsCount(prev => Math.max(0, prev + (alert && !alert.isRead ? 1 : 0)));
@@ -755,22 +749,17 @@ export function DataProvider({ children: childrenProp }: { children: ReactNode }
     try {
       // Mark all as read in backend
       await Promise.all(unreadIds.map(async (id) => {
-        const response = await fetch(`http://localhost:5000/api/alerts/${id}/read`, {
+        await request(`/alerts/${id}/read`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ readBy }),
         });
-        if (!response.ok) throw new Error(`Failed to mark alert ${id} as read`);
       }));
       
       // Refresh alerts from backend to ensure consistency
-      const allAlertsResponse = await fetch('http://localhost:5000/api/alerts');
-      if (allAlertsResponse.ok) {
-        const allAlertsData = await allAlertsResponse.json();
-        setAlerts(allAlertsData.data || []);
-        const unreadCount = (allAlertsData.data || []).filter((a: Alert) => !a.isRead).length;
-        setUnreadAlertsCount(unreadCount);
-      }
+      const allAlertsData = await request<{ data?: Alert[] }>('/alerts');
+      setAlerts(allAlertsData.data || []);
+      const unreadCount = (allAlertsData.data || []).filter((a: Alert) => !a.isRead).length;
+      setUnreadAlertsCount(unreadCount);
     } catch (err) {
       // Revert on error
       setAlerts(alerts);
