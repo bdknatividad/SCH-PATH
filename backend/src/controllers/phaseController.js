@@ -12,6 +12,12 @@ const { PHASE_REQUIREMENTS, CASE_PHASES, RESOURCES } = require('../utils/constan
 
 const baseController = createController('phaseProgress');
 
+function parseJsonValue(value, fallback) {
+  if (Array.isArray(value) || (value && typeof value === 'object')) return value;
+  if (typeof value !== 'string' || value.trim() === '') return fallback;
+  try { return JSON.parse(value); } catch { return fallback; }
+}
+
 /**
  * Check if a phase's requirements are met for a resident
  * Returns { valid, missing: { documents[], tasks[] } }
@@ -61,11 +67,7 @@ async function checkPhaseRequirements(residentId, phaseName, phaseProgressId) {
       [phaseProgressId]
     );
     let completed = [];
-    if (rows.length > 0 && rows[0].tasksCompleted) {
-      try {
-        completed = JSON.parse(rows[0].tasksCompleted);
-      } catch { completed = []; }
-    }
+    if (rows.length > 0) completed = parseJsonValue(rows[0].tasksCompleted, []);
 
     // Older clients stored checklist state on children.phaseTasksCompleted.
     // Include it so existing completed work remains valid for advancement.
@@ -74,13 +76,11 @@ async function checkPhaseRequirements(residentId, phaseName, phaseProgressId) {
       [residentId]
     );
     if (childRows[0]?.phaseTasksCompleted) {
-      try {
-        const childTasks = JSON.parse(childRows[0].phaseTasksCompleted);
-        const legacyCompleted = childTasks?.[phaseName];
-        if (Array.isArray(legacyCompleted)) {
-          completed = [...new Set([...completed, ...legacyCompleted])];
-        }
-      } catch { /* Ignore malformed legacy checklist data. */ }
+      const childTasks = parseJsonValue(childRows[0].phaseTasksCompleted, {});
+      const legacyCompleted = childTasks?.[phaseName];
+      if (Array.isArray(legacyCompleted)) {
+        completed = [...new Set([...completed, ...legacyCompleted])];
+      }
     }
     for (const task of req.requiredTasks) {
       if (!completed.includes(task)) {
@@ -465,8 +465,7 @@ async function toggleTask(req, res, next) {
       return res.json({ success: true, tasksCompleted: [task].filter(() => completed), allTasksDone: false });
     }
 
-    let tasksCompleted = [];
-    try { tasksCompleted = JSON.parse(rows[0].tasksCompleted || '[]'); } catch { tasksCompleted = []; }
+    const tasksCompleted = parseJsonValue(rows[0].tasksCompleted, []);
 
     if (completed && !tasksCompleted.includes(task)) {
       tasksCompleted.push(task);
@@ -489,8 +488,7 @@ async function toggleTask(req, res, next) {
     }
 
     // Check if all tasks done
-    let tasksRequired = [];
-    try { tasksRequired = JSON.parse(rows[0].tasksRequired || '[]'); } catch { tasksRequired = []; }
+    const tasksRequired = parseJsonValue(rows[0].tasksRequired, []);
     const allTasksDone = tasksRequired.every(t => tasksCompleted.includes(t));
 
     res.json({ success: true, tasksCompleted, allTasksDone });
