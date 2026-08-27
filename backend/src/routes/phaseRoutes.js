@@ -66,6 +66,8 @@ router.post('/:id/complete', authenticate, authorize('centerhead'), asyncHandler
  */
 router.post('/:id/demote', authenticate, authorize('centerhead'), asyncHandler(phaseController.demote));
 
+router.post('/:id/return', authenticate, authorize('centerhead'), asyncHandler(phaseController.returnToPhase));
+
 /**
  * POST /api/phases/:id/validate
  * Validate phase completion

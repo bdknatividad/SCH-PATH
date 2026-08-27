@@ -116,6 +116,7 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
   const [needsPsychAssessment, setNeedsPsychAssessment] = useState(false);
   const [togglingPsych, setTogglingPsych] = useState(false);
   const [demoting, setDemoting] = useState(false);
+  const [returningPhase, setReturningPhase] = useState<string | null>(null);
 
   const [isAdvanceDialogOpen, setIsAdvanceDialogOpen] = useState(false);
   const [advanceNotes, setAdvanceNotes] = useState('');
@@ -321,6 +322,22 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
       console.error('[Demote] Failed:', e);
     }
     setDemoting(false);
+  };
+
+  const handleReturnToPhase = async (targetPhase: string) => {
+    if (!currentRecord) return;
+    setReturningPhase(targetPhase);
+    try {
+      await request(`/phases/${currentRecord.id}/return`, {
+        method: 'POST',
+        body: JSON.stringify({ targetPhase, reason: 'Required documents incomplete' }),
+      });
+      await loadData();
+      onPhaseAdvanced?.();
+    } catch (error) {
+      console.error('[PhaseProgress] Failed to return to phase:', error);
+    }
+    setReturningPhase(null);
   };
 
   const handleValidate = async () => {
@@ -770,6 +787,17 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
                             {h.isCurrent && (
                               <Badge className="mt-1 text-[10px] bg-[#2F3E46] text-white px-2">Current</Badge>
                             )}
+                            {!h.isCurrent && h.requirementsMet === false && isCenterHead && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="mt-2 h-7 text-[10px] text-red-700 border-red-300"
+                                disabled={!!returningPhase}
+                                onClick={() => handleReturnToPhase(h.phaseName)}
+                              >
+                                {returningPhase === h.phaseName ? 'Returning...' : 'Return to this phase'}
+                              </Button>
+                            )}
                           </div>
                         </td>
                         <td className="px-4 py-3 text-gray-600 font-mono text-xs">{formatShortDateTime(h.enteredAt)}</td>
@@ -977,8 +1005,9 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
                   <ClipboardList className="w-3 h-3" /> Requirements
                 </p>
                 <div className="space-y-1">
-                  {tasksRequired.map(task => {
+                  {[...tasksRequired, ...tasksOptional].map(task => {
                     const done = tasksCompleted.includes(task);
+                    const isOptional = tasksOptional.includes(task);
                     return (
                       <label key={task} className="flex items-start gap-2 text-sm cursor-pointer p-1.5 rounded hover:bg-gray-50 group">
                         <input
@@ -988,7 +1017,9 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
                           className="mt-0.5 accent-green-600"
                           disabled={false}
                         />
-                        <span className={done ? 'line-through text-gray-400' : 'text-gray-700'}>{task}</span>
+                        <span className={done ? 'line-through text-gray-400' : 'text-gray-700'}>
+                          {task} {isOptional && <span className="text-[10px] text-gray-400">(Optional)</span>}
+                        </span>
                         {done && <CheckCircle2 className="w-3.5 h-3.5 text-green-500 ml-auto shrink-0" />}
                       </label>
                     );
@@ -997,25 +1028,6 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
               </div>
             )}
 
-            {tasksOptional.length > 0 && (
-              <div>
-                <p className="text-xs font-semibold text-gray-500 uppercase mb-2 flex items-center gap-1">
-                  <ClipboardList className="w-3 h-3" /> Optional Activities
-                </p>
-                <div className="space-y-1">
-                  {tasksOptional.map(task => {
-                    const done = tasksCompleted.includes(task);
-                    return (
-                      <label key={task} className="flex items-start gap-2 text-sm cursor-pointer p-1.5 rounded hover:bg-gray-50 group">
-                        <input type="checkbox" checked={done} onChange={(e) => handleToggleTask(task, e.target.checked)} className="mt-0.5 accent-green-600" />
-                        <span className={done ? 'line-through text-gray-400' : 'text-gray-700'}>{task}</span>
-                        {done && <CheckCircle2 className="w-3.5 h-3.5 text-green-500 ml-auto shrink-0" />}
-                      </label>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
 
             {/* Conditional Psych Assessment Toggle (Admission Phase only, after base docs uploaded) */}
             {currentPhase === 'Admission Phase' && (user?.role === 'socialworker' || user?.role === 'centerhead') && (() => {

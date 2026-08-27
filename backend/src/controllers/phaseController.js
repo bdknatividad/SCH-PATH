@@ -451,6 +451,47 @@ async function demote(req, res, next) {
 }
 
 /**
+ * Return a resident to an earlier phase so missing required documents can be
+ * completed without deleting the phase history.
+ */
+async function returnToPhase(req, res, next) {
+  try {
+    const { id } = req.params;
+    const { targetPhase, reason } = req.body || {};
+    const [rows] = await pool.query('SELECT * FROM phaseProgress WHERE id = ?', [id]);
+    if (rows.length === 0) throw new ApiError(404, 'Phase record not found');
+
+    const current = mapRow('phaseProgress', rows[0]);
+    const currentIndex = CASE_PHASES.indexOf(current.phaseName);
+    const targetIndex = CASE_PHASES.indexOf(targetPhase);
+    if (targetIndex < 0 || targetIndex >= currentIndex) {
+      throw new ApiError(400, 'Return target must be an earlier phase');
+    }
+
+    const returnedBy = req.user?.username || 'Center Head';
+    const today = new Date().toISOString().split('T')[0];
+    await pool.query(
+      'UPDATE phaseProgress SET isCurrent = 0, completedAt = COALESCE(completedAt, ?), completedBy = COALESCE(completedBy, ?), notes = COALESCE(?, notes) WHERE id = ?',
+      [today, returnedBy, `RETURNED: ${reason || 'Required documents incomplete'}`, id]
+    );
+
+    const [existing] = await pool.query('SELECT id FROM phaseProgress');
+    const newId = generateId('PHS', existing.map(row => ({ id: row.id })));
+    const nextReq = PHASE_REQUIREMENTS[targetPhase] || {};
+    await pool.query(
+      `INSERT INTO phaseProgress (id, residentId, phaseName, enteredAt, isCurrent, tasksRequired, tasksCompleted, enteredBy, createdBy)
+       VALUES (?, ?, ?, ?, 1, ?, '[]', ?, ?)`,
+      [newId, current.residentId, targetPhase, today, JSON.stringify(nextReq.requiredTasks || []), returnedBy, returnedBy]
+    );
+    await pool.query('UPDATE children SET casePhase = ? WHERE id = ?', [targetPhase, current.residentId]);
+
+    res.json({ success: true, newPhase: targetPhase, phaseId: newId });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
  * POST /api/phases/:id/task
  * Toggle a task as complete/incomplete on a phase
  */
@@ -508,6 +549,7 @@ module.exports = {
   getCurrent,
   complete,
   demote,
+  returnToPhase,
   validate,
   validateByResident,
   toggleTask,

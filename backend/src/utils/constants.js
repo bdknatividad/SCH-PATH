@@ -171,7 +171,6 @@ const PHASE_REQUIREMENTS = {
       'Home/School Visit Form',
     ],
     optionalDocuments: ['Psychological Testing'],
-    optionalDocuments: [],
     requiredTasks: [
       'Conduct Observation',
       'Home Visit',
