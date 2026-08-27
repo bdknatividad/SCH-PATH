@@ -254,12 +254,28 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
       : localTasksCompleted.filter(t => t !== task);
     setLocalTasksCompleted(newTasks);
 
-    // Persist to child record
+    // Persist to the authoritative phase record first, then mirror to the
+    // legacy child field used by older clients.
     const child = children.find(c => c.id === residentId);
-    if (!child) return;
-    const existing: Record<string, string[]> = child.phaseTasksCompleted || {};
-    const updated = { ...existing, [currentPhase]: newTasks };
-    await updateChild(residentId, { phaseTasksCompleted: updated });
+    try {
+      if (currentRecord) {
+        const result = await request<{ success: boolean; tasksCompleted?: string[] }>(
+          `/phases/${currentRecord.id}/task`,
+          {
+            method: 'POST',
+            body: JSON.stringify({ task, completed: done }),
+          }
+        );
+        if (Array.isArray(result.tasksCompleted)) setLocalTasksCompleted(result.tasksCompleted);
+      }
+      if (child) {
+        const existing: Record<string, string[]> = child.phaseTasksCompleted || {};
+        const updated = { ...existing, [currentPhase]: newTasks };
+        await updateChild(residentId, { phaseTasksCompleted: updated });
+      }
+    } catch (error) {
+      console.error('[PhaseProgress] Failed to save checklist task:', error);
+    }
   };
 
   const handleTogglePsychAssessment = async (value: boolean) => {
