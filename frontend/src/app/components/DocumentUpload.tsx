@@ -31,10 +31,10 @@ const PHASE_NAME_MAP: Record<string, string> = {
 const PHASE_REQUIREMENTS: Record<string, { requiredDocuments: string[]; optionalDocuments?: string[]; requiredTasks: string[] }> = {
   Admission:        { requiredDocuments: ['Court Order','OCP Resolution','Case Information','Diversion Plan Referral Letter','Medical Certificate / Birth Certificate','Baptismal Certificate'], optionalDocuments: ['Psychological Assessment'], requiredTasks: [] },
   Orientation:      { requiredDocuments: [], requiredTasks: [] },
-  Observation:      { requiredDocuments: ['Psychological Testing','Discernment Assessment','SCSR'], requiredTasks: [] },
-  Rehabilitation:   { requiredDocuments: [], requiredTasks: [] },
-  'Pre-integration':{ requiredDocuments: ['Parenting Capability Assessment'], requiredTasks: [] },
-  Reintegration:    { requiredDocuments: [], requiredTasks: [] },
+  Observation:      { requiredDocuments: ['Discernment Assessment','Case Conference Form','Home/School Visit Form'], optionalDocuments: ['Psychological Testing'], requiredTasks: [] },
+  Rehabilitation:   { requiredDocuments: ['Casework / Groupwork'], optionalDocuments: ['Monitoring Report','Case Assistance Feedback Form','Court Assistance Feedback Form'], requiredTasks: [] },
+  'Pre-integration':{ requiredDocuments: ['Case Conference Form','Parenting Capability Assessment'], requiredTasks: [] },
+  Reintegration:    { requiredDocuments: ['Discharge Form'], requiredTasks: [] },
 };
 
 const DOCUMENT_ROLE_PERMISSIONS: Record<string, string[]> = {
@@ -49,6 +49,11 @@ const DOCUMENT_ROLE_PERMISSIONS: Record<string, string[]> = {
   'Discernment Assessment':             ['psychologist','centerhead'],
   'SCSR':                               ['socialworker','centerhead'],
   'Parenting Capability Assessment':    ['psychologist','centerhead'],
+  'Case Conference Form':               ['socialworker','centerhead'],
+  'Home/School Visit Form':             ['socialworker','educator','centerhead'],
+  'Case Assistance Feedback Form':      ['socialworker','centerhead'],
+  'Court Assistance Feedback Form':     ['socialworker','centerhead'],
+  'Discharge Form':                     ['socialworker','centerhead'],
   'Progress Report':                    ['socialworker','psychologist','nurse','educator','centerhead'],
   'Health Record Form':                 ['nurse','centerhead'],
   'Medical Certificate':                ['nurse','centerhead'],

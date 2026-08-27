@@ -16,6 +16,7 @@ DROP TABLE IF EXISTS activities;
 DROP TABLE IF EXISTS staff;
 DROP TABLE IF EXISTS children;
 DROP TABLE IF EXISTS users;
+DROP TABLE IF EXISTS accessRequests;
 SET FOREIGN_KEY_CHECKS = 1;
 
 CREATE TABLE users (
@@ -31,6 +32,27 @@ CREATE TABLE users (
   modifiedBy VARCHAR(100) NULL,
   createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE accessRequests (
+  id VARCHAR(40) PRIMARY KEY,
+  requesterId VARCHAR(40) NOT NULL,
+  requesterUsername VARCHAR(100) NOT NULL,
+  targetUserId VARCHAR(40) NULL,
+  targetRole VARCHAR(50) NULL,
+  residentId VARCHAR(40) NULL,
+  moduleName VARCHAR(100) NULL,
+  recordTab VARCHAR(100) NULL,
+  reason TEXT NOT NULL,
+  status ENUM('Pending', 'Approved', 'Rejected') NOT NULL DEFAULT 'Pending',
+  reviewedBy VARCHAR(100) NULL,
+  reviewedAt TIMESTAMP NULL,
+  reviewerNote TEXT NULL,
+  createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_access_requesterId (requesterId),
+  INDEX idx_access_status (status),
+  INDEX idx_access_targetRole (targetRole)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE children (

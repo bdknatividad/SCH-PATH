@@ -30,8 +30,13 @@ const DOCUMENT_ROLE_PERMISSIONS: Record<string, string[]> = {
   'Psychological Assessment':           ['psychologist', 'centerhead'],
   'Psychological Testing':              ['psychologist', 'centerhead'],
   'Discernment Assessment':             ['psychologist', 'centerhead'],
+  'Case Conference Form':               ['socialworker', 'centerhead'],
+  'Home/School Visit Form':             ['socialworker', 'educator', 'centerhead'],
+  'Case Assistance Feedback Form':      ['socialworker', 'centerhead'],
+  'Court Assistance Feedback Form':     ['socialworker', 'centerhead'],
   'SCSR':                               ['socialworker', 'centerhead'],
   'Parenting Capability Assessment':    ['psychologist', 'centerhead'],
+  'Discharge Form':                     ['socialworker', 'centerhead'],
 };
 
 interface PhaseRecord {
@@ -55,6 +60,7 @@ interface PhaseRequirements {
   [phase: string]: {
     requiredDocuments: string[];
     requiredTasks: string[];
+    optionalTasks?: string[];
     optionalDocuments?: string[];
     manualCompletion?: boolean;
   };
@@ -80,6 +86,7 @@ interface Props {
 interface PhaseReqWithOptional {
   requiredDocuments: string[];
   optionalDocuments?: string[];
+  optionalTasks?: string[];
   requiredTasks: string[];
   manualCompletion?: boolean;
 }
@@ -640,6 +647,7 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
   const tasksCompleted = localTasksCompleted;
 
   const tasksRequired = currentRecord?.tasksRequired || currentReq.requiredTasks;
+  const tasksOptional = currentReq.optionalTasks || [];
   const tasksDone = tasksRequired.filter(t => tasksCompleted.includes(t)).length;
   const tasksTotal = tasksRequired.length;
 
@@ -702,15 +710,18 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
               const isCurrent = phase === currentPhase;
               const isDone = histEntry?.completedAt || (idx < currentPhaseIndex);
               const isFuture = idx > currentPhaseIndex;
+              const hasMissing = histEntry?.missingRequirements &&
+                (histEntry.missingRequirements.documents.length > 0 || histEntry.missingRequirements.tasks.length > 0);
               return (
                 <div key={phase} className="flex items-center gap-1">
                   <div className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-full text-xs font-semibold transition-all ${
                     isCurrent ? 'bg-[#2F3E46] text-white shadow-sm' :
+                    hasMissing ? 'bg-red-100 text-red-800 border border-red-300' :
                     isDone    ? 'bg-emerald-100 text-emerald-800' :
                     isFuture  ? 'bg-gray-100 text-gray-400'  :
                                 'bg-gray-100 text-gray-500'
                   }`}>
-                    {isDone ? <CheckCircle2 className="w-3.5 h-3.5" /> : isFuture ? <Lock className="w-3.5 h-3.5" /> : <Circle className="w-3.5 h-3.5" />}
+                    {hasMissing ? <AlertTriangle className="w-3.5 h-3.5" /> : isDone ? <CheckCircle2 className="w-3.5 h-3.5" /> : isFuture ? <Lock className="w-3.5 h-3.5" /> : <Circle className="w-3.5 h-3.5" />}
                     <span className="hidden sm:inline">{phase}</span>
                     <span className="sm:hidden text-xs">{idx + 1}</span>
                   </div>
@@ -977,6 +988,26 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
                           className="mt-0.5 accent-green-600"
                           disabled={false}
                         />
+                        <span className={done ? 'line-through text-gray-400' : 'text-gray-700'}>{task}</span>
+                        {done && <CheckCircle2 className="w-3.5 h-3.5 text-green-500 ml-auto shrink-0" />}
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {tasksOptional.length > 0 && (
+              <div>
+                <p className="text-xs font-semibold text-gray-500 uppercase mb-2 flex items-center gap-1">
+                  <ClipboardList className="w-3 h-3" /> Optional Activities
+                </p>
+                <div className="space-y-1">
+                  {tasksOptional.map(task => {
+                    const done = tasksCompleted.includes(task);
+                    return (
+                      <label key={task} className="flex items-start gap-2 text-sm cursor-pointer p-1.5 rounded hover:bg-gray-50 group">
+                        <input type="checkbox" checked={done} onChange={(e) => handleToggleTask(task, e.target.checked)} className="mt-0.5 accent-green-600" />
                         <span className={done ? 'line-through text-gray-400' : 'text-gray-700'}>{task}</span>
                         {done && <CheckCircle2 className="w-3.5 h-3.5 text-green-500 ml-auto shrink-0" />}
                       </label>

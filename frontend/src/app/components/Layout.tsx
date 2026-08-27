@@ -48,6 +48,7 @@ export function Layout({ children }: LayoutProps) {
     { path: '/social-worker', label: 'Social Worker', icon: Briefcase },
     { path: '/court-records', label: 'Court Records', icon: Gavel },
     { path: '/documents', label: 'Documents', icon: FileText },
+    { path: '/access-requests', label: 'Access Requests', icon: Users },
     { path: '/reports', label: 'Reports', icon: FileText },
     { path: '/education', label: 'Education', icon: GraduationCap },
     { path: '/staff', label: 'Account Management', icon: Settings },
@@ -69,6 +70,7 @@ export function Layout({ children }: LayoutProps) {
 
   const filteredMenuItems = menuItems.filter(item => {
     if (item.label === 'Account Management') return isAdmin;
+    if (item.label === 'Access Requests') return true;
     // Centerhead always sees all modules
     if (isAdmin) return true;
     return user?.accessibleModules?.includes(item.label);

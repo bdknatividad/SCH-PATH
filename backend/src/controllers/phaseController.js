@@ -145,7 +145,12 @@ async function getByResident(req, res, next) {
         }
       }
     }
-    res.json({ success: true, data: rows.map(r => mapRow('phaseProgress', r)), count: rows.length });
+    const data = await Promise.all(rows.map(async row => {
+      const phase = mapRow('phaseProgress', row);
+      const result = await checkPhaseRequirements(residentId, phase.phaseName, phase.id);
+      return { ...phase, requirementsMet: result.valid, missingRequirements: result.missing, violationBlock: result.violationBlock };
+    }));
+    res.json({ success: true, data, count: data.length });
   } catch (error) {
     next(error);
   }

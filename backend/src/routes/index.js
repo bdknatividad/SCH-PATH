@@ -24,6 +24,7 @@ const alertRoutes = require('./alertRoutes');
 const courtRoutes = require('./courtRoutes');
 const phaseRoutes = require('./phaseRoutes');
 const documentRoutes = require('./documentRoutes');
+const accessRequestRoutes = require('./accessRequestRoutes');
 
 // Public health check endpoint (must be before mounting routes)
 router.get('/health', (req, res) => {
@@ -111,6 +112,7 @@ router.use('/courtRecords', authenticate, courtRoutes); // backward compatible
 router.use('/phases', authenticate, phaseRoutes);
 router.use('/phaseProgress', authenticate, phaseRoutes); // backward compatible
 router.use('/documents', authenticate, documentRoutes);
+router.use('/access-requests', authenticate, accessRequestRoutes);
 
 // Generic resource endpoints for backward compatibility
 // These handle requests like /api/children, /api/staff, etc. with full CRUD

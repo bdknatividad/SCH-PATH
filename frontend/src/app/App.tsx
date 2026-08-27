@@ -23,6 +23,7 @@ import { CourtRecords } from '@/app/components/CourtRecords';
 import { SocialWorker } from '@/app/components/SocialWorker';
 import { DocumentUpload } from '@/app/components/DocumentUpload';
 import { Education } from '@/app/components/Education';
+import { AccessRequests } from '@/app/components/AccessRequests';
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean, error: Error | null }> {
   constructor(props: { children: ReactNode }) {
@@ -177,6 +178,12 @@ export default function App() {
             <Route path="/documents" element={
               <ProtectedRoute moduleName="Documents">
                 <Layout><DocumentUpload /></Layout>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/access-requests" element={
+              <ProtectedRoute>
+                <Layout><AccessRequests /></Layout>
               </ProtectedRoute>
             } />
 

@@ -9,6 +9,12 @@
  * @constant {Object}
  */
 const RESOURCES = {
+  accessRequests: {
+    prefix: 'ACC',
+    orderBy: 'createdAt DESC',
+    jsonFields: [],
+    columns: ['id', 'requesterId', 'requesterUsername', 'targetUserId', 'targetRole', 'residentId', 'moduleName', 'recordTab', 'reason', 'status', 'reviewedBy', 'reviewedAt', 'reviewerNote', 'createdAt', 'updatedAt'],
+  },
   users: {
     prefix: 'U',
     orderBy: 'createdAt ASC',
@@ -160,9 +166,11 @@ const PHASE_REQUIREMENTS = {
   },
   'Enculturation/Observation Phase': {
     requiredDocuments: [
-      'Psychological Testing',
       'Discernment Assessment',
+      'Case Conference Form',
+      'Home/School Visit Form',
     ],
+    optionalDocuments: ['Psychological Testing'],
     optionalDocuments: [],
     requiredTasks: [
       'Conduct Observation',
@@ -178,6 +186,8 @@ const PHASE_REQUIREMENTS = {
     ],
     optionalDocuments: [
       'Monitoring Report',
+      'Case Assistance Feedback Form',
+      'Court Assistance Feedback Form',
     ],
     requiredTasks: [
       'Counseling Sessions',
@@ -185,24 +195,23 @@ const PHASE_REQUIREMENTS = {
       'Parent Visits',
       'Family Conferencing',
       'Sports / Values Formation',
-      'Court Assistance',
     ],
+    optionalTasks: ['Court Assistance'],
     manualCompletion: false,
   },
   'Pre-integration Phase': {
     requiredDocuments: [
+      'Case Conference Form',
       'Parenting Capability Assessment',
     ],
     optionalDocuments: [],
     requiredTasks: [
-      'Discharge Planning completed',
-      'Family preparation activities completed',
-      'Exit case conference conducted',
+      'Exit Case Conference',
     ],
     manualCompletion: false,
   },
   'Reintegration/Aftercare Program': {
-    requiredDocuments: [],
+    requiredDocuments: ['Discharge Form'],
     optionalDocuments: [],
     requiredTasks: [
       'Life Skills Sessions',
@@ -231,11 +240,16 @@ const DOCUMENT_ROLE_PERMISSIONS = {
   // Enculturation/Observation Phase documents
   'Psychological Testing':              ['psychologist', 'centerhead'],
   'Discernment Assessment':             ['psychologist', 'centerhead'],
+  'Case Conference Form':               ['socialworker', 'centerhead'],
+  'Home/School Visit Form':             ['socialworker', 'educator', 'centerhead'],
   // Caring & Rehabilitation Phase documents
   'Casework / Groupwork':               ['socialworker', 'centerhead'],
   'Monitoring Report':                  ['socialworker', 'centerhead'],
   // Pre-integration Phase documents
   'Parenting Capability Assessment':    ['psychologist', 'centerhead'],
+  'Case Assistance Feedback Form':      ['socialworker', 'centerhead'],
+  'Court Assistance Feedback Form':      ['socialworker', 'centerhead'],
+  'Discharge Form':                     ['socialworker', 'centerhead'],
   // General documents (kept for backwards compatibility)
   'Progress Report':                    ['socialworker', 'psychologist', 'nurse', 'educator', 'centerhead'],
   'Health Record Form':                 ['nurse', 'centerhead'],
