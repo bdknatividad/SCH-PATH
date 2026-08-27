@@ -245,7 +245,7 @@ async function validateByResident(req, res, next) {
 async function complete(req, res, next) {
   try {
     const { id } = req.params;
-    const { completedBy, notes } = req.body || {};
+    const { completedBy, notes, force } = req.body || {};
 
     const [rows] = await pool.query('SELECT * FROM phaseProgress WHERE id = ?', [id]);
     if (rows.length === 0) throw new ApiError(404, 'Phase record not found');
@@ -253,7 +253,8 @@ async function complete(req, res, next) {
     const phase = mapRow('phaseProgress', rows[0]);
 
     const { valid, missing } = await checkPhaseRequirements(phase.residentId, phase.phaseName, id);
-    if (!valid) {
+    const canForceAdvance = Boolean(force) && req.user?.role === 'centerhead';
+    if (!valid && !canForceAdvance) {
       return res.status(422).json({
         success: false,
         canAdvance: false,

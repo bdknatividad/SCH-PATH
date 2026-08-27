@@ -397,7 +397,7 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
       if (!currentRecord) throw new Error('Current phase record is unavailable');
       await request(`/phases/${currentRecord.id}/complete`, {
         method: 'POST',
-        body: JSON.stringify({ notes: advanceNotes }),
+        body: JSON.stringify({ notes: advanceNotes, force: isCenterHead && !validationResult?.canAdvance }),
       });
 
       // Backend completion updates both the phase history and child.casePhase.

@@ -27,9 +27,9 @@ async function create(req, res, next) {
 
     // Set default values
     if (!req.body.status) req.body.status = 'Active';
-    // Keep newly created children aligned with the canonical phase name used by
-    // PHASE_REQUIREMENTS and phaseProgress.
-    if (!req.body.casePhase || req.body.casePhase === 'Admission') req.body.casePhase = 'Admission Phase';
+    // Every new admission must start in the first canonical phase. The client
+    // cannot skip phases by sending a different casePhase value.
+    req.body.casePhase = 'Admission Phase';
     if (!req.body.documentsComplete) req.body.documentsComplete = false;
 
     const data = req.body || {};
@@ -63,7 +63,7 @@ async function create(req, res, next) {
       values
     );
 
-    const phase = data.casePhase || 'Admission Phase';
+    const phase = 'Admission Phase';
     const phaseRequirements = PHASE_REQUIREMENTS[phase] || PHASE_REQUIREMENTS['Admission Phase'];
     const [existingPhases] = await connection.query('SELECT id FROM phaseProgress FOR UPDATE');
     const phaseId = generateId('PHS', existingPhases.map(row => ({ id: row.id })));
