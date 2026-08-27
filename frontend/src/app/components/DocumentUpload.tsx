@@ -439,8 +439,8 @@ export function DocumentUpload() {
     }
   };
   
-  const canApprove = user?.role === 'centerhead' || user?.role === 'admin';
-  const pendingDocs = documents.filter(d => d.status === 'Submitted');
+  const canApprove = user?.role === 'centerhead' || user?.role === 'socialworker' || user?.role === 'admin';
+  const pendingDocs = documents.filter(d => d.status === 'Submitted' || d.status === 'Under Review');
   
   return (
     <div className="space-y-6">
@@ -662,7 +662,7 @@ export function DocumentUpload() {
                                               <div className="flex gap-1 shrink-0">
                                                 <Button variant="outline" size="sm" className="h-7 px-2 text-xs" onClick={() => { setSelectedDocument(doc); setIsViewDialogOpen(true); }}>View</Button>
                                                 <FolderDownloadButton doc={doc} />
-                                                {canApprove && doc.status === 'Submitted' && (
+                                                {canApprove && (doc.status === 'Submitted' || doc.status === 'Under Review') && (
                                                   <>
                                                     <Button variant="outline" size="sm" className="h-7 px-2 text-xs text-green-600" onClick={() => handleApprove(doc)}>✓</Button>
                                                     <Button variant="outline" size="sm" className="h-7 px-2 text-xs text-red-500" onClick={() => openRejectDialog(doc)}>✕</Button>

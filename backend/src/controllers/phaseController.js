@@ -66,6 +66,22 @@ async function checkPhaseRequirements(residentId, phaseName, phaseProgressId) {
         completed = JSON.parse(rows[0].tasksCompleted);
       } catch { completed = []; }
     }
+
+    // Older clients stored checklist state on children.phaseTasksCompleted.
+    // Include it so existing completed work remains valid for advancement.
+    const [childRows] = await pool.query(
+      'SELECT phaseTasksCompleted FROM children WHERE id = ?',
+      [residentId]
+    );
+    if (childRows[0]?.phaseTasksCompleted) {
+      try {
+        const childTasks = JSON.parse(childRows[0].phaseTasksCompleted);
+        const legacyCompleted = childTasks?.[phaseName];
+        if (Array.isArray(legacyCompleted)) {
+          completed = [...new Set([...completed, ...legacyCompleted])];
+        }
+      } catch { /* Ignore malformed legacy checklist data. */ }
+    }
     for (const task of req.requiredTasks) {
       if (!completed.includes(task)) {
         missing.tasks.push(task);
@@ -434,6 +450,15 @@ async function toggleTask(req, res, next) {
       'UPDATE phaseProgress SET tasksCompleted = ? WHERE id = ?',
       [JSON.stringify(tasksCompleted), id]
     );
+
+    const [phaseRows] = await pool.query('SELECT residentId, phaseName FROM phaseProgress WHERE id = ?', [id]);
+    if (phaseRows.length > 0) {
+      const [childRows] = await pool.query('SELECT phaseTasksCompleted FROM children WHERE id = ?', [phaseRows[0].residentId]);
+      let childTasks = {};
+      try { childTasks = JSON.parse(childRows[0]?.phaseTasksCompleted || '{}'); } catch { childTasks = {}; }
+      childTasks[phaseRows[0].phaseName] = tasksCompleted;
+      await pool.query('UPDATE children SET phaseTasksCompleted = ? WHERE id = ?', [JSON.stringify(childTasks), phaseRows[0].residentId]);
+    }
 
     // Check if all tasks done
     let tasksRequired = [];

@@ -8,6 +8,7 @@ const express = require('express');
 const router = express.Router();
 const documentController = require('../controllers/documentController');
 const { asyncHandler } = require('../middleware/errorHandler');
+const { authorize } = require('../middleware/auth');
 
 /**
  * GET /api/documents
@@ -61,13 +62,13 @@ router.post('/:id/submit', asyncHandler(documentController.submit));
  * POST /api/documents/:id/approve
  * Approve document
  */
-router.post('/:id/approve', asyncHandler(documentController.approve));
+router.post('/:id/approve', authorize('centerhead', 'socialworker'), asyncHandler(documentController.approve));
 
 /**
  * POST /api/documents/:id/reject
  * Reject document
  */
-router.post('/:id/reject', asyncHandler(documentController.reject));
+router.post('/:id/reject', authorize('centerhead', 'socialworker'), asyncHandler(documentController.reject));
 
 /**
  * DELETE /api/documents/:id
