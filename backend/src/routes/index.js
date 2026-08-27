@@ -58,26 +58,32 @@ router.get('/store', authenticate, async (req, res, next) => {
     };
     
     for (const [tableName, resourceName] of Object.entries(resourceMapping)) {
-      let rows;
-      if (tableName === 'documents') {
-        // Exclude fileData from store load — it's base64 and can be huge (MB per file).
-        // fileData is fetched individually via GET /documents/:id when viewing/downloading.
-        [rows] = await pool.query(
-          `SELECT id, residentId, residentName, staffId, title, type, category, description,
-                  fileName, fileSize, filePath, fileType, uploaderRole, status, phase, requiredFor,
-                  submittedBy, submittedAt, uploadedBy, uploadedAt, reviewedBy, reviewedAt,
-                  approvedBy, approvedAt, rejectionReason, notes, createdBy, modifiedBy,
-                  createdAt, updatedAt
-           FROM documents ORDER BY createdAt DESC`
-        );
-      } else {
-        [rows] = await pool.query(`SELECT * FROM \`${tableName}\` ORDER BY ${RESOURCES[tableName]?.orderBy || 'createdAt DESC'}`);
+      try {
+        let rows;
+        if (tableName === 'documents') {
+          // Exclude fileData from store load — it's base64 and can be huge (MB per file).
+          // fileData is fetched individually via GET /documents/:id when viewing/downloading.
+          [rows] = await pool.query(
+            `SELECT id, residentId, residentName, staffId, title, type, category, description,
+                    fileName, fileSize, filePath, fileType, uploaderRole, status, phase, requiredFor,
+                    submittedBy, submittedAt, uploadedBy, uploadedAt, reviewedBy, reviewedAt,
+                    approvedBy, approvedAt, rejectionReason, notes, createdBy, modifiedBy,
+                    createdAt, updatedAt
+             FROM documents ORDER BY createdAt DESC`
+          );
+        } else {
+          [rows] = await pool.query(`SELECT * FROM \`${tableName}\` ORDER BY ${RESOURCES[tableName]?.orderBy || 'createdAt DESC'}`);
+        }
+        data[resourceName] = rows.map((row) => {
+          const mapped = mapRow(tableName, row);
+          if (tableName === 'users' && mapped) delete mapped.password;
+          return mapped;
+        });
+      } catch (resourceError) {
+        // Keep healthy modules available while an older deployment is migrated.
+        console.error(`Store load failed for ${tableName}:`, resourceError.message);
+        data[resourceName] = [];
       }
-      data[resourceName] = rows.map((row) => {
-        const mapped = mapRow(tableName, row);
-        if (tableName === 'users' && mapped) delete mapped.password;
-        return mapped;
-      });
     }
     
     res.json({ success: true, data });
