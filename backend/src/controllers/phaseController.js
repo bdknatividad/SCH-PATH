@@ -253,7 +253,8 @@ async function complete(req, res, next) {
     const phase = mapRow('phaseProgress', rows[0]);
 
     const { valid, missing } = await checkPhaseRequirements(phase.residentId, phase.phaseName, id);
-    const canForceAdvance = Boolean(force) && req.user?.role === 'centerhead';
+    const normalizedRole = String(req.user?.role || '').toLowerCase().replace(/[\s_-]+/g, '');
+    const canForceAdvance = Boolean(force) && normalizedRole === 'centerhead';
     if (!valid && !canForceAdvance) {
       return res.status(422).json({
         success: false,
