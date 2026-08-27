@@ -141,6 +141,31 @@ async function runMigrations() {
       console.log('Migration: childRecordTabs column already exists - OK.');
     }
 
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS phaseProgress (
+        id VARCHAR(40) PRIMARY KEY,
+        residentId VARCHAR(40) NOT NULL,
+        phaseName VARCHAR(100) NOT NULL,
+        enteredAt DATE NOT NULL,
+        completedAt DATE NULL,
+        tasksRequired JSON NULL,
+        tasksCompleted JSON NULL,
+        notes TEXT NULL,
+        enteredBy VARCHAR(100) NULL,
+        completedBy VARCHAR(100) NULL,
+        createdBy VARCHAR(100) NULL,
+        isCurrent BOOLEAN NOT NULL DEFAULT FALSE,
+        violationCount INT NOT NULL DEFAULT 0,
+        advancementBlocked BOOLEAN NOT NULL DEFAULT FALSE,
+        demotionRecommended BOOLEAN NOT NULL DEFAULT FALSE,
+        demotionCount INT NOT NULL DEFAULT 0,
+        createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_phaseProgress_residentId (residentId),
+        INDEX idx_phaseProgress_isCurrent (isCurrent)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
     // Keep existing deployments compatible with the current child resource
     // contract without replacing or modifying existing records.
     await pool.query(`
