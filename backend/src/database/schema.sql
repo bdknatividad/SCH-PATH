@@ -55,6 +55,11 @@ CREATE TABLE accessRequests (
   INDEX idx_access_targetRole (targetRole)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE childIdSequence (
+  id TINYINT PRIMARY KEY,
+  nextNumber INT NOT NULL
+) ENGINE=InnoDB;
+
 CREATE TABLE children (
   id VARCHAR(40) PRIMARY KEY,
   name VARCHAR(150) NOT NULL,

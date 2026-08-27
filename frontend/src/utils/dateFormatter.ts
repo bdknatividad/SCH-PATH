@@ -77,6 +77,9 @@ export function formatShortDate(date: string | Date | undefined): string {
  */
 export function formatShortDateTime(date: string | Date | undefined): string {
   if (!date) return 'N/A';
+  if (typeof date === 'string' && (/^\d{4}-\d{2}-\d{2}$/.test(date) || /^\d{4}-\d{2}-\d{2}T00:00:00(?:\.000)?Z$/.test(date))) {
+    return formatShortDate(date.split('T')[0]);
+  }
   const d = new Date(date);
   if (isNaN(d.getTime())) return 'Invalid Date';
   const dateStr = d.toLocaleDateString('en-PH', {

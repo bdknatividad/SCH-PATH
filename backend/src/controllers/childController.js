@@ -34,14 +34,31 @@ async function create(req, res, next) {
 
     const data = req.body || {};
     const config = RESOURCES.children;
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS childIdSequence (
+        id TINYINT PRIMARY KEY,
+        nextNumber INT NOT NULL
+      ) ENGINE=InnoDB
+    `);
     connection = await pool.getConnection();
     await connection.beginTransaction();
 
-    // Do not reuse IDs from deleted admissions; documents and phase history may
-    // still reference an old ID while an admission is being reviewed.
-    let childId = `CH${Date.now()}`;
-    const [existingChildId] = await connection.query('SELECT id FROM children WHERE id = ?', [childId]);
-    if (existingChildId.length > 0) childId = `CH${Date.now()}${Math.floor(Math.random() * 1000)}`;
+    // Keep child IDs short and readable while preserving a server-side sequence
+    // so deleted IDs are never reused.
+    const [sequenceRows] = await connection.query('SELECT nextNumber FROM childIdSequence WHERE id = 1 FOR UPDATE');
+    let nextNumber = sequenceRows[0]?.nextNumber || 1;
+    let childId = `CH${String(nextNumber).padStart(2, '0')}`;
+    let [existingChildId] = await connection.query('SELECT id FROM children WHERE id = ?', [childId]);
+    while (existingChildId.length > 0) {
+      nextNumber += 1;
+      childId = `CH${String(nextNumber).padStart(2, '0')}`;
+      [existingChildId] = await connection.query('SELECT id FROM children WHERE id = ?', [childId]);
+    }
+    if (sequenceRows.length === 0) {
+      await connection.query('INSERT INTO childIdSequence (id, nextNumber) VALUES (1, ?)', [nextNumber + 1]);
+    } else {
+      await connection.query('UPDATE childIdSequence SET nextNumber = ? WHERE id = 1', [nextNumber + 1]);
+    }
     const columns = ['id'];
     const values = [childId];
     const placeholders = ['?'];
