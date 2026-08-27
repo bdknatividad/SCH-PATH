@@ -128,9 +128,23 @@ async function getByResident(req, res, next) {
   try {
     const { residentId } = req.params;
     const [rows] = await pool.query(
-      'SELECT * FROM phaseProgress WHERE residentId = ? ORDER BY enteredAt ASC',
+      'SELECT * FROM phaseProgress WHERE residentId = ? ORDER BY enteredAt ASC, id ASC',
       [residentId]
     );
+    const currentRows = rows.filter(row => row.isCurrent);
+    if (currentRows.length > 1) {
+      const keep = currentRows[currentRows.length - 1];
+      await pool.query(
+        'UPDATE phaseProgress SET isCurrent = 0, completedAt = COALESCE(completedAt, CURDATE()) WHERE residentId = ? AND isCurrent = 1 AND id <> ?',
+        [residentId, keep.id]
+      );
+      for (const row of rows) {
+        if (row.id !== keep.id && currentRows.some(current => current.id === row.id)) {
+          row.isCurrent = 0;
+          row.completedAt = row.completedAt || new Date().toISOString().split('T')[0];
+        }
+      }
+    }
     res.json({ success: true, data: rows.map(r => mapRow('phaseProgress', r)), count: rows.length });
   } catch (error) {
     next(error);
@@ -144,9 +158,16 @@ async function getCurrent(req, res, next) {
   try {
     const { residentId } = req.params;
     const [rows] = await pool.query(
-      'SELECT * FROM phaseProgress WHERE residentId = ? AND isCurrent = 1 ORDER BY enteredAt DESC LIMIT 1',
+      'SELECT * FROM phaseProgress WHERE residentId = ? AND isCurrent = 1 ORDER BY enteredAt DESC, id DESC',
       [residentId]
     );
+
+    if (rows.length > 1) {
+      await pool.query(
+        'UPDATE phaseProgress SET isCurrent = 0, completedAt = COALESCE(completedAt, CURDATE()) WHERE residentId = ? AND isCurrent = 1 AND id <> ?',
+        [residentId, rows[0].id]
+      );
+    }
 
     let phase;
     if (rows.length === 0) {

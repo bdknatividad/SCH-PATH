@@ -37,8 +37,11 @@ async function create(req, res, next) {
     connection = await pool.getConnection();
     await connection.beginTransaction();
 
-    const [existingChildren] = await connection.query('SELECT id FROM children FOR UPDATE');
-    const childId = generateId(config.prefix, existingChildren.map(row => ({ id: row.id })));
+    // Do not reuse IDs from deleted admissions; documents and phase history may
+    // still reference an old ID while an admission is being reviewed.
+    let childId = `CH${Date.now()}`;
+    const [existingChildId] = await connection.query('SELECT id FROM children WHERE id = ?', [childId]);
+    if (existingChildId.length > 0) childId = `CH${Date.now()}${Math.floor(Math.random() * 1000)}`;
     const columns = ['id'];
     const values = [childId];
     const placeholders = ['?'];
