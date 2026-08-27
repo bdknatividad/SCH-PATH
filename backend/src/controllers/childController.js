@@ -5,6 +5,7 @@
  */
 
 const { pool } = require('../config/database');
+const { createController } = require('./baseController');
 const { calculateAge, generateId, mapRow } = require('../utils/helpers');
 const { ApiError } = require('../middleware/errorHandler');
 const { PHASE_REQUIREMENTS, RESOURCES } = require('../utils/constants');
