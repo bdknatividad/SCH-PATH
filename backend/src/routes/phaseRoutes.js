@@ -8,6 +8,7 @@ const express = require('express');
 const router = express.Router();
 const phaseController = require('../controllers/phaseController');
 const { asyncHandler } = require('../middleware/errorHandler');
+const { authenticate, authorize } = require('../middleware/auth');
 
 /**
  * GET /api/phases
@@ -33,6 +34,8 @@ router.get('/resident/:residentId/current', asyncHandler(phaseController.getCurr
  */
 router.get('/requirements', asyncHandler(phaseController.getRequirements));
 
+router.get('/validate/:residentId', authenticate, asyncHandler(phaseController.validateByResident));
+
 /**
  * GET /api/phases/:id
  * Get phase progress by ID
@@ -55,25 +58,25 @@ router.put('/:id', asyncHandler(phaseController.update));
  * POST /api/phases/:id/complete
  * Mark phase as completed
  */
-router.post('/:id/complete', asyncHandler(phaseController.complete));
+router.post('/:id/complete', authenticate, authorize('centerhead'), asyncHandler(phaseController.complete));
 
 /**
  * POST /api/phases/:id/demote
  * Demote child to previous phase due to violations
  */
-router.post('/:id/demote', asyncHandler(phaseController.demote));
+router.post('/:id/demote', authenticate, authorize('centerhead'), asyncHandler(phaseController.demote));
 
 /**
  * POST /api/phases/:id/validate
  * Validate phase completion
  */
-router.post('/:id/validate', asyncHandler(phaseController.validate));
+router.post('/:id/validate', authenticate, asyncHandler(phaseController.validate));
 
 /**
  * POST /api/phases/:id/task
  * Toggle a checklist task on a phase
  */
-router.post('/:id/task', asyncHandler(phaseController.toggleTask));
+router.post('/:id/task', authenticate, asyncHandler(phaseController.toggleTask));
 
 /**
  * DELETE /api/phases/:id

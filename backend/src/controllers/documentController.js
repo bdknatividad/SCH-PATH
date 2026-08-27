@@ -124,7 +124,7 @@ async function submit(req, res, next) {
       `UPDATE documents 
        SET status = ?, submittedBy = ?, submittedAt = NOW(), modifiedBy = ? 
        WHERE id = ?`,
-      ['Pending Review', submittedBy || req.user?.username, req.user?.username || 'System', id]
+      ['Under Review', submittedBy || req.user?.username, req.user?.username || 'System', id]
     );
 
     res.json({

@@ -9,7 +9,7 @@ const router = express.Router();
 const { pool } = require('../config/database');
 const { RESOURCES } = require('../utils/constants');
 const { mapRow } = require('../utils/helpers');
-const { optionalAuth } = require('../middleware/auth');
+const { authenticate } = require('../middleware/auth');
 
 const userRoutes = require('./userRoutes');
 const childRoutes = require('./childRoutes');
@@ -36,7 +36,7 @@ router.get('/health', (req, res) => {
 
 // Store endpoint - get all data (used by frontend DataContext)
 // Public endpoint - can be called with or without auth
-router.get('/store', optionalAuth, async (req, res, next) => {
+router.get('/store', authenticate, async (req, res, next) => {
   try {
     const data = {};
     
@@ -73,7 +73,11 @@ router.get('/store', optionalAuth, async (req, res, next) => {
       } else {
         [rows] = await pool.query(`SELECT * FROM \`${tableName}\` ORDER BY ${RESOURCES[tableName]?.orderBy || 'createdAt DESC'}`);
       }
-      data[resourceName] = rows.map((row) => mapRow(tableName, row));
+      data[resourceName] = rows.map((row) => {
+        const mapped = mapRow(tableName, row);
+        if (tableName === 'users' && mapped) delete mapped.password;
+        return mapped;
+      });
     }
     
     res.json({ success: true, data });
@@ -85,22 +89,22 @@ router.get('/store', optionalAuth, async (req, res, next) => {
 // Mount all routes
 router.use('/auth', userRoutes);
 router.use('/users', userRoutes); // Add /users endpoint for frontend compatibility
-router.use('/children', childRoutes);
-router.use('/staff', staffRoutes);
-router.use('/activities', activityRoutes);
-router.use('/assessments', assessmentRoutes);
-router.use('/reports', reportRoutes);
-router.use('/health-records', healthRoutes);
-router.use('/healthRecords', healthRoutes); // backward compatible
-router.use('/evaluations', evaluationRoutes);
-router.use('/activityEvaluations', evaluationRoutes); // backward compatible
-router.use('/violations', violationRoutes);
-router.use('/alerts', alertRoutes);
-router.use('/court', courtRoutes);
-router.use('/courtRecords', courtRoutes); // backward compatible
-router.use('/phases', phaseRoutes);
-router.use('/phaseProgress', phaseRoutes); // backward compatible
-router.use('/documents', documentRoutes);
+router.use('/children', authenticate, childRoutes);
+router.use('/staff', authenticate, staffRoutes);
+router.use('/activities', authenticate, activityRoutes);
+router.use('/assessments', authenticate, assessmentRoutes);
+router.use('/reports', authenticate, reportRoutes);
+router.use('/health-records', authenticate, healthRoutes);
+router.use('/healthRecords', authenticate, healthRoutes); // backward compatible
+router.use('/evaluations', authenticate, evaluationRoutes);
+router.use('/activityEvaluations', authenticate, evaluationRoutes); // backward compatible
+router.use('/violations', authenticate, violationRoutes);
+router.use('/alerts', authenticate, alertRoutes);
+router.use('/court', authenticate, courtRoutes);
+router.use('/courtRecords', authenticate, courtRoutes); // backward compatible
+router.use('/phases', authenticate, phaseRoutes);
+router.use('/phaseProgress', authenticate, phaseRoutes); // backward compatible
+router.use('/documents', authenticate, documentRoutes);
 
 // Generic resource endpoints for backward compatibility
 // These handle requests like /api/children, /api/staff, etc. with full CRUD

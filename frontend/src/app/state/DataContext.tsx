@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { createResource, deleteResource, getStore, updateResource, request } from '@/services/api';
+import { useAuth } from './AuthContext';
 
 // === TYPES ===
 
@@ -290,6 +291,7 @@ interface DataContextType {
 const DataContext = createContext<DataContextType | undefined>(undefined);
 
 export function DataProvider({ children: childrenProp }: { children: ReactNode }) {
+  const { token } = useAuth();
   const [children, setChildren] = useState<Child[]>(() => {
     try {
       const saved = localStorage.getItem('children');
@@ -410,7 +412,9 @@ export function DataProvider({ children: childrenProp }: { children: ReactNode }
     }
   };
 
-  useEffect(() => { loadStore(); }, []);
+  useEffect(() => {
+    if (token) loadStore();
+  }, [token]);
 
   useEffect(() => { localStorage.setItem('children', JSON.stringify(children)); }, [children]);
   useEffect(() => { localStorage.setItem('staff', JSON.stringify(staff)); }, [staff]);

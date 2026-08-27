@@ -5,10 +5,9 @@
  */
 
 const { pool } = require('../config/database');
-const { createController } = require('./baseController');
 const { calculateAge, generateId, mapRow } = require('../utils/helpers');
 const { ApiError } = require('../middleware/errorHandler');
-const { PHASE_REQUIREMENTS } = require('../utils/constants');
+const { PHASE_REQUIREMENTS, RESOURCES } = require('../utils/constants');
 
 const baseController = createController('children');
 
@@ -17,7 +16,9 @@ const baseController = createController('children');
  * @async
  */
 async function create(req, res, next) {
+  let connection;
   try {
+    req.body = req.body || {};
     // Calculate age from birthDate if provided
     if (req.body.birthDate && !req.body.age) {
       req.body.age = calculateAge(req.body.birthDate);
@@ -30,35 +31,59 @@ async function create(req, res, next) {
     if (!req.body.casePhase || req.body.casePhase === 'Admission') req.body.casePhase = 'Admission Phase';
     if (!req.body.documentsComplete) req.body.documentsComplete = false;
 
-    // We need the generated child ID, so intercept the response
-    const originalJson = res.json.bind(res);
-    res.json = async (body) => {
-      res.json = originalJson; // restore
-      if (body && body.success && body.data && body.data.id) {
-        const childId = body.data.id;
-        const phase = body.data.casePhase || 'Admission Phase';
-        try {
-          // Generate phase ID
-          const [existingPhases] = await pool.query('SELECT id FROM phaseProgress');
-          const phaseId = generateId('PHS', existingPhases.map(r => ({ id: r.id })));
-          // Get required tasks for this phase
-          const req_ = PHASE_REQUIREMENTS[phase];
-          const tasksRequired = JSON.stringify(req_ ? req_.requiredTasks : []);
-          await pool.query(
-            `INSERT INTO phaseProgress (id, residentId, phaseName, enteredAt, isCurrent, tasksRequired, tasksCompleted, enteredBy, createdBy)
-             VALUES (?, ?, ?, CURDATE(), 1, ?, '[]', ?, ?)`,
-            [phaseId, childId, phase, tasksRequired, 'System', 'System']
-          );
-        } catch (e) {
-          console.error('Failed to create initial phaseProgress:', e.message);
-        }
-      }
-      return originalJson(body);
-    };
+    const data = req.body || {};
+    const config = RESOURCES.children;
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
 
-    await baseController.create(req, res, next);
+    const [existingChildren] = await connection.query('SELECT id FROM children FOR UPDATE');
+    const childId = generateId(config.prefix, existingChildren.map(row => ({ id: row.id })));
+    const columns = ['id'];
+    const values = [childId];
+    const placeholders = ['?'];
+
+    for (const column of config.columns) {
+      if (column === 'id' || column === 'createdAt' || column === 'updatedAt' || data[column] === undefined) continue;
+      columns.push(column);
+      values.push(config.jsonFields.includes(column) && typeof data[column] === 'object'
+        ? JSON.stringify(data[column])
+        : data[column]);
+      placeholders.push('?');
+    }
+
+    if (req.user && !columns.includes('createdBy')) {
+      columns.push('createdBy');
+      values.push(req.user.username);
+      placeholders.push('?');
+    }
+
+    await connection.query(
+      `INSERT INTO children (${columns.join(', ')}) VALUES (${placeholders.join(', ')})`,
+      values
+    );
+
+    const phase = data.casePhase || 'Admission Phase';
+    const phaseRequirements = PHASE_REQUIREMENTS[phase] || PHASE_REQUIREMENTS['Admission Phase'];
+    const [existingPhases] = await connection.query('SELECT id FROM phaseProgress FOR UPDATE');
+    const phaseId = generateId('PHS', existingPhases.map(row => ({ id: row.id })));
+    await connection.query(
+      `INSERT INTO phaseProgress (id, residentId, phaseName, enteredAt, isCurrent, tasksRequired, tasksCompleted, enteredBy, createdBy)
+       VALUES (?, ?, ?, CURDATE(), 1, ?, '[]', ?, ?)`,
+      [phaseId, childId, phase, JSON.stringify(phaseRequirements.requiredTasks || []), req.user?.username || 'System', req.user?.username || 'System']
+    );
+
+    const [rows] = await connection.query('SELECT * FROM children WHERE id = ?', [childId]);
+    await connection.commit();
+    res.status(201).json({
+      success: true,
+      data: mapRow('children', rows[0]),
+      message: 'children created successfully',
+    });
   } catch (error) {
+    if (connection) await connection.rollback();
     next(error);
+  } finally {
+    if (connection) connection.release();
   }
 }
 

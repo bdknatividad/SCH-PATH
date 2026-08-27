@@ -378,22 +378,15 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
       const nextPhase = CASE_PHASES[currentIndex + 1];
       console.log('[Advance] Advancing to:', nextPhase);
 
-      // Update child casePhase directly
-      await updateChild(residentId, { casePhase: nextPhase });
+      if (!currentRecord) throw new Error('Current phase record is unavailable');
+      await request(`/phases/${currentRecord.id}/complete`, {
+        method: 'POST',
+        body: JSON.stringify({ notes: advanceNotes }),
+      });
 
-      // Reset tasks for new phase
+      // Backend completion updates both the phase history and child.casePhase.
       setLocalTasksCompleted([]);
       setTasksInitialized(false);
-
-      // Also try phaseProgress backend (non-fatal)
-      if (currentRecord) {
-        try {
-          await request(`/phases/${currentRecord.id}/complete`, {
-            method: 'POST',
-            body: JSON.stringify({ notes: advanceNotes, force: true }),
-          });
-        } catch { /* non-fatal */ }
-      }
 
       setIsAdvanceDialogOpen(false);
       setAdvanceNotes('');

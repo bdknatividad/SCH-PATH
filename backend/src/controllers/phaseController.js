@@ -190,30 +190,60 @@ async function validate(req, res, next) {
 }
 
 /**
+ * GET /api/phases/validate/:residentId
+ * Validate the current phase for a resident.
+ */
+async function validateByResident(req, res, next) {
+  try {
+    const { residentId } = req.params;
+    const [rows] = await pool.query(
+      'SELECT * FROM phaseProgress WHERE residentId = ? AND isCurrent = 1 ORDER BY enteredAt DESC LIMIT 1',
+      [residentId]
+    );
+    if (rows.length === 0) throw new ApiError(404, 'Current phase record not found');
+
+    const phase = mapRow('phaseProgress', rows[0]);
+    const { valid, missing, violationBlock } = await checkPhaseRequirements(residentId, phase.phaseName, phase.id);
+    res.json({
+      success: true,
+      data: {
+        canProgress: valid,
+        canAdvance: valid,
+        currentPhase: phase.phaseName,
+        missingRequirements: missing,
+        violationBlock,
+        message: valid
+          ? `All requirements for ${phase.phaseName} are met.`
+          : `Cannot advance: ${missing.documents.length} document(s) and ${missing.tasks.length} task(s) are incomplete.`,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
  * POST /api/phases/:id/complete
  * Complete current phase and start next one (BLOCKED if requirements not met)
  */
 async function complete(req, res, next) {
   try {
     const { id } = req.params;
-    const { completedBy, notes, force } = req.body || {};
+    const { completedBy, notes } = req.body || {};
 
     const [rows] = await pool.query('SELECT * FROM phaseProgress WHERE id = ?', [id]);
     if (rows.length === 0) throw new ApiError(404, 'Phase record not found');
 
     const phase = mapRow('phaseProgress', rows[0]);
 
-    // Strict validation — block unless center head forces or all requirements met
-    if (!force) {
-      const { valid, missing } = await checkPhaseRequirements(phase.residentId, phase.phaseName, id);
-      if (!valid) {
-        return res.status(422).json({
-          success: false,
-          canAdvance: false,
-          missingRequirements: missing,
-          message: `Cannot advance: ${missing.documents.length} document(s) pending approval and ${missing.tasks.length} task(s) incomplete.`,
-        });
-      }
+    const { valid, missing } = await checkPhaseRequirements(phase.residentId, phase.phaseName, id);
+    if (!valid) {
+      return res.status(422).json({
+        success: false,
+        canAdvance: false,
+        missingRequirements: missing,
+        message: `Cannot advance: ${missing.documents.length} document(s) pending approval and ${missing.tasks.length} task(s) incomplete.`,
+      });
     }
 
     const completedAt = new Date().toISOString().split('T')[0];
@@ -428,5 +458,6 @@ module.exports = {
   complete,
   demote,
   validate,
+  validateByResident,
   toggleTask,
 };
