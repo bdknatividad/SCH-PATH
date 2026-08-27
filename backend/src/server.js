@@ -166,6 +166,34 @@ async function runMigrations() {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
 
+    const [phaseColumns] = await pool.query(
+      `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'phaseProgress'`
+    );
+    const existingPhaseColumns = new Set(phaseColumns.map(column => column.COLUMN_NAME));
+    const phaseColumnDefinitions = {
+      completedAt: 'DATE NULL',
+      tasksRequired: 'JSON NULL',
+      tasksCompleted: 'JSON NULL',
+      notes: 'TEXT NULL',
+      enteredBy: 'VARCHAR(100) NULL',
+      completedBy: 'VARCHAR(100) NULL',
+      createdBy: 'VARCHAR(100) NULL',
+      isCurrent: 'BOOLEAN NOT NULL DEFAULT FALSE',
+      violationCount: 'INT NOT NULL DEFAULT 0',
+      advancementBlocked: 'BOOLEAN NOT NULL DEFAULT FALSE',
+      demotionRecommended: 'BOOLEAN NOT NULL DEFAULT FALSE',
+      demotionCount: 'INT NOT NULL DEFAULT 0',
+      createdAt: 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP',
+      updatedAt: 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
+    };
+    for (const [column, definition] of Object.entries(phaseColumnDefinitions)) {
+      if (!existingPhaseColumns.has(column)) {
+        await pool.query(`ALTER TABLE phaseProgress ADD COLUMN ${column} ${definition}`);
+        console.log(`Migration: added phaseProgress.${column}.`);
+      }
+    }
+
     // Keep existing deployments compatible with the current child resource
     // contract without replacing or modifying existing records.
     await pool.query(`
