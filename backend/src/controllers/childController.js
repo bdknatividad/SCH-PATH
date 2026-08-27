@@ -25,7 +25,9 @@ async function create(req, res, next) {
 
     // Set default values
     if (!req.body.status) req.body.status = 'Active';
-    if (!req.body.casePhase) req.body.casePhase = 'Admission';
+    // Keep newly created children aligned with the canonical phase name used by
+    // PHASE_REQUIREMENTS and phaseProgress.
+    if (!req.body.casePhase || req.body.casePhase === 'Admission') req.body.casePhase = 'Admission Phase';
     if (!req.body.documentsComplete) req.body.documentsComplete = false;
 
     // We need the generated child ID, so intercept the response
@@ -34,7 +36,7 @@ async function create(req, res, next) {
       res.json = originalJson; // restore
       if (body && body.success && body.data && body.data.id) {
         const childId = body.data.id;
-        const phase = body.data.casePhase || 'Admission';
+        const phase = body.data.casePhase || 'Admission Phase';
         try {
           // Generate phase ID
           const [existingPhases] = await pool.query('SELECT id FROM phaseProgress');

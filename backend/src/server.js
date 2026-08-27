@@ -140,6 +140,87 @@ async function runMigrations() {
     } else {
       console.log('Migration: childRecordTabs column already exists - OK.');
     }
+
+    // Keep existing deployments compatible with the current child resource
+    // contract without replacing or modifying existing records.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS children (
+        id VARCHAR(40) PRIMARY KEY,
+        name VARCHAR(150) NOT NULL,
+        age INT NOT NULL DEFAULT 0,
+        gender ENUM('Male', 'Female') NOT NULL DEFAULT 'Male',
+        admissionDate DATE NULL,
+        legalCategory VARCHAR(150) NULL,
+        caseType VARCHAR(150) NULL,
+        status ENUM('Active', 'Discharged') NOT NULL DEFAULT 'Active',
+        casePhase VARCHAR(150) NULL,
+        isRepeatOffender BOOLEAN NOT NULL DEFAULT FALSE,
+        previousCaseDetails TEXT NULL,
+        previousCases JSON NULL,
+        birthDate DATE NULL,
+        address TEXT NULL,
+        documentsComplete BOOLEAN NOT NULL DEFAULT FALSE,
+        documents JSON NULL,
+        medicalRecords JSON NULL,
+        lastCheckup DATE NULL,
+        notes TEXT NULL,
+        behaviorNotes TEXT NULL,
+        guardianName VARCHAR(150) NULL,
+        guardianContact VARCHAR(100) NULL,
+        behavioralLogs JSON NULL,
+        assessments JSON NULL,
+        phaseTasksCompleted JSON NULL,
+        needsPsychAssessment BOOLEAN NOT NULL DEFAULT FALSE,
+        readmissionDate DATE NULL,
+        readmissionDatetime DATETIME NULL,
+        createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
+    const [childColumns] = await pool.query(
+      `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'children'`
+    );
+    if (childColumns.length > 0) {
+      const existingChildColumns = new Set(childColumns.map(column => column.COLUMN_NAME));
+      const childColumnDefinitions = {
+        age: 'INT NOT NULL DEFAULT 0',
+        gender: "ENUM('Male', 'Female') NOT NULL DEFAULT 'Male'",
+        admissionDate: 'DATE NULL',
+        legalCategory: 'VARCHAR(150) NULL',
+        caseType: 'VARCHAR(150) NULL',
+        status: "ENUM('Active', 'Discharged') NOT NULL DEFAULT 'Active'",
+        casePhase: 'VARCHAR(150) NULL',
+        isRepeatOffender: 'BOOLEAN NOT NULL DEFAULT FALSE',
+        previousCaseDetails: 'TEXT NULL',
+        previousCases: 'JSON NULL',
+        birthDate: 'DATE NULL',
+        address: 'TEXT NULL',
+        documentsComplete: 'BOOLEAN NOT NULL DEFAULT FALSE',
+        documents: 'JSON NULL',
+        medicalRecords: 'JSON NULL',
+        lastCheckup: 'DATE NULL',
+        notes: 'TEXT NULL',
+        behaviorNotes: 'TEXT NULL',
+        guardianName: 'VARCHAR(150) NULL',
+        guardianContact: 'VARCHAR(100) NULL',
+        behavioralLogs: 'JSON NULL',
+        assessments: 'JSON NULL',
+        phaseTasksCompleted: 'JSON NULL',
+        needsPsychAssessment: 'BOOLEAN NOT NULL DEFAULT FALSE',
+        readmissionDate: 'DATE NULL',
+        readmissionDatetime: 'DATETIME NULL',
+        createdAt: 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP',
+        updatedAt: 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
+      };
+      for (const [column, definition] of Object.entries(childColumnDefinitions)) {
+        if (!existingChildColumns.has(column)) {
+          await pool.query(`ALTER TABLE children ADD COLUMN ${column} ${definition}`);
+          console.log(`Migration: added children.${column}.`);
+        }
+      }
+    }
   } catch (err) {
     console.warn('Migration warning (childRecordTabs):', err.message);
   }
