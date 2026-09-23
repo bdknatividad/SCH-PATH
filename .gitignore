@@ -35,6 +35,11 @@ backend/data/store.json
 .smoke-serve.cjs
 *.local-analyze.*
 
+# Recon / audit probes: Playwright sweeps, RBAC snapshots, DB integrity
+# scripts and the static server they drive. Throwaway by design — they carry
+# hardcoded seeded credentials and the Railway host, so they must not ship.
+.workbuddy-ai/recon/
+
 # ── Editor / OS noise ─────────────────────────────────────────────────────
 .vscode/*
 !.vscode/extensions.json

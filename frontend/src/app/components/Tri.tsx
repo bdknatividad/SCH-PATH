@@ -1696,9 +1696,9 @@ export function Tri() {
 
       {/* CASE LOAD — restored from the original TRI workflow */}
       {tabs.length > 0 && (
-        <div className="flex gap-1 border-b border-gray-200">
+        <div className="flex gap-1 border-b border-gray-200 overflow-x-auto">
           {tabs.map(tab => (
-            <button key={tab.key} type="button" onClick={() => setActiveTab(tab.key)} className={`border-b-2 px-4 py-2 text-sm font-semibold transition-colors ${activeTab === tab.key ? 'border-[#FFD100] text-[#2F3E46]' : 'border-transparent text-gray-400 hover:text-gray-600'}`}>{tab.label}</button>
+            <button key={tab.key} type="button" onClick={() => setActiveTab(tab.key)} className={`shrink-0 whitespace-nowrap border-b-2 px-4 py-2 text-sm font-semibold transition-colors ${activeTab === tab.key ? 'border-[#FFD100] text-[#2F3E46]' : 'border-transparent text-gray-400 hover:text-gray-600'}`}>{tab.label}</button>
           ))}
         </div>
       )}

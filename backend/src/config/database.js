@@ -5,6 +5,7 @@
  */
 
 const mysql = require('mysql2/promise');
+const { resolveDatabaseEnv } = require('./databaseEnv');
 require('dotenv').config();
 
 /**
@@ -32,12 +33,23 @@ const POOL_LIMIT = Number.isFinite(parsedPoolLimit) && parsedPoolLimit > 0
   ? Math.min(Math.floor(parsedPoolLimit), 200)
   : 20;
 
+/**
+ * Connection details from a single URL, when one is provided.
+ *
+ * Managed MySQL providers hand out a `mysql://user:pass@host:port/db` string and
+ * some (Railway, Heroku, Clever Cloud) expose it as `MYSQL_URL` / `DATABASE_URL`
+ * rather than as separate fields. Reading it here means a deployment that only
+ * has the URL still connects, instead of silently falling back to
+ * `root@localhost` and failing at boot with a confusing ECONNREFUSED.
+ *
+ * `DB_*` still wins over every source, so nothing that works today changes.
+ * The precedence rules live in `config/databaseEnv.js` so they can be tested
+ * without opening a pool.
+ */
+const resolved = resolveDatabaseEnv(process.env);
+
 const dbConfig = {
-  host: process.env.DB_HOST || 'localhost',
-  port: Number(process.env.DB_PORT || 3306),
-  user: process.env.DB_USER || 'root',
-  password: process.env.DB_PASSWORD || '',
-  database: process.env.DB_NAME || 'sch_path_db',
+  ...resolved,
   waitForConnections: true,
   connectionLimit: POOL_LIMIT,
   // Unbounded queue: a burst is absorbed and served as connections free up. A

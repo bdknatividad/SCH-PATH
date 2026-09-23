@@ -9,13 +9,33 @@ const { generateId } = require('../utils/helpers');
 
 const DEFAULT_USERS = [
   { id: 'U001', username: 'centerhead', password: 'centerhead123', role: 'centerhead', status: 'Active' },
-  // Social Worker reviews / returns / finalizes TRI (see triController canReview), so the
-  // TRI module must be granted here — otherwise ProtectedRoute moduleName="TRI" redirects
-  // them to the dashboard and the review workflow is unreachable.
-  { id: 'U002', username: 'socialworker', password: 'social123', role: 'socialworker', status: 'Active', accessibleModules: ['Dashboard', 'Child Records', 'Violations', 'Court Records', 'Documents', 'Reports', 'TRI'] },
+  // ── Seeded accounts inherit their role's matrix ───────────────────────────
+  //
+  // These entries used to carry a hand-written `accessibleModules` array, which
+  // was a *second copy* of `config/rbac.definition.json`. It drifted, and
+  // because `buildAccessSnapshot()` prefers a non-empty stored grant over the
+  // role matrix, the stale copy won — in both directions:
+  //
+  //   socialworker  lost Activities and Assessments (both granted by the
+  //                 definition) and still carried the pre-rename `TRI` key
+  //   nurse         gained Reports and Activities, and lost Child Records
+  //   educator      gained Activities, and lost Child Records
+  //
+  // The Nurse gaining Reports is the sharp one: the role's specification says
+  // the Nurse must not reach Reports at all.
+  //
+  // Omitting the field writes `[]`, which every reader — `buildAccessSnapshot`,
+  // `resolveModuleAccess` and Account Management — interprets as "use the
+  // role's declared matrix". That makes the definition the single source of
+  // truth, so a future matrix change cannot leave the seed behind again.
+  //
+  // The Social Worker still reaches the TRI/Houseparent workflow: the module
+  // was renamed to `Houseparent`, the definition grants it to that role, and
+  // `TRI` remains declared as one of its `legacyKeys`.
+  { id: 'U002', username: 'socialworker', password: 'social123', role: 'socialworker', status: 'Active' },
   { id: 'U003', username: 'psychologist', password: 'psych123', role: 'psychologist', status: 'Active' },
-  { id: 'U004', username: 'nurse', password: 'nurse123', role: 'nurse', status: 'Active', accessibleModules: ['Dashboard', 'Activities', 'Documents', 'Health', 'Reports'] },
-  { id: 'U005', username: 'educator', password: 'educator123', role: 'educator', status: 'Active', accessibleModules: ['Dashboard', 'Documents', 'Activities', 'Education'] },
+  { id: 'U004', username: 'nurse', password: 'nurse123', role: 'nurse', status: 'Active' },
+  { id: 'U005', username: 'educator', password: 'educator123', role: 'educator', status: 'Active' },
   // Ten starter Houseparent accounts, so a fresh database has a working
   // roster. They are seed convenience only — NOT a whitelist. Any additional
   // Houseparent created through Account Management is just as valid, and is
@@ -27,7 +47,6 @@ const DEFAULT_USERS = [
     password: `hp${i + 1}123`,
     role: 'houseparent',
     status: 'Active',
-    accessibleModules: ['Dashboard', 'Violations', 'Activities', 'Assessments', 'Houseparent'],
   })),
 ];
 
@@ -1161,5 +1180,5 @@ async function seedDatabase() {
   }
 }
 
-module.exports = { seedDatabase };
+module.exports = { seedDatabase, DEFAULT_USERS };
 

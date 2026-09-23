@@ -6,7 +6,7 @@
   "outputDirectory": "dist",
   "rewrites": [
     {
-      "source": "/((?!assets/|forms/|cmaps/|fonts/|pdf.worker|tri-form\\.pdf|vite\\.svg|favicon\\.ico).*)",
+      "source": "/((?!assets/|forms/|cmaps/|fonts/|pdf.worker|tri-form\\.pdf|vite\\.svg|favicon\\.ico|apple-touch-icon\\.png).*)",
       "destination": "/index.html"
     }
   ],

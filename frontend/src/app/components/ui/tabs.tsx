@@ -25,8 +25,23 @@ function TabsList({
   return (
     <TabsPrimitive.List
       data-slot="tabs-list"
+      // The strip must never be wider than the screen.
+      //
+      // It is `w-fit`, so it is exactly as wide as its tabs. Once a module had
+      // four or five of them (Health: All / Assessments / Medications /
+      // Treatments) the strip was wider than a phone viewport, and because
+      // nothing here scrolled, it pushed the whole page sideways — the tabs at
+      // the end were simply unreachable, and the page dragged left/right.
+      //
+      // `max-w-full` caps it at the container and `overflow-x-auto` scrolls the
+      // remainder inside the strip, so the page itself never moves.
+      //
+      // `justify-start`, not `justify-center`: a centred flex container that
+      // overflows pushes its *first* items out of the scrollable area, which
+      // makes the first tab unreachable instead of the last. When the strip does
+      // fit, `w-fit` makes the two indistinguishable.
       className={cn(
-        "bg-muted text-muted-foreground inline-flex h-9 w-fit items-center justify-center rounded-xl p-[3px] flex",
+        "bg-muted text-muted-foreground inline-flex h-9 w-fit max-w-full items-center justify-start overflow-x-auto rounded-xl p-[3px] flex",
         className,
       )}
       {...props}

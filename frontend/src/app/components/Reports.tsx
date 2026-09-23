@@ -1262,9 +1262,9 @@ export function Reports() {
         <p className="text-gray-300">View, review, and download facility reports</p>
       </div>
 
-      <div className="flex border-b border-gray-200">
-        <button type="button" onClick={() => setActiveReportsTab('reports')} className={`border-b-2 px-4 py-3 text-sm font-bold ${activeReportsTab === 'reports' ? 'border-[#FFD100] text-[#2F3E46]' : 'border-transparent text-gray-400'}`}>Reports</button>
-        <button type="button" onClick={() => setActiveReportsTab('review')} className={`border-b-2 px-4 py-3 text-sm font-bold ${activeReportsTab === 'review' ? 'border-[#FFD100] text-[#2F3E46]' : 'border-transparent text-gray-400'}`}>Needs Review</button>
+      <div className="flex border-b border-gray-200 overflow-x-auto">
+        <button type="button" onClick={() => setActiveReportsTab('reports')} className={`shrink-0 whitespace-nowrap border-b-2 px-4 py-3 text-sm font-bold ${activeReportsTab === 'reports' ? 'border-[#FFD100] text-[#2F3E46]' : 'border-transparent text-gray-400'}`}>Reports</button>
+        <button type="button" onClick={() => setActiveReportsTab('review')} className={`shrink-0 whitespace-nowrap border-b-2 px-4 py-3 text-sm font-bold ${activeReportsTab === 'review' ? 'border-[#FFD100] text-[#2F3E46]' : 'border-transparent text-gray-400'}`}>Needs Review</button>
       </div>
 
       {activeReportsTab === 'review' ? (

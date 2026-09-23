@@ -435,7 +435,10 @@ export function Assessments() {
   return (
     <div className="space-y-6 p-2">
       {/* HEADER */}
-      <div className="flex justify-between items-center">
+      {/* Stacks on a phone. In a row, the "Schedule Assessment" button left the
+          title about 110px on a 320px screen, which is narrower than the word
+          "Assessments" — so the heading broke mid-word ("Assessmen / ts"). */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center">
         <div>
           <h2 className="text-2xl font-bold tracking-tight text-[#2F3E46]">Assessments</h2>
           <p className="text-sm text-gray-500">Manage resident assessments</p>

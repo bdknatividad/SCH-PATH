@@ -204,7 +204,11 @@ export function Violations() {
 
   // The DB-backed ViolationGuide component is the source of truth. activeMatrix is read-only here and is used only by the incident logger.
   const [activeMatrix, setActiveMatrix] = useState<ViolationItem[]>([]);
-  const [actionMenuOpen, setActionMenuOpen] = useState<string | null>(null);
+  // `actionMenuOpen` used to live here. It drove a per-row action dropdown that
+  // no longer exists — the state was still declared, and the `overflow-visible`
+  // wrapper on the Violation List table was still justified by it, long after
+  // the dropdown was removed. That stale constraint is what kept the table from
+  // scrolling on a phone. Removed with the wrapper.
 
   // Returns the freshly-fetched matrix directly (not just via state) because
   // setActiveMatrix() doesn't apply synchronously — callers that need the
@@ -718,13 +722,17 @@ export function Violations() {
       {/* A tab needs its submenu *and* the capability behind it. Holding the tab
           is not the same as being allowed to act in it — the same rule the
           Documents module applies to its review queue. */}
-      <div className="flex items-center gap-1 border-b border-gray-200 mb-4">
+      {/* The strip scrolls rather than overflowing the page. Five submodule tabs
+          do not fit a phone: "Manage Violations & Interventions" alone ran past
+          the right edge (measured at x=392 on a 390px viewport) and was
+          unreachable, while the strip dragged the whole page sideways. */}
+      <div className="flex items-center gap-1 border-b border-gray-200 mb-4 overflow-x-auto">
         {tabs.map(t => {
           if (t.key === 'verification' && !can('Violations', 'verify')) return null;
           if (t.key === 'manage' && !can('Violations', 'edit')) return null;
           return (
           <button key={t.key} onClick={() => setActiveTab(t.key)}
-            className={`px-4 py-2.5 text-sm font-semibold border-b-2 -mb-px transition-all ${
+            className={`shrink-0 whitespace-nowrap px-4 py-2.5 text-sm font-semibold border-b-2 -mb-px transition-all ${
               activeTab === t.key ? 'border-[#FFD100] text-[#2F3E46]' : 'border-transparent text-gray-400 hover:text-gray-600'
             }`}>
             {t.label}
@@ -867,16 +875,32 @@ export function Violations() {
               </div>
             </CardContent>
           </Card>
-          <div onClick={() => setActionMenuOpen(null)} className="mt-4">
-          <Card className="border border-gray-200 shadow-sm overflow-visible">
+          <div className="mt-4">
+          <Card className="border border-gray-200 shadow-sm">
             {filteredViolations.length === 0 ? (
               <CardContent className="p-12 text-center">
                 <ShieldAlert className="w-12 h-12 mx-auto mb-4 text-gray-300" />
                 <p className="text-gray-500">No violations found matching your criteria.</p>
               </CardContent>
             ) : (
-              <div className="overflow-visible">
-                <table className="w-full table-fixed text-sm">
+              // Horizontal scroll, not compression.
+              //
+              // This was `overflow-visible` around a `table-fixed` table. The
+              // seven columns declared more fixed width than a phone viewport
+              // holds (`w-10` + `w-[28%]` + 4 × `w-24`), and `table-fixed`
+              // resolves that by *shrinking* the over-committed columns — two of
+              // them to 0px. With `px-4` on a 0px column the content box is
+              // negative, so every header wrapped to one character per line and
+              // the table grew to 288px tall. `overflow-visible` then removed any
+              // chance of scrolling to the clipped columns.
+              //
+              // The `overflow-visible` was there so a per-row action dropdown
+              // could escape the card. That dropdown no longer exists — the
+              // `actionMenuOpen` state it served was declared and never rendered
+              // — so the constraint is gone and the table can scroll inside its
+              // own box like the other tables in this module.
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[860px] text-sm">
                   <thead>
                     <tr className="bg-gray-50 border-b border-gray-200">
                       <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide w-10">#</th>
@@ -891,9 +915,6 @@ export function Violations() {
                   <tbody className="divide-y divide-gray-100">
                     {filteredViolations.map((violation, idx) => {
                       const resident = children.find(c => c.id === violation.residentId);
-                      const menuKey = violation.id || String(idx);
-                      const isMenuOpen = actionMenuOpen === menuKey;
-                      const canManage = isCenterHead || isSocialWorker;
                       return (
                         <tr key={violation.id} className={idx % 2 === 0 ? 'bg-white hover:bg-gray-50' : 'bg-gray-50 hover:bg-gray-100'}>
                           <td className="px-4 py-3 text-gray-400 text-xs">{idx + 1}</td>

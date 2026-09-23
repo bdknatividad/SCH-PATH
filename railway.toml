@@ -4,12 +4,40 @@
 # the SAME Railway project, so the two reach each other over Railway's private
 # network and no public proxy, no TLS handshake and no port forwarding is
 # involved. That is the whole reason for running the backend here rather than
-# on a separate host: `MYSQL_URL` is supplied by Railway at runtime and the
-# private hostname resolves.
+# on a separate host.
 #
 # To use it: Railway → New Project → Deploy from GitHub repo → pick the
-# repository. Railway reads this file automatically; no dashboard settings
-# need to be typed.
+# repository. Railway reads this file automatically.
+#
+# ── The variables this file does NOT set, and why it matters ──────────────
+#
+# `DB_USER`, `DB_PASSWORD` and `DB_NAME` are deliberately absent below, and
+# Railway does not share one service's variables with another. So unless they
+# are supplied, the server boots with the local defaults (`root`, empty
+# password, `sch_path_db`) and fails to connect.
+#
+# `src/config/database.js` resolves each field in this order:
+#
+#   1. DB_HOST / DB_PORT / DB_USER / DB_PASSWORD / DB_NAME   (explicit)
+#   2. MYSQLHOST / MYSQLPORT / MYSQLUSER / MYSQLPASSWORD / MYSQLDATABASE
+#   3. a parsed MYSQL_URL or DATABASE_URL
+#   4. the local development default
+#
+# So there are two working ways to wire the database, and either is fine:
+#
+#   (a) reference the MySQL service's own variables into this service —
+#       Railway → sch-path-api → Variables → New Variable → "Add Reference":
+#           DB_USER     = ${{MySQL.MYSQLUSER}}
+#           DB_PASSWORD = ${{MySQL.MYSQLPASSWORD}}
+#           DB_NAME     = ${{MySQL.MYSQLDATABASE}}
+#       (step 1 above then reads them; steps 2/3 are equivalent)
+#
+#   (b) paste the values in by hand, as `render.yaml` does.
+#
+# Until 2026-09-23 the comment here claimed Railway "supplies MYSQL_URL at
+# runtime", while `database.js` read only `DB_*` — so a fresh deploy of this
+# repository could not connect without dashboard-only values that appear nowhere
+# in version control. Step 3 above is what makes that claim true.
 #
 # IMPORTANT: `dockerfilePath` is `backend/Dockerfile` but the build context is
 # the REPOSITORY ROOT. Railway always builds with the repository root as the

@@ -372,8 +372,8 @@ export function InterventionTracker({ embedded = false }: { embedded?: boolean }
         ))}
       </div>
 
-      {/* Tabs */}
-      <div className="flex items-center gap-2 border-b border-gray-200 pb-0">
+      {/* Tabs — scrolls rather than overflowing the page on a narrow screen. */}
+      <div className="flex items-center gap-2 border-b border-gray-200 pb-0 overflow-x-auto">
         {([
           { key: 'active', label: 'Active', count: activeList.reduce((s,ci) => s + ci.count, 0) },
           { key: 'done',   label: 'Done',             count: doneList.reduce((s,ci) => s + ci.count, 0)   },
@@ -381,7 +381,7 @@ export function InterventionTracker({ embedded = false }: { embedded?: boolean }
           <button
             key={t.key}
             onClick={() => { setTab(t.key); setExpanded(null); }}
-            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold border-b-2 transition-all -mb-px ${
+            className={`shrink-0 whitespace-nowrap flex items-center gap-2 px-4 py-2.5 text-sm font-semibold border-b-2 transition-all -mb-px ${
               tab === t.key
                 ? 'border-[#FFD100] text-[#2F3E46]'
                 : 'border-transparent text-gray-400 hover:text-gray-600'
