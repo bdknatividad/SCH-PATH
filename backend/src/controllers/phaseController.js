@@ -11,6 +11,7 @@ const { ApiError } = require('../middleware/errorHandler');
 const { PHASE_REQUIREMENTS, LEGACY_DOCUMENT_ALIASES, LEGACY_TASK_ALIASES, CASE_PHASES, RESOURCES } = require('../utils/constants');
 const notifications = require('../services/notificationService');
 const { canAccessResident } = require('./assignmentController');
+const { activeAdmissionIdFor } = require('../services/admissionLink');
 
 const baseController = createController('phaseProgress');
 
@@ -206,13 +207,18 @@ async function getCurrent(req, res, next) {
       const nextReq = PHASE_REQUIREMENTS[phaseName] || {};
       const today = new Date().toISOString().split('T')[0];
 
+      // Anchor the phase to the admission it is being recorded under, or a
+      // later re-admission's archival sweep would retire this row as if it
+      // belonged to the admission being closed.
+      const admissionId = await activeAdmissionIdFor(pool, residentId);
+
       // Two concurrent requests can derive the same id; retry instead of 500.
       const newId = await insertWithGeneratedId(pool, {
         table: 'phaseProgress',
         prefix: 'PHS',
         insert: (generatedId) => pool.query(
-          `INSERT INTO phaseProgress (id, residentId, phaseName, enteredAt, isCurrent, tasksRequired, tasksCompleted, enteredBy, createdBy) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)`,
-          [generatedId, residentId, phaseName, today,
+          `INSERT INTO phaseProgress (id, residentId, admissionId, phaseName, enteredAt, isCurrent, tasksRequired, tasksCompleted, enteredBy, createdBy) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
+          [generatedId, residentId, admissionId, phaseName, today,
             JSON.stringify(nextReq.requiredTasks || []),
             JSON.stringify([]),
             'System', 'System']
@@ -374,9 +380,15 @@ async function complete(req, res, next) {
         const newId = generateId('PHS', existing.map(r => ({ id: r.id })));
         const nextReq = PHASE_REQUIREMENTS[nextPhase] || {};
 
+        // Advancing within the same admission: the new phase inherits the one it
+        // came from, so it is retired by that admission's discharge and not by a
+        // later re-admission's sweep.
+        const nextAdmissionId = phase.admissionId
+          || await activeAdmissionIdFor(connection, phase.residentId);
+
         await connection.query(
-          `INSERT INTO phaseProgress (id, residentId, phaseName, enteredAt, isCurrent, tasksRequired, tasksCompleted, enteredBy, createdBy) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)`,
-          [newId, phase.residentId, nextPhase, completedAt,
+          `INSERT INTO phaseProgress (id, residentId, admissionId, phaseName, enteredAt, isCurrent, tasksRequired, tasksCompleted, enteredBy, createdBy) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
+          [newId, phase.residentId, nextAdmissionId, nextPhase, completedAt,
             JSON.stringify(nextReq.requiredTasks || []),
             JSON.stringify([]),
             completedByUser, completedByUser]
@@ -510,12 +522,18 @@ async function demote(req, res, next) {
       const generatedId = generateId('PHS', existing.map(r => ({ id: r.id })));
       const nextReq = PHASE_REQUIREMENTS[prevPhase] || {};
 
+      // A demotion stays inside the same admission, so the new row inherits the
+      // link of the phase it replaces.
+      const demotedAdmissionId = phase.admissionId
+        || await activeAdmissionIdFor(connection, phase.residentId);
+
       await connection.query(
-        `INSERT INTO phaseProgress (id, residentId, phaseName, enteredAt, isCurrent, tasksRequired, tasksCompleted, enteredBy, createdBy, demotionCount, violationCount, advancementBlocked) 
-         VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, 0, FALSE)`,
+        `INSERT INTO phaseProgress (id, residentId, admissionId, phaseName, enteredAt, isCurrent, tasksRequired, tasksCompleted, enteredBy, createdBy, demotionCount, violationCount, advancementBlocked) 
+         VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, 0, FALSE)`,
         [
           generatedId,
           phase.residentId,
+          demotedAdmissionId,
           prevPhase,
           today,
           JSON.stringify(nextReq.requiredTasks || []),
@@ -603,10 +621,16 @@ async function returnToPhase(req, res, next) {
       const [existing] = await connection.query('SELECT id FROM phaseProgress');
       const generatedId = generateId('PHS', existing.map(row => ({ id: row.id })));
       const nextReq = PHASE_REQUIREMENTS[targetPhase] || {};
+
+      // Returning to an earlier phase stays inside the same admission, so the
+      // new row inherits the link of the phase it replaces.
+      const returnedAdmissionId = current.admissionId
+        || await activeAdmissionIdFor(connection, current.residentId);
+
       await connection.query(
-        `INSERT INTO phaseProgress (id, residentId, phaseName, enteredAt, isCurrent, tasksRequired, tasksCompleted, enteredBy, createdBy)
-         VALUES (?, ?, ?, ?, 1, ?, '[]', ?, ?)`,
-        [generatedId, current.residentId, targetPhase, today, JSON.stringify(nextReq.requiredTasks || []), returnedBy, returnedBy]
+        `INSERT INTO phaseProgress (id, residentId, admissionId, phaseName, enteredAt, isCurrent, tasksRequired, tasksCompleted, enteredBy, createdBy)
+         VALUES (?, ?, ?, ?, ?, 1, ?, '[]', ?, ?)`,
+        [generatedId, current.residentId, returnedAdmissionId, targetPhase, today, JSON.stringify(nextReq.requiredTasks || []), returnedBy, returnedBy]
       );
       await connection.query('UPDATE children SET casePhase = ? WHERE id = ?', [targetPhase, current.residentId]);
 

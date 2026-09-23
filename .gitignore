@@ -28,6 +28,13 @@ dist-verify*/
 # be committed. Left on disk rather than deleted; see the note in the handoff.
 backend/data/store.json
 
+# ── Local analysis scratch files ──────────────────────────────────────────
+# Bundle-composition reporters and static smoke servers used while profiling
+# and verifying the build. They are throwaway tooling, not part of the app.
+.bundle-analyze.cjs
+.smoke-serve.cjs
+*.local-analyze.*
+
 # ── Editor / OS noise ─────────────────────────────────────────────────────
 .vscode/*
 !.vscode/extensions.json

@@ -3,11 +3,26 @@ import { UNAUTHORIZED_EVENT } from '@/services/api';
 import { canonicalizeModules, type AccessSnapshot, type AccessibleMenu } from '../config/moduleAccess';
 
 /**
- * Local caches written by DataProvider / Education. They contain confidential
- * resident data, so they must be dropped when the session ends — otherwise the
- * next person on the machine sees the previous user's records.
+ * Local caches written by DataProvider / Education / Account Management. They
+ * contain confidential resident and account data, so they must be dropped when
+ * the session ends — otherwise the next person on the machine sees the previous
+ * user's records. On a shared care-facility workstation that is the normal
+ * case, not an edge case.
+ *
+ * The list previously named `educationSchoolVisits` and
+ * `educationMonthlyReports`, but `Education.tsx` writes
+ * `educationVisitReports` and `educationProgressReports` — so two of the three
+ * Education caches survived logout, as did `educationStudents` and
+ * `userAccounts`. A Nurse could sign out and the next person could read the
+ * previous user's Education records and the account roster out of
+ * localStorage, with no request to the API and no role check.
+ *
+ * Every key below is asserted against its writer in
+ * `backend/tests/session-cache.test.js`, which reads the literals out of the
+ * components — so a renamed key fails the build instead of silently leaking.
  */
 const CACHED_DATA_KEYS = [
+  // state/DataContext.tsx
   'children',
   'staff',
   'activitiesRecords',
@@ -16,10 +31,13 @@ const CACHED_DATA_KEYS = [
   'violations',
   'alerts',
   'courtRecords',
-  'educationRecords',
+  // components/Education.tsx
+  'educationStudents',
+  'educationVisitReports',
   'educationProgressReports',
   'educationMonthlyReports',
-  'educationSchoolVisits',
+  // components/AccountManagement.tsx — the local account roster
+  'userAccounts',
 ];
 
 function clearCachedData() {

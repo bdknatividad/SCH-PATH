@@ -9,6 +9,7 @@ import {
 } from '@/app/components/ui/alert-dialog';
 import { Button } from '@/app/components/ui/button';
 import { cn } from '@/app/components/ui/utils';
+import { modalPointerGuard } from '@/app/components/ui/modalLayer';
 
 /**
  * The system's own confirm / notify dialogs.
@@ -143,15 +144,91 @@ export function SystemDialogProvider({ children }: { children: React.ReactNode }
   const [pending, setPending] = useState<{ request: SystemDialogRequest; mode: 'confirm' | 'notice' } | null>(null);
   const resolver = useRef<((value: boolean) => void) | null>(null);
 
+  /**
+   * True while a dialog is visible or still animating out.
+   *
+   * Kept separate from `resolver` because the two answer different questions.
+   * `resolver` answers "is a caller still waiting for an answer?", which becomes
+   * `null` the instant a button is pressed. This answers "is a Radix layer still
+   * on screen?", which stays true until React has committed the unmount. The
+   * decision below has to be made on the second question: a dialog that has been
+   * answered but not yet unmounted is exactly the layer that would otherwise
+   * collide with its replacement.
+   */
+  const layerMounted = useRef(false);
+
+  /**
+   * Cancels a replacement that is waiting on the next frame.
+   *
+   * Two `open()` calls in quick succession each queue a presentation. Without
+   * this, both frames fire and the first one wins — mounting the *older* request
+   * on top of the newer one. Each new replacement cancels the one before it, so
+   * only the latest survives.
+   */
+  const cancelQueued = useRef<(() => void) | null>(null);
+
+  /**
+   * Opens a dialog, replacing whatever is showing.
+   *
+   * The yield before the new dialog is presented is deliberate and
+   * load-bearing. The common shape in this app is
+   *
+   *   if (!await dialog.confirm(...)) return;
+   *   await doTheThing();
+   *   await dialog.success(...);
+   *
+   * so a confirm is settled and a notice opened moments later. Opening the
+   * notice in the same synchronous turn as the confirm's dismissal makes two
+   * Radix `DismissableLayer`s overlap: the outgoing layer is still in the
+   * library's layer `Set` when the incoming one measures its position, so the
+   * new dialog is judged "not the top layer" and Radix inlines
+   * `pointer-events: none` on it. The dialog paints and Esc dismisses it (Escape
+   * is a document-level key handler, not a pointer event), but nothing inside it
+   * accepts a click — the reported bug, where only Esc gets you out.
+   *
+   * Waiting for the next frame lets React commit the dismissal, run the outgoing
+   * layer's cleanup effect, and drop it from the `Set` first — so the incoming
+   * dialog is unambiguously the top layer. `modalPointerGuard` in
+   * `ui/modalLayer.ts` is the second line of defence, for dialogs that sit open
+   * behind each other on purpose; this keeps the common case from reaching that
+   * state at all.
+   */
   const open = useCallback((request: SystemDialogRequest, mode: 'confirm' | 'notice') => (
     new Promise<boolean>((resolve) => {
-      // A second request while one is open would strand the first promise, so the
-      // open one is settled as "no" before it is replaced.
+      /** Presents the request and marks its layer as mounted. */
+      const present = () => {
+        cancelQueued.current = null;
+        resolver.current = resolve;
+        layerMounted.current = true;
+        setPending({ request, mode });
+      };
+
+      // Nothing on screen: show it now, with no extra frame of latency.
+      if (!layerMounted.current && !resolver.current) {
+        present();
+        return;
+      }
+
+      // Something is showing. A second request would strand the first promise,
+      // so settle it as "no" — then wait a frame for its layer to leave the DOM
+      // before presenting the replacement.
       resolver.current?.(false);
-      resolver.current = resolve;
-      setPending({ request, mode });
+      resolver.current = null;
+      layerMounted.current = false;
+      cancelQueued.current?.();
+      setPending(null);
+
+      if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(present);
+      } else {
+        setTimeout(present, 0);
+      }
+
+      // Lets a later `open()` supersede this queued presentation.
+      cancelQueued.current = () => { resolve(false); };
     })
   ), []);
+
 
   /**
    * Settles the open dialog exactly once. Both buttons and a dismissal (Esc,
@@ -161,6 +238,7 @@ export function SystemDialogProvider({ children }: { children: React.ReactNode }
   const settle = useCallback((value: boolean) => {
     const resolve = resolver.current;
     resolver.current = null;
+    layerMounted.current = false;
     setPending(null);
     resolve?.(value);
   }, []);
@@ -191,22 +269,16 @@ export function SystemDialogProvider({ children }: { children: React.ReactNode }
     <SystemDialogContext.Provider value={api}>
       {children}
       <AlertDialog open={Boolean(pending)} onOpenChange={(next) => { if (!next) settle(false); }}>
-        {/* `pointerEvents: auto` is load-bearing, not decoration.
-            Radix's DismissableLayer disables outside pointer events for every
-            modal layer and then re-enables them on the *last* one mounted
-            (`pointerEvents: isHighestLayer ? 'auto' : 'none'`). This dialog is
-            opened from inside other Radix dialogs — the reject / reassessment
-            form, the upload form — so when one of those is still mounted it is
-            registered after this content and Radix inlines `pointer-events:
-            none` here. The dialog still paints and Esc still closes it (Esc is a
-            document-level key handler, not a pointer event), but every button
-            in it stops receiving clicks.
-            Radix spreads `...props.style` after its own value, so passing the
-            style here wins and the app's own confirm dialog can never be made
-            inert by whatever happens to be open behind it. */}
+        {/* `modalPointerGuard` keeps every button in here clickable when this
+            dialog is opened from inside another one — the reject / reassessment
+            form, the upload form. Without it Radix inlines
+            `pointer-events: none` on the content whenever it is not judged the
+            top layer, and the dialog paints but refuses clicks; Esc still works,
+            because Escape is a document-level key handler, not a pointer event.
+            See `ui/modalLayer.ts` for the full mechanism. */}
         <AlertDialogContent
           className="max-w-[calc(100%-2rem)] gap-0 overflow-hidden p-0 sm:max-w-md"
-          style={{ pointerEvents: 'auto' }}
+          style={modalPointerGuard}
         >
           {pending && (
             <>

@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/app/components/ui/select';
 import { useAuth } from '../state/AuthContext';
 import { useData } from '../state/DataContext';
-import { describeError, request } from '@/services/api';
+import { describeError, request, apiUrl, authHeaders } from '@/services/api';
 import { useSystemDialog } from '@/app/components/SystemDialog';
 import { SignaturePadModal } from '@/app/components/SignaturePad';
 import { Document as PdfDocument, Page as PdfPage, pdfjs } from 'react-pdf';
@@ -139,8 +139,8 @@ const HOUSEPARENT_SIGNATURE_BOX = { x: 58, top: 446, width: 220, height: 26 };
  * implementation, on the server, and this endpoint is the only consumer.
  */
 export async function downloadAnecdotalPdf(record: { id: string }): Promise<void> {
-  const res = await fetch(`/api/anecdotal-reports/${encodeURIComponent(record.id)}/pdf`, {
-    headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+  const res = await fetch(apiUrl(`/anecdotal-reports/${encodeURIComponent(record.id)}/pdf`), {
+    headers: authHeaders(),
   });
   if (!res.ok) {
     const payload = await res.json().catch(() => null);
@@ -530,8 +530,10 @@ export function AnecdotalReports({
   async function returnForRevision() {
     if (!selectedRecord || !reviewer || !reviewNotes.trim()) return;
     setSaving(true); setError(null);
+    const notes = reviewNotes.trim();
     try {
-      const res = await request<{success:boolean;data:AnecdotalRecord}>(`/anecdotal-reports/${selectedRecord.id}/return`, { method:'POST', body:JSON.stringify({ reviewNotes }) });
+      const res = await request<{success:boolean;data:AnecdotalRecord}>(`/anecdotal-reports/${selectedRecord.id}/return`, { method:'POST', body:JSON.stringify({ reviewNotes: notes }) });
+      setReviewNotes('');
       setSelectedRecord(res.data); await loadRecords(); onStatusChange?.();
       await dialog.success(
         'Report returned for revision.',

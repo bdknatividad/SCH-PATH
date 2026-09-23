@@ -19,7 +19,7 @@ import { SignaturePadModal } from '@/app/components/SignaturePad';
 import { downloadAnecdotalPdf } from '@/app/components/AnecdotalReports';
 import { useData } from '../state/DataContext';
 import { useAuth } from '../state/AuthContext';
-import { request } from '@/services/api';
+import { request, apiUrl, authHeaders } from '@/services/api';
 import templateLayout from '@/shared/quarterlyReportTemplate.json';
 
 pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.mjs';
@@ -140,9 +140,8 @@ function StatusBadge({ status }: { status: string }) {
 
 /** Downloads the combined PDF for a saved report. */
 export async function downloadQuarterlyProgressPdf(report: { id: string }): Promise<void> {
-  const token = localStorage.getItem('token');
-  const response = await fetch(`/api/quarterly-progress-reports/${encodeURIComponent(report.id)}/pdf`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+  const response = await fetch(apiUrl(`/quarterly-progress-reports/${encodeURIComponent(report.id)}/pdf`), {
+    headers: authHeaders(),
   });
   if (!response.ok) {
     let message = 'Unable to download the Quarterly Progress Report.';
@@ -612,10 +611,9 @@ export function QuarterlyProgressReportEditor({
     setTemplateUrl(null);
     (async () => {
       try {
-        const token = localStorage.getItem('token');
         const response = await fetch(
-          `/api/quarterly-progress-reports/${encodeURIComponent(reportId)}/template`,
-          { headers: token ? { Authorization: `Bearer ${token}` } : undefined }
+          apiUrl(`/quarterly-progress-reports/${encodeURIComponent(reportId)}/template`),
+          { headers: authHeaders() }
         );
         if (!response.ok) throw new Error('Unable to load the report form.');
         const blob = await response.blob();

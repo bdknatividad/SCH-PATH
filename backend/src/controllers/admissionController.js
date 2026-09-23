@@ -271,6 +271,24 @@ async function create(req, res, next) {
       const admissionNumber = Number(numberRows[0]?.nextNumber || 1);
 
       /*
+       * The admission this one supersedes, if any.
+       *
+       * A resident reaching here is either new (admission 1) or returning, in
+       * which case the previous admission was closed above and its phases are
+       * the ones to retire. Read before the `admissions` insert so it names the
+       * *outgoing* admission rather than the one being created.
+       */
+      const [previousAdmissionRows] = await connection.query(
+        `SELECT id
+           FROM admissions
+          WHERE residentId = ?
+          ORDER BY admissionNumber DESC
+          LIMIT 1`,
+        [residentId]
+      );
+      const previousAdmissionId = previousAdmissionRows[0]?.id || null;
+
+      /*
        * Create resident master record only for first admission.
        */
       if (isNewResident) {
@@ -436,18 +454,31 @@ async function create(req, res, next) {
         );
 
         /*
-         * Archive previous phase records.
+         * Retire the phases of the admission being closed.
+         *
+         * Scoped to the admission, not the resident: archiving everything the
+         * resident owns would also close the phases of admissions already
+         * retired, and — because `isCurrent` is the only "which phase are they
+         * in" signal — would leave the returning resident with no current phase
+         * at all until the insert below ran. A phase belongs to exactly one
+         * admission, so an admission retires only its own.
+         *
+         * Rows written before the admission link existed (NULL) still fall back
+         * to the per-resident sweep, so a legacy upgrade does not strand them.
          */
         await connection.query(
           `UPDATE phaseProgress
               SET isCurrent = 0,
                   completedAt = COALESCE(completedAt, ?),
                   completedBy = COALESCE(completedBy, ?)
-            WHERE residentId = ?`,
+            WHERE residentId = ?
+              AND (admissionId = ? OR admissionId IS NULL)
+              AND isCurrent = 1`,
           [
             admission.admissionDate,
             req.user?.username || 'System',
             residentId,
+            previousAdmissionId,
           ]
         );
 
@@ -558,6 +589,23 @@ async function create(req, res, next) {
           admission.expectedDischargeDate || null,
           req.user?.username || 'System',
         ]
+      );
+
+      /*
+       * Anchor this admission's phases to it.
+       *
+       * The phase row above was inserted before the admission existed, so it
+       * could not carry the link at insert time. Without this the row would stay
+       * NULL forever and a *later* re-admission's archival would sweep it (the
+       * NULL fallback). Only rows with no link are touched, so an earlier
+       * admission's retired phases are never pulled into this one.
+       */
+      await connection.query(
+        `UPDATE phaseProgress
+            SET admissionId = ?
+          WHERE residentId = ?
+            AND admissionId IS NULL`,
+        [admissionId, residentId]
       );
 
       return { residentId, admissionId };

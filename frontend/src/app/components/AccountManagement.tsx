@@ -320,8 +320,13 @@ export function AccountManagement() {
       ? canonicalizeModules(addForm.accessibleModules)
       : (DEFAULT_MODULE_ACCESS[addForm.role] || ['Dashboard']);
 
-    const newUser: User = {
-      id: `U${String(Date.now()).slice(-4)}`,
+    // No id is minted here. The id is allocated by userController.register()
+    // through insertWithGeneratedId(), which re-reads the id list and retries on
+    // a duplicate key. A client-derived id (`U` + last four digits of the clock)
+    // collides whenever two admins submit within the same millisecond, and the
+    // id it computed could never match the one the server actually stored —
+    // leaving a phantom row until the next reload.
+    const payload = {
       username: addForm.username.trim(),
       // Sent untrimmed: leading and trailing spaces are legitimate in a password.
       password: addForm.password,
@@ -336,7 +341,9 @@ export function AccountManagement() {
     };
 
     try {
-      const saved = await createResource<User>('users', newUser);
+      // The response is the row the server wrote, so the list is reconciled
+      // against the authoritative id rather than an optimistic guess.
+      const saved = await createResource<User>('users', payload as unknown as User);
       const updated = [...users, saved];
       setUsers(updated);
       saveUsers(updated);

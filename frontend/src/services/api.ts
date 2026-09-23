@@ -1,6 +1,56 @@
-const API_BASE_URL = import.meta.env.DEV
-  ? (import.meta.env.VITE_API_URL ?? '/api')
-  : '/api';
+/**
+ * Where the API lives.
+ *
+ * `VITE_API_URL` is baked in at build time, so Vercel must have it set before
+ * the build runs. It is read in production as well as development: the previous
+ * version hard-coded `'/api'` for production, which only works when the backend
+ * serves the frontend from the same origin. Deployed to Vercel with the API on
+ * a separate host, every request would have gone to `<vercel-domain>/api` and
+ * 404'd — the app would load and then fail on the first call.
+ *
+ * The trailing slash is trimmed so `${API_BASE_URL}${path}` cannot produce a
+ * double slash when the value is written as `https://host/api/`.
+ *
+ * Falling back to `/api` is deliberate and keeps the single-service deployment
+ * (backend serving `frontend/dist`) working with no configuration at all.
+ */
+const API_BASE_URL = (import.meta.env.VITE_API_URL ?? '/api').replace(/\/+$/, '');
+
+/**
+ * The API base URL, for the handful of callers that cannot use `request()`.
+ *
+ * `request()` builds `${API_BASE_URL}${path}`, so every call that goes through it
+ * is correct. But the binary endpoints — document View/Download/Print, the ZIP
+ * bulk download, and the PDF generators — use raw `fetch()` because they need a
+ * `Blob` or an object URL rather than parsed JSON. Those were written with a
+ * literal `'/api/...'`, which resolves against the *page* origin.
+ *
+ * In the split deployment (frontend on Vercel, API on Render) the page origin is
+ * Vercel, so `/api/documents/.../file` never reached the API at all: Vercel's
+ * SPA rewrite turned it into `index.html`, `res.ok` was true, and the "file" was
+ * a copy of the app's HTML. Every View, Download, Print, bulk-ZIP and generated
+ * PDF would have failed — on every device, since the bug is in the page origin
+ * rather than in anything device-specific.
+ *
+ * Exported so those callers build the same URL the rest of the app does.
+ */
+export { API_BASE_URL };
+
+/**
+ * An authenticated `fetch` against the API, with the URL resolved properly.
+ *
+ * For binary and PDF endpoints. `path` is API-relative and may omit the leading
+ * slash, e.g. `documentFileUrl('/documents/abc/file')`.
+ */
+export function apiUrl(path: string): string {
+  return `${API_BASE_URL}${path.startsWith('/') ? '' : '/'}${path}`;
+}
+
+/** Authorization header for a raw `fetch` against the API. */
+export function authHeaders(extra?: Record<string, string>): Record<string, string> {
+  const token = localStorage.getItem('token');
+  return { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...extra };
+}
 
 // Hard cap so a stalled connection (backend down, DB hang, dropped proxy) cannot
 // leave "Submitting…" spinners stuck forever. The user gets a clear timeout error

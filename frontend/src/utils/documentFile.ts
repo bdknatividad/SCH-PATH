@@ -11,6 +11,8 @@
  * and a second copy is how two downloads of the same file start to differ.
  */
 
+import { apiUrl, authHeaders } from '../services/api';
+
 export interface DownloadableDocument {
   id: string;
   fileName?: string | null;
@@ -30,8 +32,8 @@ export async function downloadDocumentFile(
   onError?: (message: string) => void,
 ): Promise<void> {
   try {
-    const res = await fetch(`/api/documents/${doc.id}/file`, {
-      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+    const res = await fetch(apiUrl(`/documents/${doc.id}/file`), {
+      headers: authHeaders(),
     });
     if (!res.ok) throw new Error('Could not download the file.');
     const blob = await res.blob();

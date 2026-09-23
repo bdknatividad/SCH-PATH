@@ -548,7 +548,11 @@ function PsychologistDashboard({
               <p className="text-sm text-gray-400 italic text-center py-4">No assessments on record.</p>
             ) : (
               <>
-                <div className="grid grid-cols-3 gap-3">
+                {/* Three stat cards side by side is fine from the sm breakpoint
+                    up. On a phone each card would get roughly a third of ~360px,
+                    which is narrower than the words in the labels above the
+                    numbers, so they stack instead. */}
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                   <div className="p-3 rounded-xl bg-blue-50 border border-blue-100">
                     <p className="text-[10px] font-semibold uppercase tracking-wide text-blue-600">Scheduled</p>
                     <p className="text-2xl font-bold text-blue-700">{summary.scheduled}</p>
@@ -2042,7 +2046,7 @@ export function Dashboard() {
             </CardTitle>
           </CardHeader>
           <CardContent className="pt-3">
-            <div className="grid grid-cols-3 gap-3 mb-3">
+            <div className="grid grid-cols-1 gap-3 mb-3 sm:grid-cols-3">
               <div className="p-3 bg-blue-50 rounded-xl border border-blue-100">
                 <p className="text-xs text-blue-600 font-semibold uppercase">Active Cases</p>
                 <p className="text-2xl font-bold text-blue-700">{activeChildren.length}</p>

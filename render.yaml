@@ -1,0 +1,61 @@
+# ── Render service definition ─────────────────────────────────────────────
+# Optional: Render can build the backend from the dashboard without this file.
+# It is committed so the deployment is reproducible and reviewable rather than
+# a set of clicks nobody can diff.
+#
+# To use it: Render → New → Blueprint → point at the repository.
+#
+# IMPORTANT: `dockerContext` is the repository root, not `backend/`. The
+# Dockerfile copies PDF templates and the logo out of `frontend/` because the
+# backend reads them at runtime when it publishes Anecdotal Reports, TRI
+# records and Incident Reports.
+
+services:
+  - type: web
+    name: sch-path-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: .
+    # Matches the API's own liveness endpoint. The endpoint does not touch the
+    # database, so a slow database does not cause the service to be recycled.
+    healthCheckPath: /api/health
+    envVars:
+      # Set every one of these in the Render dashboard. `sync: false` marks a
+      # value that must be supplied there and is never read from this file.
+      - key: NODE_ENV
+        value: production
+
+      # ── Database (managed MySQL: Railway, Aiven, Clever Cloud) ──
+      # The application uses MySQL-specific SQL, so the server must be
+      # MySQL-compatible. A PostgreSQL instance will not work.
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        sync: false
+      - key: DB_USER
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: DB_NAME
+        sync: false
+      # Managed MySQL requires TLS. Set to "true" unless your provider says
+      # otherwise.
+      - key: DB_SSL
+        sync: false
+
+      # ── Authentication ──
+      # Generate with:
+      #   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+      # The server refuses to start on a missing, short, or placeholder value.
+      - key: JWT_SECRET
+        sync: false
+      - key: JWT_EXPIRE
+        value: 24h
+
+      # ── CORS ──
+      # The deployed frontend origin, e.g. https://sch-path.vercel.app
+      # Comma-separate multiple origins. Leave empty ONLY if this service also
+      # serves the frontend.
+      - key: CORS_ORIGIN
+        sync: false

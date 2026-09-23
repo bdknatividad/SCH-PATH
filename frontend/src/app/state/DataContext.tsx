@@ -1,10 +1,20 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from 'react';
 import { createResource, deleteResource, getStore, updateResource, request } from '@/services/api';
 import { useAuth } from './AuthContext';
 
 // ponytail: dedupe concurrent mark-as-read calls (per-id) to prevent the
 // "Unable to update notifications" race condition.
 const readingAlerts = new Set<string>();
+
+/**
+ * The server-maintained columns every stored row carries, which the domain
+ * interfaces above do not model. `updatedAt` is what makes conflict detection
+ * possible — see `withVersion` in the provider.
+ */
+interface RecordVersion {
+  id: string;
+  updatedAt?: string;
+}
 
 /**
  * Local cache writes must never take the app down. `children` carries base64
@@ -429,6 +439,27 @@ export function DataProvider({ children: childrenProp }: { children: ReactNode }
   const [error, setError] = useState<string | null>(null);
 
   /**
+   * Monotonic token identifying the newest `loadStore()` call.
+   *
+   * `loadStore()` fires on mount, on every `token`/role change, and — through
+   * `refreshData()` — from window-focus handlers and after most actions. With
+   * two people working at once those calls overlap, and responses can land out
+   * of order: a request sent first but answered last would write older rows
+   * over newer ones, so a record the user had just seen appear would vanish
+   * again until the next refresh. The store response carries no server
+   * timestamp to order by, so the client orders by issue order instead — only
+   * the response belonging to the newest call is allowed to write state.
+   *
+   * Deliberately a ref, not state: it must not trigger a render, and the guard
+   * has to read the *current* value rather than the value captured when the
+   * promise was created.
+   */
+  const loadGeneration = useRef(0);
+
+  /** Same guard for the notification feed — see `refreshAlerts`. */
+  const alertLoadGeneration = useRef(0);
+
+  /**
    * Re-read the caller's notifications from the server.
    *
    * Alerts are the one collection where the server must be the only source of
@@ -442,15 +473,21 @@ export function DataProvider({ children: childrenProp }: { children: ReactNode }
    * the list it is describing.
    */
   const refreshAlerts = useCallback(async () => {
+    // Same out-of-order hazard as loadStore(): this runs on a 30s poll, on
+    // window focus, and after alert actions, so two calls can overlap and the
+    // slower one would overwrite the newer list and count.
+    const generation = (alertLoadGeneration.current += 1);
     try {
       const [list, counts] = await Promise.all([
         request<{ data?: Alert[] }>('/alerts?limit=200'),
         request<{ count?: number }>('/alerts/unread-count'),
       ]);
+      if (generation !== alertLoadGeneration.current) return true;
       setAlerts(Array.isArray(list.data) ? list.data : []);
       setUnreadAlertsCount(Number(counts.count || 0));
       return true;
     } catch (err) {
+      if (generation !== alertLoadGeneration.current) return true;
       setError(err instanceof Error ? err.message : 'Unable to load notifications');
       return false;
     }
@@ -459,10 +496,16 @@ export function DataProvider({ children: childrenProp }: { children: ReactNode }
   // Memoised so consumers that depend on its identity (e.g. the Notifications
   // polling interval) are not torn down on every provider render.
   const loadStore = useCallback(async () => {
+    // Claim the newest generation. Any response from an earlier call that is
+    // still in flight will see a higher number below and discard itself.
+    const generation = (loadGeneration.current += 1);
     setIsLoading(true);
     setError(null);
     try {
       const store = await getStore();
+      // A newer load started while this one was in flight — its data is at
+      // least as fresh, so writing this response would move the UI backwards.
+      if (generation !== loadGeneration.current) return;
       let loadedChildren = Array.isArray(store.children) ? store.children.map((c: any) => ({
         ...c,
         behavioralLogs: Array.isArray(c.behavioralLogs) ? c.behavioralLogs : [],
@@ -491,6 +534,10 @@ export function DataProvider({ children: childrenProp }: { children: ReactNode }
           console.warn('[DataContext] Unable to refresh Houseparent assigned residents:', assignmentError);
         }
       }
+
+      // The Houseparent branch above awaits a second request, so re-check the
+      // generation before touching any state.
+      if (generation !== loadGeneration.current) return;
 
       setChildren(loadedChildren);
       setStaff(Array.isArray(store.staff) ? store.staff : []);
@@ -530,9 +577,15 @@ export function DataProvider({ children: childrenProp }: { children: ReactNode }
       // disagree with the panel it describes.
       await refreshAlerts();
     } catch (err) {
+      // A superseded request must not surface its error either: the newer load
+      // is already on its way and will report whatever is actually wrong.
+      if (generation !== loadGeneration.current) return;
       setError(err instanceof Error ? err.message : 'Unable to load backend data');
     } finally {
-      setIsLoading(false);
+      // Only the newest call owns the spinner. Clearing it here unconditionally
+      // would hide the progress indicator while a newer request is still
+      // running, so the page would look idle-but-empty.
+      if (generation === loadGeneration.current) setIsLoading(false);
     }
   }, [user?.role, refreshAlerts]);
 
@@ -549,24 +602,44 @@ export function DataProvider({ children: childrenProp }: { children: ReactNode }
   useEffect(() => { persist('alerts', alerts); }, [alerts]);
   useEffect(() => { persist('courtRecords', courtRecords); }, [courtRecords]);
 
-  const generateId = (prefix: string, list: any[]) => {
-    const nextNum = list.length > 0 
-      ? Math.max(...list.map(i => parseInt(i.id.replace(prefix, '')) || 0)) + 1 
-      : 1;
-    return `${prefix}${String(nextNum).padStart(3, '0')}`;
+  /**
+   * A temporary, client-only key for an optimistically rendered row.
+   *
+   * This is deliberately **not** a record id and must never be sent as one.
+   * The previous version computed the next sequential id from the ids already
+   * on screen (`CH001` → `CH006`) and posted it as the record's id, which broke
+   * in two ways the moment two people used the system at the same time:
+   *
+   * 1. **Collision.** Two browsers holding the same list compute the *same*
+   *    next id. The backend ignores a client-supplied id and allocates its own
+   *    (§ `insertWithGeneratedId`), so neither request failed — but the client
+   *    then reconciled its optimistic row by matching that id, and one of the
+   *    two rows could never be matched, leaving a phantom in the list.
+   * 2. **Orphaned rows.** Because the server minted a different id than the one
+   *    sent, `prev.map(d => d.id === tempId ? saved : d)` never matched and the
+   *    optimistic row was never replaced — it showed a stale copy until reload.
+   *
+   * A random, namespaced key is unique per browser, so reconciliation is exact
+   * and two simultaneous creates can no longer produce the same key.
+   */
+  const provisionalKey = (prefix: string) => {
+    const random = Math.random().toString(36).slice(2, 10);
+    return `tmp-${prefix}-${Date.now().toString(36)}-${random}`;
   };
 
   const addChild = async (data: Omit<Child, 'id' | 'behavioralLogs'>): Promise<Child | null> => {
-    const newEntry: Child = { 
-      ...data, 
-      id: generateId('CH', children), 
-      behavioralLogs: [],
-      assessments: [],
-      medicalRecords: [],
-      lastCheckup: undefined
-    };
+    // See provisionalKey(). The id is the server's to allocate — sending one
+    // let two concurrent creates collide on the same value.
+    const { id: _ignoredProvisional, ...payload } = data as any;
+    void _ignoredProvisional;
     try {
-      const saved = await createResource<Child>('children', newEntry);
+      const saved = await createResource<Child>('children', {
+        ...payload,
+        behavioralLogs: [],
+        assessments: [],
+        medicalRecords: [],
+        lastCheckup: undefined,
+      } as any);
       setChildren(prev => [...prev, saved]);
       return saved;
     } catch (err) {
@@ -575,11 +648,39 @@ export function DataProvider({ children: childrenProp }: { children: ReactNode }
     }
   };
 
+  /**
+   * Attach the caller's rendered `updatedAt` to a partial update payload.
+   *
+   * The backend compares it against the stored value and refuses the write with
+   * a 409 when someone else saved the row first (see `baseController.update`).
+   * Without this a second editor silently overwrote the first — and because
+   * these updates are partial (`{ notes }`, `{ phaseTasksCompleted }`), the
+   * overwrite also destroyed fields the payload never mentioned.
+   *
+   * The domain interfaces in this file do not declare `updatedAt`, but every
+   * row carries it: the backend selects `*` and MySQL maintains the column via
+   * `ON UPDATE CURRENT_TIMESTAMP`. It is read through `RecordVersion` so the
+   * dependency on a column the types omit is stated in one place rather than
+   * scattered as casts.
+   *
+   * `updatedAt` is stripped and re-added rather than left in place so a caller
+   * that already put something else there cannot defeat the check.
+   */
+  // A trailing comma on the type parameter is required in `.tsx`: without it
+  // TypeScript parses `<T>` as the start of a JSX element.
+  const withVersion = <T,>(list: T[], id: string, updates: Partial<T>): Partial<T> => {
+    const { updatedAt: _drop, ...rest } = updates as Record<string, unknown>;
+    void _drop;
+    const rendered = (list.find(item => (item as RecordVersion).id === id) as RecordVersion | undefined)
+      ?.updatedAt;
+    return (rendered ? { ...rest, updatedAt: rendered } : rest) as Partial<T>;
+  };
+
   const updateChild = async (id: string, updates: Partial<Child>) => {
     const previous = children;
     setChildren(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c));
     try {
-      const saved = await updateResource<Child>('children', id, updates);
+      const saved = await updateResource<Child>('children', id, withVersion(children, id, updates));
       setChildren(prev => prev.map(c => c.id === id ? saved : c));
     } catch (err) {
       setChildren(previous);
@@ -648,7 +749,8 @@ export function DataProvider({ children: childrenProp }: { children: ReactNode }
 
   const addStaff = async (data: Omit<Staff, 'id'>) => {
     try {
-      const saved = await createResource<Staff>('staff', { ...data, id: generateId('ST', staff) });
+      // No id in the payload: the server allocates it (see provisionalKey).
+      const saved = await createResource<Staff>('staff', { ...data } as any);
       setStaff(prev => [...prev, saved]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to add staff');
@@ -659,7 +761,7 @@ export function DataProvider({ children: childrenProp }: { children: ReactNode }
     const previous = staff;
     setStaff(prev => prev.map(s => s.id === id ? { ...s, ...updates } : s));
     try {
-      const saved = await updateResource<Staff>('staff', id, updates);
+      const saved = await updateResource<Staff>('staff', id, withVersion(staff, id, updates));
       setStaff(prev => prev.map(s => s.id === id ? saved : s));
     } catch (err) {
       setStaff(previous);
@@ -680,7 +782,8 @@ export function DataProvider({ children: childrenProp }: { children: ReactNode }
 
   const addActivity = async (data: Omit<Activity, 'id'>) => {
     try {
-      const saved = await createResource<Activity>('activities', { ...data, id: generateId('ACT', activities) });
+      // No id in the payload: the server allocates it (see provisionalKey).
+      const saved = await createResource<Activity>('activities', { ...data } as any);
       setActivities(prev => [...prev, saved]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to add activity');
@@ -691,7 +794,7 @@ export function DataProvider({ children: childrenProp }: { children: ReactNode }
     const previous = activities;
     setActivities(prev => prev.map(a => a.id === id ? { ...a, ...updates } : a));
     try {
-      const saved = await updateResource<Activity>('activities', id, updates);
+      const saved = await updateResource<Activity>('activities', id, withVersion(activities, id, updates));
       setActivities(prev => prev.map(a => a.id === id ? saved : a));
     } catch (err) {
       setActivities(previous);
@@ -712,10 +815,9 @@ export function DataProvider({ children: childrenProp }: { children: ReactNode }
 
   // FIX: In-update para laging nasa taas ang bagong assessment
   const addAssessment = async (data: Omit<Assessment, 'id'>) => {
-    const newId = generateId('ASM', assessments);
-    const newEntry = { ...data, id: newId };
     try {
-      const saved = await createResource<Assessment>('assessments', newEntry);
+      // No id in the payload: the server allocates it (see provisionalKey).
+      const saved = await createResource<Assessment>('assessments', { ...data } as any);
       setAssessments(prev => [saved, ...prev]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to add assessment');
@@ -726,7 +828,7 @@ export function DataProvider({ children: childrenProp }: { children: ReactNode }
     const previous = assessments;
     setAssessments(prev => prev.map(a => a.id === id ? { ...a, ...updates } : a));
     try {
-      const saved = await updateResource<Assessment>('assessments', id, updates);
+      const saved = await updateResource<Assessment>('assessments', id, withVersion(assessments, id, updates));
       setAssessments(prev => prev.map(a => a.id === id ? saved : a));
     } catch (err) {
       setAssessments(previous);
@@ -746,8 +848,8 @@ export function DataProvider({ children: childrenProp }: { children: ReactNode }
   };
 
   const generateReport = async (type: Report['type'], title?: string, generatedBy?: string) => {
-    const newRep: Report = {
-      id: generateId('REP', reports),
+    const newRep = {
+      // No id in the payload: the server allocates it (see provisionalKey).
       title: title || `${type.toUpperCase()} Report - ${new Date().toLocaleDateString()}`,
       type,
       date: new Date().toISOString().split('T')[0],
@@ -755,7 +857,7 @@ export function DataProvider({ children: childrenProp }: { children: ReactNode }
       status: 'generated',
     };
     try {
-      const saved = await createResource<Report>('reports', newRep);
+      const saved = await createResource<Report>('reports', newRep as any);
       setReports(prev => [saved, ...prev]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to generate report');
@@ -804,9 +906,9 @@ export function DataProvider({ children: childrenProp }: { children: ReactNode }
 
   // === VIOLATIONS ===
   const addViolation = async (data: Omit<Violation, 'id'>): Promise<(Violation & { autoCreatedAssessment?: any; autoCreatedAlerts?: any[]; interventionPlan?: any }) | null> => {
-    const newEntry = { ...data, id: generateId('VIO', violations) };
+    const newEntry = { ...data };
     try {
-      const saved = await createResource<Violation>('violations', newEntry);
+      const saved = await createResource<Violation>('violations', newEntry as any);
       // Add violation to state immediately
       setViolations(prev => [saved, ...prev]);
       // Auto-created assessment — add to assessments state immediately
@@ -836,7 +938,7 @@ export function DataProvider({ children: childrenProp }: { children: ReactNode }
     const previous = violations;
     setViolations(prev => prev.map(v => v.id === id ? { ...v, ...updates } : v));
     try {
-      const saved = await updateResource<Violation>('violations', id, updates);
+      const saved = await updateResource<Violation>('violations', id, withVersion(violations, id, updates));
       setViolations(prev => prev.map(v => v.id === id ? saved : v));
     } catch (err) {
       setViolations(previous);
@@ -929,9 +1031,9 @@ export function DataProvider({ children: childrenProp }: { children: ReactNode }
 
   // === COURT RECORDS ===
   const addCourtRecord = async (data: Omit<CourtRecord, 'id'>) => {
-    const newEntry = { ...data, id: generateId('CRT', courtRecords) };
+    const newEntry = { ...data };
     try {
-      const saved = await createResource<CourtRecord>('courtRecords', newEntry);
+      const saved = await createResource<CourtRecord>('courtRecords', newEntry as any);
       setCourtRecords(prev => [...prev, saved]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to add court record');
@@ -942,7 +1044,7 @@ export function DataProvider({ children: childrenProp }: { children: ReactNode }
     const previous = courtRecords;
     setCourtRecords(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c));
     try {
-      const saved = await updateResource<CourtRecord>('courtRecords', id, updates);
+      const saved = await updateResource<CourtRecord>('courtRecords', id, withVersion(courtRecords, id, updates));
       setCourtRecords(prev => prev.map(c => c.id === id ? saved : c));
     } catch (err) {
       setCourtRecords(previous);
@@ -963,9 +1065,9 @@ export function DataProvider({ children: childrenProp }: { children: ReactNode }
 
   // === PHASE PROGRESS ===
   const addPhaseProgress = async (data: Omit<PhaseProgress, 'id'>) => {
-    const newEntry = { ...data, id: generateId('PHS', phaseProgress) };
+    const newEntry = { ...data };
     try {
-      const saved = await createResource<PhaseProgress>('phaseProgress', newEntry);
+      const saved = await createResource<PhaseProgress>('phaseProgress', newEntry as any);
       setPhaseProgress(prev => [...prev, saved]);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to add phase progress');
@@ -976,7 +1078,7 @@ export function DataProvider({ children: childrenProp }: { children: ReactNode }
     const previous = phaseProgress;
     setPhaseProgress(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
     try {
-      const saved = await updateResource<PhaseProgress>('phaseProgress', id, updates);
+      const saved = await updateResource<PhaseProgress>('phaseProgress', id, withVersion(phaseProgress, id, updates));
       setPhaseProgress(prev => prev.map(p => p.id === id ? saved : p));
     } catch (err) {
       setPhaseProgress(previous);
@@ -1004,12 +1106,18 @@ export function DataProvider({ children: childrenProp }: { children: ReactNode }
 
   // === DOCUMENTS ===
   const addDocument = async (data: Omit<DocumentWithApproval, 'id'>) => {
-    const tempId = generateId('DOC', documents);
+    // The only genuine use of a provisional key: the row must appear in the UI
+    // before the upload finishes. It is *not* sent as the record's id — the
+    // server allocates that — so two people uploading at the same moment can
+    // no longer produce the same key, and the replacement below always matches.
+    const tempId = provisionalKey('DOC');
     const optimistic: DocumentWithApproval = { ...data, id: tempId };
     // Optimistic update — show immediately in UI before backend confirms
     setDocuments(prev => [optimistic, ...prev]);
     try {
-      const saved = await createResource<DocumentWithApproval>('documents', optimistic);
+      const { id: _omitServerAllocated, ...payload } = optimistic as any;
+      void _omitServerAllocated;
+      const saved = await createResource<DocumentWithApproval>('documents', payload);
       // Replace optimistic entry with server-confirmed entry
       setDocuments(prev => prev.map(d => d.id === tempId ? saved : d));
     } catch (err) {
@@ -1029,7 +1137,7 @@ export function DataProvider({ children: childrenProp }: { children: ReactNode }
     const previous = documents;
     setDocuments(prev => prev.map(d => d.id === id ? { ...d, ...updates } : d));
     try {
-      const saved = await updateResource<DocumentWithApproval>('documents', id, updates);
+      const saved = await updateResource<DocumentWithApproval>('documents', id, withVersion(documents, id, updates));
       setDocuments(prev => prev.map(d => d.id === id ? saved : d));
     } catch (err) {
       setDocuments(previous);

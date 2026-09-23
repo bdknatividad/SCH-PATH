@@ -235,8 +235,11 @@ test('the delete affordance comes from RBAC, never from the document type', () =
   const rowComponents = (source.match(/<DocumentList/g) || []).length
     + (source.match(/<FolderDocumentRow/g) || []).length;
   assert.ok(rowComponents > 0, 'expected the document row components to be rendered');
+  // The capability must still originate in RBAC at every call site. It may be
+  // refined further — a closed admission is read-only regardless of the role —
+  // but it must never be *replaced* by something the role did not grant.
   assert.equal(
-    (source.match(/canDelete=\{canDeleteDocuments\}/g) || []).length,
+    (source.match(/canDelete=\{[^}]*canDeleteDocuments[^}]*\}/g) || []).length,
     rowComponents,
     'every DocumentList / FolderDocumentRow call site must pass the RBAC capability'
   );

@@ -115,24 +115,51 @@ async function publishDocumentForHealthRecord(record, actor) {
     + '. Filed automatically by the Health module.';
   const fileData = buffer.toString('base64');
 
-  const [existing] = await pool.query('SELECT id FROM documents WHERE healthRecordId = ? LIMIT 1', [record.id]);
+  /*
+   * Re-publish in place, preserving the admission the document was filed under.
+   *
+   * `residentId` is rewritten because an edit can move the record to a different
+   * resident, and the document has to follow it into that child's folder.
+   *
+   * The admission link is a different matter, and getting it wrong is what mixed
+   * a returning resident's records together. It used to be re-resolved from the
+   * resident's *current* admission on every save — so once a resident had been
+   * discharged and re-admitted, the next unrelated edit to an older health
+   * record silently dragged that record's document out of its own admission
+   * folder and into the newest one. The original value was overwritten in place,
+   * so nothing could put it back.
+   *
+   * A document belongs to the admission it was created under, permanently. The
+   * only circumstance that justifies re-filing it is the record itself moving to
+   * another resident — in which case the old link points at an admission that
+   * belongs to a different child and must be replaced. When the resident is
+   * unchanged, the existing link is left exactly as it is, which is also what
+   * keeps two same-day admissions separable.
+   */
+  const [existing] = await pool.query(
+    'SELECT id, residentId, admissionId FROM documents WHERE healthRecordId = ? LIMIT 1',
+    [record.id]
+  );
   if (existing.length) {
-    // `residentId` is rewritten too: an edit can move the record to a different
-    // resident, and the document has to follow it into that child's folder. The
-    // admission link is re-resolved for the same reason — the one on the row
-    // belongs to the resident the record just left, so leaving it would file the
-    // document under another child's admission.
-    const movedAdmissionId = await activeAdmissionIdFor(pool, record.residentId);
+    const previous = existing[0];
+    const residentChanged = String(previous.residentId || '') !== String(record.residentId || '');
+
+    // Only a genuine move re-resolves the admission; otherwise it is carried
+    // through untouched.
+    const admissionId = residentChanged
+      ? await activeAdmissionIdFor(pool, record.residentId)
+      : previous.admissionId;
+
     await pool.query(
       `UPDATE documents SET residentId = ?, admissionId = ?, residentName = ?, title = ?, type = ?, description = ?,
        fileName = ?, fileSize = ?, fileType = 'application/pdf', fileData = ?,
        category = ?, documentCategory = ?, uploaderRole = ?,
        approvedBy = ?, approvedAt = NOW(), submittedBy = ?, modifiedBy = ? WHERE id = ?`,
-      [record.residentId, movedAdmissionId, residentName, title, record.recordType, description, fileName, fileSize, fileData,
+      [record.residentId, admissionId, residentName, title, record.recordType, description, fileName, fileSize, fileData,
         HEALTH_DOCUMENT_CATEGORY, HEALTH_DOCUMENT_FOLDER, uploaderRole,
-        author, author, actor?.username || author, existing[0].id]
+        author, author, actor?.username || author, previous.id]
     );
-    return existing[0].id;
+    return previous.id;
   }
 
   // `submittedBy` is the nurse who recorded the health data, not the account that

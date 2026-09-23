@@ -1,0 +1,45 @@
+# Keep the build context small. The Docker build context is the repository
+# root, so without this the whole frontend source tree, every node_modules and
+# all build output would be uploaded to the Docker daemon on each deploy.
+#
+# Nothing excluded here is COPY'd by the Dockerfile.
+
+# Dependencies — reinstalled inside the image from package-lock.json
+**/node_modules
+
+# Build output — the backend does not serve a prebuilt frontend in this image
+frontend/dist
+frontend/dist-*/
+**/dist-verify*
+**/.verify-build*
+**/.buildcheck-*
+**/.vb-verify-*
+
+# Tests and one-off migration scripts. Neither runs in production: the schema
+# is built and upgraded by runMigrations() inside server.js on every boot.
+backend/tests
+backend/migrations
+
+# Version control and CI
+.git
+.gitignore
+.github
+
+# Secrets and local state — these must never enter an image layer
+**/.env
+**/.env.local
+**/.env.*.local
+backend/data
+
+# Stale build-check copies of the frontend
+frontend/.buildcheck-*
+frontend/.vb-verify-*
+frontend/.verify-build*
+frontend/dist-verify*
+
+# Documentation and editor noise
+**/*.md
+**/.vscode
+**/.idea
+**/.DS_Store
+**/Thumbs.db

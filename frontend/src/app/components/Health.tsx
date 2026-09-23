@@ -154,14 +154,12 @@ function RecordTypeBadge({ type }: { type: string }) {
   return <Badge className="bg-green-100 text-green-700 border-none gap-1"><HeartPulse className="w-3 h-3" />{type}</Badge>;
 }
 
-// ── GENERATE SEQUENTIAL ID ──────────────────────────────────────────────────
-function genHealthId(records: any[]) {
-  const nums = records
-    .map(r => parseInt((r.id || '').replace(/^HLT0*/, '') || '0'))
-    .filter(n => !isNaN(n));
-  const next = nums.length ? Math.max(...nums) + 1 : 1;
-  return `HLT${String(next).padStart(3, '0')}`;
-}
+// ── RECORD ID ───────────────────────────────────────────────────────────────
+// The id is the server's to allocate. This screen used to send
+// `HLT<max+1>` computed from the rows it could see, so two people filing a
+// health record at the same time derived the same id — see the note on
+// `provisionalKey` in `state/DataContext`. The payload now carries no id and
+// the store is re-read after the save.
 
 export function Health() {
   // The records come from the shared store, not a private fetch: the same rows
@@ -280,9 +278,11 @@ export function Health() {
     // requires; they were previously sent straight from `form`, which nothing on
     // this screen ever set, so every new dental record was refused.
     const isDental = form.recordType === 'Dental Services';
+    // `editingId` is still needed for the PUT branch; a new record must not
+    // carry an id at all, or the client would be choosing the primary key.
     const entry = {
       ...form,
-      id: editingId || genHealthId(healthRecords),
+      ...(editingId ? { id: editingId } : {}),
       status: 'Completed',
       recordedBy: user?.username || 'Staff',
       dentalService: isDental ? dentalServiceSummary(dentalServices) : form.dentalService,

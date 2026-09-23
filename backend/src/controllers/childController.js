@@ -15,6 +15,7 @@ const { loadDocumentScope, documentVisibleTo } = require('./documentController')
 const { isManager } = require('../utils/authorization');
 const notifications = require('../services/notificationService');
 const { buildAccessSnapshot, hasModuleAccess, hasSubModuleAccess, can } = require('../config/rbac');
+const { activeAdmissionIdFor } = require('../services/admissionLink');
 
 const baseController = createController('children');
 
@@ -256,10 +257,18 @@ async function create(req, res, next) {
     const phaseRequirements = PHASE_REQUIREMENTS[phase] || PHASE_REQUIREMENTS['Admission Phase'];
     const [existingPhases] = await connection.query('SELECT id FROM phaseProgress FOR UPDATE');
     const phaseId = generateId('PHS', existingPhases.map(row => ({ id: row.id })));
+
+    // A resident created here has no `admissions` row (this is the plain CRUD
+    // create, not the admission intake form), so there is usually nothing to
+    // link yet. Read it anyway: when the intake form lives on this path the row
+    // exists, and a NULL link is what a later re-admission's archival sweep
+    // would treat as its own.
+    const admissionId = await activeAdmissionIdFor(connection, childId);
+
     await connection.query(
-      `INSERT INTO phaseProgress (id, residentId, phaseName, enteredAt, isCurrent, tasksRequired, tasksCompleted, enteredBy, createdBy)
-       VALUES (?, ?, ?, CURDATE(), 1, ?, '[]', ?, ?)`,
-      [phaseId, childId, phase, JSON.stringify(phaseRequirements.requiredTasks || []), req.user?.username || 'System', req.user?.username || 'System']
+      `INSERT INTO phaseProgress (id, residentId, admissionId, phaseName, enteredAt, isCurrent, tasksRequired, tasksCompleted, enteredBy, createdBy)
+       VALUES (?, ?, ?, ?, CURDATE(), 1, ?, '[]', ?, ?)`,
+      [phaseId, childId, admissionId, phase, JSON.stringify(phaseRequirements.requiredTasks || []), req.user?.username || 'System', req.user?.username || 'System']
     );
 
     const [rows] = await connection.query('SELECT * FROM children WHERE id = ?', [childId]);
@@ -589,11 +598,51 @@ async function readmit(req, res, next) {
 
     const child = childRows[0];
 
-    // Store previous case info for history
+    /*
+     * This is the legacy re-admission path, kept for API compatibility. The UI
+     * admits a returning resident through the admissions controller, which files
+     * documents as Resident -> Admission -> Category -> File.
+     *
+     * Everything below therefore has to leave the database in the same shape the
+     * admissions controller would, or the resident's history splits two ways:
+     * the folder view splits on `documents.admissionId`, which is only ever set
+     * from an `admissions` row, and it numbers folders from
+     * `children.previousCases[].admissionNumber`. A re-admission that recorded no
+     * admission row and no admission number would leave the new cycle's
+     * documents unlinked, so they would fall to the timestamp path and merge
+     * into whichever admission happened to sort last.
+     */
+    const today = new Date().toISOString().split('T')[0];
+    const completedBy = req.user?.username || 'System';
+    const reAdmissionDate = newAdmissionDate || today;
+
+    // The admission this one supersedes. Closed below, then snapshotted so the
+    // previous admission keeps its own documents and phase history.
+    const [previousAdmissionRows] = await pool.query(
+      `SELECT *
+         FROM admissions
+        WHERE residentId = ?
+        ORDER BY admissionNumber DESC
+        LIMIT 1`,
+      [id]
+    );
+    const previousAdmission = previousAdmissionRows[0] || null;
+
+    // Store previous case info for history, in the same shape the admissions
+    // controller writes — including the admission id and number the folder view
+    // needs to keep this cycle's documents separate from the new one's.
     const previousCaseInfo = {
-      offense: child.caseType,
-      date: child.admissionDate,
-      dischargeDate: child.status === 'Discharged' ? new Date().toISOString().split('T')[0] : null,
+      admissionId: previousAdmission?.id || null,
+      admissionNumber: previousAdmission?.admissionNumber
+        || (Array.isArray(child.previousCases) ? 1 : 1),
+      offense: previousAdmission?.specificOffense || child.caseType,
+      legalCategory: previousAdmission?.legalCategory || child.legalCategory || null,
+      date: previousAdmission?.admissionDate || child.admissionDate,
+      admissionDate: previousAdmission?.admissionDate || child.admissionDate,
+      dischargeDate: previousAdmission?.closedDate
+        || (child.status === 'Discharged' ? today : null),
+      closedDate: previousAdmission?.closedDate
+        || (child.status === 'Discharged' ? today : null),
     };
 
     // Build updated previousCases array
@@ -607,13 +656,22 @@ async function readmit(req, res, next) {
 
     previousCases.push(previousCaseInfo);
 
-    const today = new Date().toISOString().split('T')[0];
-    const completedBy = req.user?.username || 'System';
-
-    // 1. Mark any existing phaseProgress records as not current (archive them)
+    // 1. Retire the phases of the admission being closed.
+    //
+    // Scoped to that admission. The phase table now carries `admissionId`; rows
+    // written before the column existed are NULL and are still swept by the
+    // per-resident fallback, so a legacy upgrade is not stranded. Without the
+    // scope this closed every phase the resident had ever had, including ones
+    // already retired.
     await pool.query(
-      'UPDATE phaseProgress SET isCurrent = 0, completedAt = COALESCE(completedAt, ?), completedBy = COALESCE(completedBy, ?) WHERE residentId = ?',
-      [today, completedBy, id]
+      `UPDATE phaseProgress
+          SET isCurrent = 0,
+              completedAt = COALESCE(completedAt, ?),
+              completedBy = COALESCE(completedBy, ?)
+        WHERE residentId = ?
+          AND (admissionId = ? OR admissionId IS NULL)
+          AND isCurrent = 1`,
+      [today, completedBy, id, previousAdmission?.id || null]
     );
 
     // 1b. Close the previous active admission so the admission controller's
@@ -628,20 +686,63 @@ async function readmit(req, res, next) {
       [today, completedBy, id]
     );
 
+    // 1c. Create the immutable snapshot for the new admission, so this cycle can
+    // own documents the same way an admission created through the admissions
+    // controller does.
+    const admissionNumber = previousAdmission
+      ? Number(previousAdmission.admissionNumber || 0) + 1
+      : 1;
+
+    const admissionId = await insertWithGeneratedId(pool, {
+      table: 'admissions',
+      prefix: 'ADM',
+      insert: (generatedId) => pool.query(
+        `INSERT INTO admissions (
+           id, residentId, admissionNumber, admissionDate, name, age, sex, birthDate,
+           religion, address, guardianName, guardianContact, guardianAddress,
+           referringParty, referringPartyContact, houseparentOnDuty,
+           legalCategory, specificOffense, caseHistory, status, createdBy
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Active', ?)`,
+        [
+          generatedId,
+          id,
+          admissionNumber,
+          reAdmissionDate,
+          child.name,
+          child.age ?? 0,
+          child.gender === 'Female' ? 'Female' : 'Male',
+          child.birthDate ?? reAdmissionDate,
+          child.religion || 'Unspecified',
+          child.address || 'Unspecified',
+          child.guardianName || 'Unspecified',
+          child.guardianContact || 'Unspecified',
+          child.guardianAddress || 'Unspecified',
+          'Re-admission',
+          'Unspecified',
+          child.houseparentOnDuty || 'Unspecified',
+          newLegalCategory || child.legalCategory || 'Unspecified',
+          newCaseType || child.caseType || 'Unspecified',
+          `Previous: ${child.caseType} (${child.admissionDate})`,
+          completedBy,
+        ]
+      ),
+    });
+
     // 2. Get required tasks for Admission Phase
     const { PHASE_REQUIREMENTS } = require('../utils/constants');
     const admissionReq = PHASE_REQUIREMENTS['Admission Phase'] || {};
     const tasksRequired = JSON.stringify(admissionReq.requiredTasks || []);
 
-    // 3. Create new phaseProgress record for new Admission Phase.
-    // Two concurrent re-admissions can derive the same id; retry instead of 500.
+    // 3. Create new phaseProgress record for new Admission Phase, anchored to
+    // the admission it belongs to. Two concurrent re-admissions can derive the
+    // same id; retry instead of 500.
     const phaseId = await insertWithGeneratedId(pool, {
       table: 'phaseProgress',
       prefix: 'PHS',
       insert: (generatedId) => pool.query(
-        `INSERT INTO phaseProgress (id, residentId, phaseName, enteredAt, isCurrent, tasksRequired, tasksCompleted, enteredBy, createdBy)
-         VALUES (?, ?, ?, ?, 1, ?, '[]', ?, ?)`,
-        [generatedId, id, 'Admission Phase', newAdmissionDate || today, tasksRequired, completedBy, completedBy]
+        `INSERT INTO phaseProgress (id, residentId, admissionId, phaseName, enteredAt, isCurrent, tasksRequired, tasksCompleted, enteredBy, createdBy)
+         VALUES (?, ?, ?, ?, ?, 1, ?, '[]', ?, ?)`,
+        [generatedId, id, admissionId, 'Admission Phase', reAdmissionDate, tasksRequired, completedBy, completedBy]
       ),
     });
 
@@ -658,7 +759,6 @@ async function readmit(req, res, next) {
       ? ` | ${child.previousCaseDetails.replace(/Previous:\s*[^|]+\(\s*[^)]+\s*\)\s*\|?\s*/g, '').trim()}`
       : '';
 
-    const reAdmissionDate = newAdmissionDate || today;
     const updateFields = {
       status: 'Active',
       casePhase: 'Admission Phase',

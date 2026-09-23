@@ -132,6 +132,23 @@
 
   body {
     @apply bg-background text-foreground;
+    /*
+      Stop iOS bumping text up on its own. Safari inflates body text on a
+      landscape phone unless this is set, which desynchronised the printed-form
+      overlays — they place fields by absolute pixel offsets, so a silent font
+      scale shift moved every field off its printed rule.
+    */
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  /*
+    Clear of the notch and the home indicator. Only applies on devices that
+    report an inset; everywhere else the values resolve to 0.
+  */
+  body {
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
   }
 
   /**
@@ -183,5 +200,72 @@
     font-size: var(--text-base);
     font-weight: var(--font-weight-normal);
     line-height: 1.5;
+  }
+}
+
+/*
+ * Mobile baseline.
+ *
+ * Everything here is a root-cause fix for a phone-specific defect, not a
+ * cosmetic preference. Kept to the base layer so a component's own utility
+ * classes still win where it knows better.
+ */
+@layer base {
+  /*
+    iOS Safari zooms the whole page in when a focused field's computed
+    font-size is under 16px, and does not zoom back out on blur. Dozens of
+    fields in this system are `text-xs` / `text-sm`, so on a phone every form
+    was a fight: tap a field, the page jumps to 1.3x, and half the form is off
+    screen. Forcing 16px on small screens is the standard fix and is why this
+    is a single rule rather than an edit to every input.
+  */
+  @media (max-width: 1023px) {
+    input,
+    select,
+    textarea {
+      font-size: 16px;
+    }
+  }
+
+  /*
+    A `datetime-local` / `date` control in a narrow grid can be wider than the
+    cell it sits in — iOS renders the value plus its picker chrome at a fixed
+    intrinsic width — and that single control then sets the page's minimum
+    width. Let them shrink and ellipsize instead of overflowing the layout.
+  */
+  input[type='date'],
+  input[type='datetime-local'],
+  input[type='time'],
+  input[type='month'] {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  /*
+    Long unbroken strings — a resident's full name, a file name, a court docket
+    number — are common in this system's tables and cards, and any one of them
+    can push a narrow column wider than the viewport. Wrapping them removes the
+    whole class of horizontal-overflow bugs at once.
+  */
+  h1, h2, h3, h4, p, span, td, th, label, li, dd, dt {
+    overflow-wrap: anywhere;
+  }
+
+  /*
+    Media never wider than its container. The logo, signature images and
+    scanned documents are all variable-size and were the other overflow source.
+  */
+  img,
+  canvas,
+  video,
+  svg {
+    max-width: 100%;
+  }
+
+  /*
+    Anchor jumps and focus scrolling land under the sticky header without this.
+  */
+  html {
+    scroll-padding-top: 5rem;
   }
 }

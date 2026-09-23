@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/app/components/ui/card';
 import { Button } from '@/app/components/ui/button';
 import { Badge } from '@/app/components/ui/badge';
@@ -8,11 +8,12 @@ import { Textarea } from '@/app/components/ui/textarea';
 import { Input } from '@/app/components/ui/input';
 import { Label } from '@/app/components/ui/label';
 import { SignaturePadModal } from '@/app/components/SignaturePad';
-import { describeError, request } from '@/services/api';
+import { describeError, request, apiUrl, authHeaders } from '@/services/api';
 import { systemDialog } from '@/app/components/SystemDialog';
 import { useAuth } from '../state/AuthContext';
 import { useData } from '../state/DataContext';
 import { formatShortDate, formatShortDateTime } from '@/utils/dateFormatter';
+import { admissionPeriodsFor } from '@/utils/admissionPeriods';
 
 const CASE_PHASES = [
   'Admission Phase',
@@ -974,8 +975,8 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
 
   /** Fetches a stored file through the same authorised endpoint the Documents module uses. */
   const fetchStoredFile = async (doc: { id: string; fileName?: string; title?: string }) => {
-    const res = await fetch(`/api/documents/${doc.id}/file`, {
-      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
+    const res = await fetch(apiUrl(`/documents/${doc.id}/file`), {
+      headers: authHeaders(),
     });
     if (!res.ok) throw new Error('Could not load the file. You may not have access to it.');
     return { blob: await res.blob(), fileName: doc.fileName || doc.title || 'document' };
@@ -1040,9 +1041,36 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
   const docCutoffDatetime = currentChildRecord?.readmissionDatetime || '';
   const docCutoffDate = currentChildRecord?.readmissionDate || '';
   const isReadmitted = !!(currentChildRecord?.isRepeatOffender && (docCutoffDatetime || docCutoffDate));
-  const belongsToCurrentAdmission = (d: { residentId?: string; uploadedAt?: string }) => {
+
+  /**
+   * The admissions on record for this resident, so a document can be matched to
+   * its own instead of to a date.
+   *
+   * This mirrors `admissionPeriodsFor` in utils/admissionPeriods — the same list
+   * the Documents folder splits on — because the two must not disagree about
+   * where a document lives. The one admission this list cannot name is the open
+   * one, which is what `currentAdmissionIds` below is for.
+   */
+  const admissionPeriods = useMemo(
+    () => admissionPeriodsFor(currentChildRecord),
+    [currentChildRecord],
+  );
+  const knownAdmissionIds = useMemo(
+    () => new Set(admissionPeriods.map(p => p.admissionId).filter(Boolean)),
+    [admissionPeriods],
+  );
+
+  const belongsToCurrentAdmission = (d: { residentId?: string; admissionId?: string; uploadedAt?: string }) => {
     if (d.residentId !== residentId) return false;
     if (!isReadmitted) return true; // new child — show all their docs
+
+    // The document's own admission link, when it has one, decides outright — a
+    // document filed under a previous admission is history, whichever date it
+    // carries, and one filed under an admission the closed history does not name
+    // is this admission's own. Only the timestamp fallback below is a guess.
+    const linked = String(d.admissionId ?? '').trim();
+    if (linked) return !knownAdmissionIds.has(linked);
+
     if (!d.uploadedAt) return false; // readmitted child — old doc with no timestamp = 1st offense, hide
     // Use full datetime comparison for precision
     if (docCutoffDatetime) {

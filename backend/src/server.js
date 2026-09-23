@@ -11,7 +11,7 @@ const cron = require('node-cron');
 const path = require('path');
 require('dotenv').config();
 
-const { testConnection } = require('./config/database');
+const { pool, testConnection } = require('./config/database');
 const routes = require('./routes');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 const { seedDatabase } = require('./scripts/seedDatabase');
@@ -26,9 +26,55 @@ const { asStringArray } = require('./config/rbac');
 const app = express();
 const PORT = Number(process.env.PORT || 5000);
 
-// Middleware
-app.use(cors());
-app.use(express.json({ limit: '10mb' }));
+/**
+ * CORS.
+ *
+ * `app.use(cors())` with no options reflects *any* origin and allows the
+ * Authorization header, which is what a split deployment needs to function but
+ * is not something a production API should keep. `CORS_ORIGIN` is a
+ * comma-separated allow-list; the frontend's deployed origin goes here.
+ *
+ * Leaving it unset keeps the permissive default so local development and the
+ * single-service deployment (backend serving `frontend/dist`, same origin, no
+ * CORS at all) continue to work unchanged. Once the frontend is on its own
+ * domain, set CORS_ORIGIN to that domain — requests from anywhere else will
+ * then be refused by the browser.
+ */
+const corsOrigins = String(process.env.CORS_ORIGIN || '')
+  .split(',')
+  .map((origin) => origin.trim().replace(/\/+$/, ''))
+  .filter(Boolean);
+
+app.use(
+  cors(
+    corsOrigins.length
+      ? {
+          origin(origin, callback) {
+            // No Origin header: a same-origin request, curl, or a health check.
+            // These are not browser cross-origin calls and must still work.
+            if (!origin) return callback(null, true);
+            if (corsOrigins.includes(origin.replace(/\/+$/, ''))) return callback(null, true);
+            return callback(new Error(`Origin ${origin} is not allowed by CORS_ORIGIN.`));
+          },
+          credentials: true,
+        }
+      : {},
+  ),
+);
+// Parses JSON request bodies, including the base64 `fileData` of an upload.
+//
+// The limit is NOT the maximum file size — it is the maximum *body* size, and a
+// base64 payload is about 4/3 the size of the bytes it carries. With the old
+// `10mb`, a 10 MB file arrived as ~13.3 MB of JSON and was rejected with a 413
+// before any route ran: the client's own check allows up to 10 MB and the form
+// label says "Max 10MB", so the ceiling a person actually hit was ~7.5 MB, with
+// an error that named no real limit.
+//
+// 16mb carries a 10 MB file (13.3 MB encoded) plus its metadata with headroom.
+// `MAX_UPLOAD_BYTES` below is the number the UI is allowed to promise; keep the
+// two in step, and note that the documents table stores the encoded form in a
+// LONGTEXT column, so the body limit is the only ceiling that matters here.
+app.use(express.json({ limit: '16mb' }));
 
 // API Routes
 app.use('/api', routes);
@@ -221,6 +267,23 @@ async function runMigrations() {
     }
     await pool.query(`ALTER TABLE \`${table}\` ADD UNIQUE KEY \`${indexName}\` (\`${column}\`)`);
     console.log(`Migration: unique index ${indexName} on ${table}.${column} added.`);
+    return true;
+  }
+
+  /**
+   * Adds a plain index only when it is absent. The non-unique counterpart to
+   * `ensureUniqueIndex`, for columns that repeat (a resident has many phase rows
+   * per admission) but are read by equality often enough to want one.
+   */
+  async function ensureIndex(table, indexName, column) {
+    const [existing] = await pool.query(
+      `SELECT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS
+       WHERE TABLE_SCHEMA = DATABASE() AND LOWER(TABLE_NAME) = LOWER(?) AND LOWER(INDEX_NAME) = LOWER(?)`,
+      [table, indexName]
+    );
+    if (existing.length) return false;
+    await pool.query(`ALTER TABLE \`${table}\` ADD INDEX \`${indexName}\` (\`${column}\`)`);
+    console.log(`Migration: index ${indexName} on ${table}.${column} added.`);
     return true;
   }
 
@@ -491,6 +554,20 @@ async function runMigrations() {
     // rather than create a second one).
     await ensureColumn('documents', 'assessmentId', 'VARCHAR(40) NULL', 'residentId');
     await ensureColumn('documents', 'anecdotalReportId', 'VARCHAR(40) NULL', 'residentId');
+
+    // The admission a document belongs to.
+    //
+    // This column is what keeps a returning resident's files apart: the folder
+    // view groups Resident -> Admission -> Category -> File on this link, and a
+    // document with no link falls back to comparing timestamps, which collapses
+    // every admission a resident has ever had into one folder. It was present in
+    // schema.sql but had no runtime migration, so a *fresh* database got it and
+    // an existing one did not — the bug only ever appeared on upgraded
+    // deployments, which is the worst way round. The backfill in
+    // migrate_document_admissions.sql places the rows written before it existed.
+    await ensureColumn('documents', 'admissionId', 'VARCHAR(40) NULL', 'residentId');
+    await ensureIndex('documents', 'idx_documents_admission', 'admissionId');
+    await backfillDocumentAdmissions();
     // At most one published document per Anecdotal Report, guaranteed by the
     // database. The publisher already looks the entry up before inserting, but
     // that is a read-then-write race; this closes it. NULLs are unaffected —
@@ -1798,6 +1875,138 @@ async function runMigrations() {
   // reached the Documents module at all.
   await ensureColumn('documents', 'healthRecordId', 'VARCHAR(40) NULL', 'residentId');
   await ensureUniqueIndex('documents', 'uq_documents_health_record', 'healthRecordId');
+
+  // Links a phase record to the admission it was recorded under.
+  //
+  // `phaseProgress.isCurrent` is per-resident, so a re-admission's archival pass
+  // ("everything not current becomes history") had to guess which rows belonged
+  // to the admission being closed. With no admission link it fell back to
+  // `WHERE residentId = ?`, which closed *the newest* admission's phases too —
+  // so the resident arrived at admission 2 with their case phase already
+  // discharged. The column makes the archival explicable: a phase row belongs to
+  // exactly one admission, and retiring an admission retires only its own rows.
+  await ensureColumn('phaseProgress', 'admissionId', 'VARCHAR(40) NULL', 'residentId');
+  await ensureIndex('phaseProgress', 'idx_phaseProgress_admission', 'admissionId');
+  await backfillPhaseProgressAdmissions();
+}
+
+/**
+ * Files every existing phase row under the admission that was open when it was
+ * entered, so the scoped archival has something to scope on.
+ *
+ * Rows from before the column existed have no link, and a NULL link cannot be
+ * matched by `admissionId = ?` — which would leave them permanently current,
+ * and a re-admission would never retire them. So each is placed at the highest
+ * admission whose `admissionDate` is on or before the row's `enteredAt`: the
+ * admission in force on the day the phase began. Anything older than every
+ * admission on record (or a resident with no admission rows at all) keeps NULL
+ * and is left to the legacy per-resident fallback.
+ *
+ * Idempotent: it only ever writes rows where `admissionId IS NULL`, so a second
+ * boot is a no-op and a row placed by hand is never moved.
+ */
+async function backfillPhaseProgressAdmissions() {
+  try {
+    const [pending] = await pool.query(
+      'SELECT COUNT(*) AS total FROM phaseProgress WHERE admissionId IS NULL'
+    );
+    if (!pending[0]?.total) return;
+
+    const [result] = await pool.query(`
+      UPDATE phaseProgress p
+        JOIN (
+          SELECT p2.id AS phaseId,
+                 (SELECT a.id
+                    FROM admissions a
+                   WHERE a.residentId = p2.residentId
+                     AND a.admissionDate <= p2.enteredAt
+                   ORDER BY a.admissionDate DESC, a.admissionNumber DESC
+                   LIMIT 1) AS admissionId
+            FROM phaseProgress p2
+           WHERE p2.admissionId IS NULL
+        ) AS resolved ON resolved.phaseId = p.id
+         SET p.admissionId = resolved.admissionId
+       WHERE p.admissionId IS NULL
+         AND resolved.admissionId IS NOT NULL
+    `);
+
+    if (result.affectedRows) {
+      console.log(`Migration: phaseProgress.admissionId backfilled for ${result.affectedRows} row(s).`);
+    }
+  } catch (err) {
+    console.warn('Migration warning (phaseProgress admission backfill):', err.message);
+  }
+}
+
+/**
+ * Places existing documents under the admission that was open when they were
+ * written, so an upgraded deployment does not show a returning resident's whole
+ * history in one folder.
+ *
+ * This mirrors the two passes in `database/migrate_document_admissions.sql`,
+ * which is what a DBA would otherwise have to run by hand. Doing it at boot
+ * means the upgrade is complete the moment the server starts, rather than
+ * correct only for whoever remembers to run the SQL.
+ *
+ * The placement rule is the latest admission that already existed when the
+ * document was written. `createdAt` is the column to order by, not `uploadedAt`:
+ * the Documents module sends `toISOString()` (UTC) while the MySQL-stamped
+ * publishers write local time, and in GMT+8 those are eight hours apart, which
+ * would interleave them wrongly. A document that predates every admission on
+ * record falls back to the resident's earliest one, because a document with no
+ * admission has no folder to appear in.
+ *
+ * Idempotent: only rows with `admissionId IS NULL` are ever touched.
+ */
+async function backfillDocumentAdmissions() {
+  try {
+    const [pending] = await pool.query(
+      'SELECT COUNT(*) AS total FROM documents WHERE admissionId IS NULL AND residentId IS NOT NULL'
+    );
+    if (!pending[0]?.total) return;
+
+    // Pass 1 — the admission in force when the document was written.
+    const [placed] = await pool.query(`
+      UPDATE documents d
+        JOIN (
+          SELECT d2.id AS docId,
+                 (SELECT a.id
+                    FROM admissions a
+                   WHERE a.residentId = d2.residentId
+                     AND a.createdAt <= COALESCE(d2.createdAt, d2.uploadedAt, d2.submittedAt)
+                   ORDER BY a.admissionNumber DESC
+                   LIMIT 1) AS resolvedAdmissionId
+            FROM documents d2
+           WHERE d2.admissionId IS NULL
+        ) resolved ON resolved.docId = d.id
+         SET d.admissionId = resolved.resolvedAdmissionId
+       WHERE resolved.resolvedAdmissionId IS NOT NULL
+    `);
+
+    // Pass 2 — anything older than the first admission goes to that first one.
+    const [fallback] = await pool.query(`
+      UPDATE documents d
+        JOIN (
+          SELECT d2.id AS docId,
+                 (SELECT a.id
+                    FROM admissions a
+                   WHERE a.residentId = d2.residentId
+                   ORDER BY a.admissionNumber ASC
+                   LIMIT 1) AS firstAdmissionId
+            FROM documents d2
+           WHERE d2.admissionId IS NULL
+        ) resolved ON resolved.docId = d.id
+         SET d.admissionId = resolved.firstAdmissionId
+       WHERE resolved.firstAdmissionId IS NOT NULL
+    `);
+
+    const total = (placed.affectedRows || 0) + (fallback.affectedRows || 0);
+    if (total) {
+      console.log(`Migration: documents.admissionId backfilled for ${total} row(s).`);
+    }
+  } catch (err) {
+    console.warn('Migration warning (documents admission backfill):', err.message);
+  }
 }
 
 // Start server

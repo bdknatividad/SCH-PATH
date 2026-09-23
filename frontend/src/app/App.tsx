@@ -1,4 +1,4 @@
-import React, { Component, ErrorInfo, ReactNode } from 'react';
+import React, { Component, ErrorInfo, ReactNode, Suspense } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AlertCircle } from 'lucide-react';
 import { AuthProvider, useAuth } from './state/AuthContext';
@@ -7,24 +7,40 @@ import { SystemDialogProvider } from './components/SystemDialog';
 
 import { Layout } from '@/app/components/Layout';
 import { LoginPage } from '@/app/components/LoginPage';
-import { Dashboard } from '@/app/components/Dashboard';
-import { ChildRecords } from '@/app/components/ChildRecords';
-import { ChildDetail } from '@/app/components/ChildDetail';
-import { Activities } from '@/app/components/Activities';
-import ActivityDetail from '@/app/components/ActivityDetail'; 
-import EvaluationForm from '@/app/components/EvaluationForm'; 
+import { lazyComponent, RouteFallback } from '@/app/utils/lazyComponent';
 
-import { Assessments } from '@/app/components/Assessments';
-import { AssessmentDetail } from '@/app/components/AssessmentDetail';
-import { Health } from '@/app/components/Health';
-import { AccountManagement } from '@/app/components/AccountManagement';
-import { Reports } from '@/app/components/Reports';
-import { Violations } from '@/app/components/Violations';
-import { CourtRecords } from '@/app/components/CourtRecords';
-import { SocialWorker } from '@/app/components/SocialWorker';
-import { DocumentUpload } from '@/app/components/DocumentUpload';
-import { Education } from '@/app/components/Education';
-import { Tri } from '@/app/components/Tri';
+/*
+ * Every module is loaded on demand.
+ *
+ * The static imports that used to live here put the entire application in a
+ * single chunk, so opening the login page downloaded both PDF engines and the
+ * zip library as well — roughly 700 KB gzip before it could draw a username
+ * field. Splitting by route means a user only pays for the module they open.
+ *
+ * `Layout` stays a static import on purpose: it wraps every authenticated
+ * route, so it is on the critical path regardless and splitting it would only
+ * add a round trip. `LoginPage` is static for the same reason — it is the first
+ * thing anyone loads, so a separate chunk for it would be a request with no
+ * benefit.
+ */
+const Dashboard = lazyComponent(() => import('@/app/components/Dashboard'), 'Dashboard');
+const ChildRecords = lazyComponent(() => import('@/app/components/ChildRecords'), 'ChildRecords');
+const ChildDetail = lazyComponent(() => import('@/app/components/ChildDetail'), 'ChildDetail');
+const Activities = lazyComponent(() => import('@/app/components/Activities'), 'Activities');
+const ActivityDetail = lazyComponent(() => import('@/app/components/ActivityDetail'), 'default');
+const EvaluationForm = lazyComponent(() => import('@/app/components/EvaluationForm'), 'default');
+
+const Assessments = lazyComponent(() => import('@/app/components/Assessments'), 'Assessments');
+const AssessmentDetail = lazyComponent(() => import('@/app/components/AssessmentDetail'), 'AssessmentDetail');
+const Health = lazyComponent(() => import('@/app/components/Health'), 'Health');
+const AccountManagement = lazyComponent(() => import('@/app/components/AccountManagement'), 'AccountManagement');
+const Reports = lazyComponent(() => import('@/app/components/Reports'), 'Reports');
+const Violations = lazyComponent(() => import('@/app/components/Violations'), 'Violations');
+const CourtRecords = lazyComponent(() => import('@/app/components/CourtRecords'), 'CourtRecords');
+const SocialWorker = lazyComponent(() => import('@/app/components/SocialWorker'), 'SocialWorker');
+const DocumentUpload = lazyComponent(() => import('@/app/components/DocumentUpload'), 'DocumentUpload');
+const Education = lazyComponent(() => import('@/app/components/Education'), 'Education');
+const Tri = lazyComponent(() => import('@/app/components/Tri'), 'Tri');
 
 class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean, error: Error | null }> {
   constructor(props: { children: ReactNode }) {
@@ -138,6 +154,14 @@ export default function App() {
         <SystemDialogProvider>
         <GlobalStyles /> 
         <Router>
+          {/*
+            One Suspense boundary around the whole route tree, with the
+            fallback rendered inside <main> by <Layout>. A boundary per route
+            would swap the entire page — header and sidebar included — for a
+            spinner on every navigation; this way the shell stays put and only
+            the content area reports that it is loading.
+          */}
+          <Suspense fallback={<Layout><RouteFallback /></Layout>}>
           <Routes>
             <Route path="/" element={<LoginPage />} />
             
@@ -256,6 +280,7 @@ export default function App() {
 
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
+          </Suspense>
         </Router>
         </SystemDialogProvider>
       </DataProvider>

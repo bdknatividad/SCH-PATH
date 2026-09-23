@@ -1505,6 +1505,14 @@ export function Tri() {
       return;
     }
 
+    // Close this form *before* the confirm, not after the request. The form is a
+    // Radix layer; leaving it mounted while `dialog.confirm(...)` opens its own
+    // layer means whichever of the two Radix measures "not last" is inlined with
+    // `pointer-events: none` and its buttons stop responding. The confirm is the
+    // case a user is most likely to hit, because they are still looking at the
+    // form when it appears — see ui/modalLayer.ts.
+    setShowForm(false);
+
     // Submitting hands the record to somebody else and locks the form, so it is
     // asked about rather than done on a single click. This replaced a bare
     // button that fired immediately.
@@ -1538,7 +1546,7 @@ export function Tri() {
       if (result.data.dischargeRecommendation?.thresholdReached) {
         setDischargeRecommendation(result.data.dischargeRecommendation);
       }
-      setShowForm(false);
+      // The form was closed above, before the confirm — no second close needed.
       await fetchRecords();
       await dialog.success(
         'TRI submitted for review.',
@@ -1547,6 +1555,9 @@ export function Tri() {
     } catch (err: any) {
       if (!await recoverExistingDraft(err)) {
         setError(describeError(err, 'Failed to submit the TRI.'));
+        // The form was already closed above, before the confirm — closing it
+        // again here would be a no-op, and doing it *after* an await is the
+        // ordering this fix removes.
         await dialog.failure('Could not submit the TRI', describeError(err, 'The TRI was not submitted. Please try again.'));
       }
     }
@@ -1556,10 +1567,17 @@ export function Tri() {
   async function handleReturn() {
     if (!selectedRecord || !reviewNotes.trim()) return;
     setActionLoading(true); setError(null);
+    const notes = reviewNotes.trim();
+    // Close the confirmation form before the request, so its Radix layer is
+    // gone by the time the outcome dialog opens. Leaving it mounted makes Radix
+    // judge the outcome dialog "not the top layer" and inline
+    // `pointer-events: none` on it, so OK stops responding — see ui/modalLayer.ts.
+    setShowReturnDialog(false);
+    setReviewNotes('');
     try {
-      const result = await request<{ success: boolean; data: TriRecord }>('/tri/' + selectedRecord.id + '/return', { method: 'POST', body: JSON.stringify({ reviewNotes }) });
+      const result = await request<{ success: boolean; data: TriRecord }>('/tri/' + selectedRecord.id + '/return', { method: 'POST', body: JSON.stringify({ reviewNotes: notes }) });
       setRecords(prev => prev.map(r => r.id === result.data.id ? result.data : r));
-      setSelectedRecord(result.data); setShowReturnDialog(false); setReviewNotes('');
+      setSelectedRecord(result.data);
       await dialog.success(
         'TRI returned for revision.',
         'The Houseparent can edit it again and resubmit. Your notes are shown with the record.',
@@ -1574,10 +1592,14 @@ export function Tri() {
   async function handleFinalize() {
     if (!selectedRecord) return;
     setActionLoading(true); setError(null);
+    // Close before the request and before the refresh: `fetchRecords()` is a
+    // second await, so closing afterwards would leave this layer mounted for the
+    // whole round trip and the outcome dialog would open underneath it.
+    setShowFinalizeDialog(false);
     try {
       const result = await request<{ success: boolean; data: TriRecord }>('/tri/' + selectedRecord.id + '/finalize', { method: 'POST' });
       setRecords(prev => prev.map(r => r.id === result.data.id ? result.data : r));
-      setSelectedRecord(result.data); setShowFinalizeDialog(false);
+      setSelectedRecord(result.data);
       await fetchRecords();
       await dialog.success(
         'TRI approved.',

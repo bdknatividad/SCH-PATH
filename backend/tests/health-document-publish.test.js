@@ -176,8 +176,22 @@ const poolStub = {
     // up before inserting; see src/services/admissionLink.js.
     if (/FROM admissions/i.test(text)) return [[{ id: TEST_ADMISSION_ID }]];
 
-    if (/SELECT id FROM documents WHERE healthRecordId = \?/i.test(text)) {
-      return [documentRows.filter((r) => r.healthRecordId === params[0]).map((r) => ({ id: r.id }))];
+    // The re-publish lookup reads the columns it needs to decide whether the
+    // record moved resident. A save that does not move it must be able to carry
+    // the document's existing admissionId straight through, so the stub has to
+    // hand back what the real query selects — returning only `id` would let a
+    // regression through, because `previous.admissionId` would be undefined.
+    if (/SELECT .* FROM documents WHERE healthRecordId = \?/i.test(text)) {
+      const columns = text
+        .slice(text.indexOf('SELECT') + 'SELECT'.length, text.indexOf('FROM'))
+        .split(',')
+        .map((column) => column.trim())
+        .filter(Boolean);
+      return [
+        documentRows
+          .filter((r) => r.healthRecordId === params[0])
+          .map((r) => Object.fromEntries(columns.map((column) => [column, r[column]]))),
+      ];
     }
     if (/SELECT id FROM documents/i.test(text)) return [documentRows.map((r) => ({ id: r.id }))];
     if (/INSERT INTO documents/i.test(text)) {
@@ -537,7 +551,12 @@ test('the publisher looks the existing entry up by healthRecordId', () => {
   const start = CONTROLLER.indexOf('async function publishDocumentForHealthRecord');
   assert.ok(start > 0, 'publishDocumentForHealthRecord is gone');
   const body = CONTROLLER.slice(start, CONTROLLER.indexOf('\nasync function publishSafely', start));
-  assert.match(body, /SELECT id FROM documents WHERE healthRecordId = \?/, 'the publisher no longer checks for an existing entry');
+  assert.match(
+    body,
+    /SELECT id, residentId, admissionId FROM documents WHERE healthRecordId = \?/,
+    'the publisher no longer checks for an existing entry by healthRecordId, or no longer ' +
+      'reads the columns the resident-move decision needs'
+  );
   assert.match(body, /UPDATE documents SET/, 'the publisher no longer updates the existing entry');
   assert.match(body, /INSERT INTO documents/, 'the publisher no longer inserts');
 });

@@ -1,4 +1,4 @@
-import { ReactNode, useMemo, useState } from 'react';
+import { ReactNode, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Button } from '@/app/components/ui/button';
 import { useAuth } from '../state/AuthContext';
@@ -127,6 +127,57 @@ export function Layout({ children }: LayoutProps) {
   const userRole = user?.role?.toLowerCase();
   const isActive = (path: string) => location.pathname.startsWith(path);
 
+  /**
+   * Hold the page still while the drawer is open.
+   *
+   * The drawer is `fixed inset-0`, so without this a swipe that starts on it
+   * scrolls the page behind it instead — on a phone the list under your thumb
+   * moves, which reads as the menu being broken. The previous offset is kept so
+   * the page does not jump to the top when the drawer closes.
+   *
+   * `overflow: hidden` alone is not enough on iOS Safari, which scrolls the
+   * body anyway; pinning it to a fixed position and restoring the stored offset
+   * is what actually stops it.
+   */
+  useEffect(() => {
+    if (!mobileMenuOpen) return;
+
+    const scrollY = window.scrollY;
+    const { style } = document.body;
+    const previous = {
+      position: style.position,
+      top: style.top,
+      width: style.width,
+      overflow: style.overflow,
+    };
+
+    style.position = 'fixed';
+    style.top = `-${scrollY}px`;
+    style.width = '100%';
+    style.overflow = 'hidden';
+
+    return () => {
+      style.position = previous.position;
+      style.top = previous.top;
+      style.width = previous.width;
+      style.overflow = previous.overflow;
+      // Restoring the offset has to happen after position is back to static,
+      // otherwise the browser clamps the scroll to the pinned element.
+      window.scrollTo(0, scrollY);
+    };
+  }, [mobileMenuOpen]);
+
+  // A resize past the lg breakpoint hides the drawer with CSS, but the state
+  // would stay true and keep the page locked on the way back down to mobile.
+  useEffect(() => {
+    const query = window.matchMedia('(min-width: 1024px)');
+    const close = () => setMobileMenuOpen(false);
+    query.addEventListener('change', (event) => {
+      if (event.matches) close();
+    });
+    return () => query.removeEventListener('change', close);
+  }, []);
+
   const renderMenu = (onNavigate?: () => void) =>
     filteredMenuItems.map((item) => {
       const active = isActive(item.path);
@@ -153,8 +204,14 @@ export function Layout({ children }: LayoutProps) {
   return (
     <div className="min-h-screen flex flex-col bg-[#F8F9FA]">
       {/* HEADER - Consistent with Dark Slate Blue */}
-      <header className="shadow-lg border-b-2 border-[#FFD100]/30 bg-[#2F3E46] z-20">
-        <div className="flex items-center justify-between gap-3 px-4 py-3 sm:px-6">
+      {/*
+        The header is sticky below `lg` because on a phone the menu button is
+        the only way to reach another module; leaving it to scroll away meant
+        scrolling back to the top of a long record to navigate. From `lg` up the
+        sidebar is always on screen, so the header does not need to follow.
+      */}
+      <header className="sticky top-0 z-20 border-b-2 border-[#FFD100]/30 bg-[#2F3E46] shadow-lg lg:static">
+        <div className="flex items-center justify-between gap-3 px-4 py-2.5 sm:px-6 sm:py-3">
           <div className="flex min-w-0 items-center gap-3 sm:gap-4">
             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-gray-100 bg-white p-1.5 shadow-inner">
               <img src={systemLogo} alt="SCH Logo" className="h-full w-full object-contain" />
@@ -191,7 +248,23 @@ export function Layout({ children }: LayoutProps) {
         </div>
       </header>
 
-      <div className="flex flex-1 min-h-0 overflow-hidden">
+      {/*
+        Below `lg` this is the page: the document scrolls normally, so the
+        browser's own chrome (address bar collapsing, pull-to-refresh,
+        rubber-banding, the on-screen keyboard keeping the focused field in
+        view) behaves the way it does on every other phone site.
+
+        Scrolling a nested `overflow-auto` box instead is what caused the
+        problems: entering a field near the bottom of a long form zoomed the
+        keyboard over it without scrolling, the address bar never collapsed, and
+        pull-to-refresh did nothing because the gesture was consumed by the
+        inner box.
+
+        From `lg` up the two-column shell is restored — the sidebar is a fixed
+        rail and the content pane scrolls independently of it, which is the
+        desktop behaviour this system already had.
+      */}
+      <div className="flex min-h-0 flex-1 flex-col lg:h-[calc(100vh-4.75rem)] lg:flex-row lg:overflow-hidden">
         {/* SIDEBAR */}
         <aside className="hidden lg:block w-64 shadow-2xl z-10 bg-[#2F3E46] border-r border-white/5 overflow-y-auto">
           <nav className="p-4 space-y-1.5">
@@ -254,8 +327,14 @@ export function Layout({ children }: LayoutProps) {
         )}
 
         {/* MAIN CONTENT AREA */}
-        <main className="flex-1 p-5 lg:p-8 bg-[#F0F2F5] overflow-auto text-[#2F3E46]">
-          <div className="max-w-7xl mx-auto">
+        <main className="flex-1 p-4 sm:p-5 lg:overflow-auto lg:p-8 bg-[#F0F2F5] text-[#2F3E46]">
+          {/*
+            `min-w-0` matters here: without it a wide table inside a flex child
+            refuses to shrink and pushes the whole page into horizontal
+            overflow, which is the usual cause of a page that can be dragged
+            sideways on a phone.
+          */}
+          <div className="mx-auto min-w-0 max-w-7xl">
             {children}
           </div>
         </main>

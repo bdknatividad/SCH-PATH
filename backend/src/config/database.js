@@ -11,6 +11,27 @@ require('dotenv').config();
  * Database connection pool configuration
  * @type {Object}
  */
+/**
+ * Pool size.
+ *
+ * The limit is the real ceiling on how many requests can touch the database
+ * concurrently: past it, callers wait in the queue rather than failing
+ * (`queueLimit: 0` means the queue is unbounded), so the symptom of a pool that
+ * is too small is latency, not errors — which is why it is worth raising before
+ * it is noticed.
+ *
+ * It has to stay *below* the provider's own connection cap. Managed MySQL plans
+ * commonly allow a few dozen connections; exceeding that gets the client
+ * refused with `ER_CON_COUNT_ERROR` ("Too many connections"), which is a hard
+ * failure for every user at once. So this is deliberately tunable rather than
+ * guessed at: set `DB_POOL_LIMIT` to something like half the plan's allowance,
+ * leaving headroom for the migrations, the cron jobs and any admin session.
+ */
+const parsedPoolLimit = Number(process.env.DB_POOL_LIMIT);
+const POOL_LIMIT = Number.isFinite(parsedPoolLimit) && parsedPoolLimit > 0
+  ? Math.min(Math.floor(parsedPoolLimit), 200)
+  : 20;
+
 const dbConfig = {
   host: process.env.DB_HOST || 'localhost',
   port: Number(process.env.DB_PORT || 3306),
@@ -18,7 +39,9 @@ const dbConfig = {
   password: process.env.DB_PASSWORD || '',
   database: process.env.DB_NAME || 'sch_path_db',
   waitForConnections: true,
-  connectionLimit: 10,
+  connectionLimit: POOL_LIMIT,
+  // Unbounded queue: a burst is absorbed and served as connections free up. A
+  // bounded queue would reject the overflow with an opaque error instead.
   queueLimit: 0,
   enableKeepAlive: true,
   keepAliveInitialDelay: 0,

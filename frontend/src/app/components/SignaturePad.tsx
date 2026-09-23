@@ -289,8 +289,22 @@ export function SignaturePad({
         aria-label={label}
         role="img"
         className={canvasClass}
-        style={compact ? undefined : { height }}
+        /*
+          On a phone a 1000x300 backing store scaled to the viewport width
+          collapses to a strip roughly 90px tall, which is not enough room to
+          write a signature legibly — the drawn stroke ends up thicker than the
+          space between the lines of the form. Give the canvas an aspect-ratio
+          box instead of a fixed height: it stays 3:1 where there is width for
+          it, and grows taller in portrait where the width is scarce. The
+          backing store is untouched, so the emitted PNG is identical.
+        */
+        style={
+          compact
+            ? undefined
+            : { height, aspectRatio: `${width} / ${Math.max(height, 220)}`, maxHeight: '60vh' }
+        }
       />
+
 
       {compact && hint && !hasContent && !disabled && (
         <span className="pointer-events-none absolute inset-0 flex items-center justify-center text-[9px] font-semibold text-gray-400">

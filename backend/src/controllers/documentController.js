@@ -137,6 +137,46 @@ function documentOwnerMatchesUser(document, user) {
 }
 
 /**
+ * Refuses to change a document that belongs to a closed admission.
+ *
+ * A discharge ends an admission: its files stay exactly as they were and become
+ * the historical record of that stay. Letting one be edited, approved or deleted
+ * afterwards would rewrite history — and, because the folder view groups by
+ * admission, would let a resident's second stay alter what the first one says
+ * about them.
+ *
+ * Enforced here rather than only in the UI because the folder view is a
+ * convenience, not a control: hiding a delete button does nothing to the API
+ * call behind it.
+ *
+ * A document with no admission link (written before the column existed, or
+ * filed against a resident who has none on record) is not restricted — there is
+ * no admission to have closed, and refusing it would lock legacy rows forever.
+ *
+ * @param {{admissionId?: string|null}} document
+ * @param {string} action what the caller was trying to do, for the message
+ */
+async function assertAdmissionOpen(document, action) {
+  const admissionId = String(document?.admissionId || '').trim();
+  if (!admissionId) return;
+
+  const [rows] = await pool.query(
+    'SELECT status, admissionNumber FROM admissions WHERE id = ? LIMIT 1',
+    [admissionId]
+  );
+  const admission = rows[0];
+  if (!admission) return;
+  if (String(admission.status) === 'Active') return;
+
+  const ordinal = Number(admission.admissionNumber) || 1;
+  throw new ApiError(
+    409,
+    `Admission ${ordinal} has been closed, so its documents can no longer be ${action}. ` +
+      'They are kept as the historical record of that admission.'
+  );
+}
+
+/**
  * Caseload scoping lives in `utils/residentScope` because notifications need the
  * same rule and importing it from here would create a dependency cycle. It is
  * re-exported below so existing callers (routes/index.js, childController,
@@ -726,6 +766,10 @@ async function submit(req, res, next) {
       throw new ApiError(409, `Document cannot be submitted from its current status (${existing.status}).`);
     }
 
+    // A closed admission's files are the historical record of that stay, so a
+    // returned document from it cannot be resubmitted into a review cycle.
+    await assertAdmissionOpen(existing, 'resubmitted');
+
     // A rejection is not an erasure. The previous cycle's rejection reason, the
     // reviewer and the date are all KEPT on the row — they are the document's
     // most recent review outcome and the folder view shows them — while the
@@ -853,6 +897,9 @@ async function approve(req, res, next) {
       throw new ApiError(404, 'Document not found');
     }
 
+    // A closed admission's files are the historical record of that stay.
+    await assertAdmissionOpen(existing[0], 'reviewed');
+
     await pool.query(
       `UPDATE documents 
        SET status = ?, approvedBy = ?, approvedAt = NOW(), modifiedBy = ? 
@@ -912,6 +959,9 @@ async function reject(req, res, next) {
     if (existing.length === 0) {
       throw new ApiError(404, 'Document not found');
     }
+
+    // A closed admission's files are the historical record of that stay.
+    await assertAdmissionOpen(existing[0], 'reviewed');
 
     // `rejectedBy`/`rejectedAt` are the explicit decision fields the folder view
     // reads; `reviewedBy`/`reviewedAt` are kept in step for the older readers.
@@ -1069,6 +1119,9 @@ async function update(req, res, next) {
     const [beforeRows] = await pool.query('SELECT * FROM documents WHERE id = ? LIMIT 1', [req.params.id]);
     if (!beforeRows.length) throw new ApiError(404, 'Document not found');
     const before = beforeRows[0];
+
+    // A closed admission's files are the historical record of that stay.
+    await assertAdmissionOpen(before, 'edited');
 
     // A document's admission is permanent. It records where the file was produced,
     // and a file produced during an earlier admission has to stay in that
@@ -1356,6 +1409,10 @@ async function remove(req, res, next) {
     const document = rows[0];
     const role = normalizeRole(req.user?.role);
     const isPrivileged = DOCUMENT_DELETE_ROLES.includes(role);
+
+    // A closed admission's files are the historical record of that stay, so
+    // not even a privileged role may remove one.
+    await assertAdmissionOpen(document, 'deleted');
 
     // A rejected document is the evidence for the correction it asks for: the
     // reviewer's note, the version that was rejected, and the resubmission that

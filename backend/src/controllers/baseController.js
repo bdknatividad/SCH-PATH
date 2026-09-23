@@ -182,12 +182,42 @@ function createController(resource) {
           throw new ApiError(404, `${resourceKey} not found`);
         }
 
+        // ── Lost-update protection ──────────────────────────────────────────
+        //
+        // Two people editing the same record used to be a silent last-write-
+        // wins: whoever saved second overwrote the first person's change with
+        // no warning. Several callers also send *partial* payloads (a note, a
+        // checklist, a status), so the second save clobbered fields it never
+        // intended to touch.
+        //
+        // The client holds the `updatedAt` it rendered from, and `updatedAt` is
+        // maintained by MySQL (`ON UPDATE CURRENT_TIMESTAMP`), so comparing the
+        // two is a reliable staleness test. A caller that omits `updatedAt` is
+        // unchanged in behaviour — this is opt-in, so no existing client breaks.
+        const expectedUpdatedAt = data.updatedAt;
+        const currentUpdatedAt = existing[0].updatedAt;
+        if (expectedUpdatedAt !== undefined && expectedUpdatedAt !== null && currentUpdatedAt) {
+          const expected = new Date(expectedUpdatedAt).getTime();
+          const actual = new Date(currentUpdatedAt).getTime();
+          // Only refuse when the stored row is genuinely newer. Unparseable
+          // input is ignored rather than rejected, so a client sending a
+          // non-date (or a locale string) cannot lock itself out of updating.
+          if (Number.isFinite(expected) && Number.isFinite(actual) && actual > expected) {
+            const actor = existing[0].modifiedBy || existing[0].createdBy || 'another user';
+            throw new ApiError(
+              409,
+              `This ${resourceKey} was changed by ${actor} after you opened it. Reload it to see the current version, then reapply your edit.`,
+            );
+          }
+        }
+
         // Build update query
         const updates = [];
         const values = [];
 
         for (const col of config.columns) {
-          if (col !== 'id' && col !== 'createdAt' && data[col] !== undefined) {
+          // `updatedAt` is database-maintained; never write it from a body.
+          if (col !== 'id' && col !== 'createdAt' && col !== 'updatedAt' && data[col] !== undefined) {
             updates.push(`${col} = ?`);
             // Handle JSON fields
             if (config.jsonFields.includes(col) && typeof data[col] === 'object') {

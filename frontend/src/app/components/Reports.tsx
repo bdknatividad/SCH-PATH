@@ -100,6 +100,14 @@ function DSWDReportGenerator({ type }: { type: 'daily' | 'quarterly' }) {
                 .summary-card.highlight .number { color: #ffd700; }
                 .summary-card.highlight .label { color: #cbd5e1; }
                 table { width: 100%; border-collapse: collapse; font-size: 11px; margin-top: 10px; }
+                /* A tablet in portrait is narrower than the widest of these
+                   tables, and a phone is narrower than all of them. Wrapping
+                   lets the table scroll sideways instead of either squashing
+                   every column to one word per line or pushing the page into
+                   horizontal overflow. The max-width keeps the wrapper from
+                   itself being widened by the table's intrinsic width. */
+                .table-scroll { width: 100%; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+                .table-scroll table { min-width: 520px; }
                 th { background: #1e3a5f; color: white; padding: 10px 8px; text-align: left; font-weight: 600; border: 1px solid #1e3a5f; }
                 td { padding: 8px; border: 1px solid #e2e8f0; vertical-align: top; }
                 tr:nth-child(even) { background: #f8fafc; }
@@ -119,9 +127,41 @@ function DSWDReportGenerator({ type }: { type: 'daily' | 'quarterly' }) {
                 .no-print { background: #1e3a5f; color: white; padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; }
                 .no-print button { background: #ffd700; color: #1e3a5f; border: none; padding: 8px 20px; border-radius: 4px; font-weight: bold; cursor: pointer; margin-left: 10px; }
                 .no-print button:hover { background: #f5c700; }
+                /*
+                  These reports open in a popup, so the viewport is the popup's,
+                  not the app's — on a phone that is the full screen width. The
+                  breakpoints below keep the summary readable as a 2-up or 1-up
+                  grid and pull in the padding, rather than letting four
+                  summary cards share ~360px and wrap their labels to shreds.
+                  Print output is unaffected: the print media query restores the
+                  4-up grid, so the saved PDF is identical to before.
+                */
+                @media (max-width: 700px) {
+                  .content { padding: 12px; }
+                  .header { padding: 14px 12px; }
+                  .summary-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+                  .summary-card { padding: 12px 8px; }
+                  .signature-area { gap: 24px; }
+                  .no-print { flex-wrap: wrap; gap: 8px; padding: 12px; }
+                  .no-print button { margin-left: 0; }
+                }
+                @media (max-width: 420px) {
+                  .summary-grid { grid-template-columns: 1fr; }
+                  .table-scroll table { min-width: 440px; }
+                }
                 @media print { 
                   .no-print { display: none !important; } 
                   body { padding: 0; }
+                  /* The scaled-down grids are a screen affordance; the paper
+                     report keeps the four-card summary and the two-column
+                     signature block it has always had. */
+                  .summary-grid { grid-template-columns: repeat(4, 1fr) !important; gap: 15px !important; }
+                  .signature-area { gap: 60px !important; }
+                  .content { padding: 20px !important; }
+                  .header { padding: 20px !important; }
+                  /* Paper cannot scroll. Let wide tables shrink normally. */
+                  .table-scroll { overflow: visible !important; }
+                  .table-scroll table { min-width: 0 !important; }
                 }
               </style>
             </head>
@@ -177,6 +217,7 @@ function DSWDReportGenerator({ type }: { type: 'daily' | 'quarterly' }) {
                 ${summary.newAdmissions !== undefined ? `
                 <div class="section">
                   <div class="section-title">RESIDENT DEMOGRAPHICS</div>
+                  <div class="table-scroll">
                   <table>
                     <tr>
                       <th>Category</th>
@@ -199,12 +240,14 @@ function DSWDReportGenerator({ type }: { type: 'daily' | 'quarterly' }) {
                       <td>Ready for reintegration</td>
                     </tr>
                   </table>
+                  </div>
                 </div>
                 ` : ''}
 
                 ${summary.violations ? `
                 <div class="section">
                   <div class="section-title">VIOLATION SUMMARY</div>
+                  <div class="table-scroll">
                   <table>
                     <tr>
                       <th>Metric</th>
@@ -221,12 +264,14 @@ function DSWDReportGenerator({ type }: { type: 'daily' | 'quarterly' }) {
                       <td>${summary.violations.resolved || 0}</td>
                     </tr>
                   </table>
+                  </div>
                 </div>
                 ` : ''}
 
                 ${summary.assessments && typeof summary.assessments === 'object' ? `
                 <div class="section">
                   <div class="section-title">ASSESSMENT SUMMARY</div>
+                  <div class="table-scroll">
                   <table>
                     <tr>
                       <th>Metric</th>
@@ -243,12 +288,14 @@ function DSWDReportGenerator({ type }: { type: 'daily' | 'quarterly' }) {
                       <td>${summary.assessments.completed || 0}</td>
                     </tr>
                   </table>
+                  </div>
                 </div>
                 ` : ''}
 
                 ${summary.phaseDistribution && summary.phaseDistribution.length > 0 ? `
                 <div class="section">
                   <div class="section-title">PHASE DISTRIBUTION</div>
+                  <div class="table-scroll">
                   <table>
                     <tr>
                       <th>Phase</th>
@@ -263,6 +310,7 @@ function DSWDReportGenerator({ type }: { type: 'daily' | 'quarterly' }) {
                     </tr>
                     `).join('')}
                   </table>
+                  </div>
                 </div>
                 ` : ''}
 
