@@ -498,6 +498,14 @@ async function getFile(req, res, next) {
 async function getById(req, res, next) {
   try {
     const document = await getReadableDocument(req.params.id, req.user);
+    // Unlike the three list endpoints — which all strip the base64 payload
+    // before responding — this returns the raw row, because
+    // `IncidentReportModal` reads `data.fileData` to open a Form 08 PDF and
+    // `DocumentUpload` uses it as its legacy fallback. That makes the payload
+    // part of the contract here, so it must not be cached: `getFile` already
+    // sets `private, no-store` for the same bytes, and a browser or intermediary
+    // holding a case document in its cache outlives the session that fetched it.
+    res.setHeader('Cache-Control', 'private, no-store');
     res.json({ success: true, data: document });
   } catch (error) {
     next(error);
