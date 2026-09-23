@@ -1874,7 +1874,14 @@ export function Dashboard() {
               { label: 'Very Good', count: veryGoodCount, bg: 'bg-green-100', text: 'text-green-700', bar: 'bg-green-500' },
             ].map(u => (
               <div key={u.label} className="flex items-center gap-3">
-                <span className={`text-xs font-semibold w-16 ${u.text}`}>{u.label}</span>
+                {/* `w-16` (64px) could not hold "Need Improvement" at 12px, and
+                    a flex item shrinks below its own width, so the column
+                    measured 56px on a phone — narrower than the word
+                    "Improvement". It broke mid-word across three lines. A fixed
+                    width is still wanted so the bars line up, but it has to fit
+                    the longest label, and `whitespace-nowrap` stops the break
+                    regardless of what the metrics do. */}
+                <span className={`shrink-0 whitespace-nowrap text-xs font-semibold w-28 ${u.text}`}>{u.label}</span>
                 <div className="flex-1 h-5 bg-gray-100 rounded-full overflow-hidden">
                   <div
                     className={`h-full ${u.bar} rounded-full transition-all`}
@@ -1952,7 +1959,13 @@ export function Dashboard() {
                   </div>
                   <details>
                     <summary className="text-xs text-gray-500 hover:text-[#2F3E46] cursor-pointer select-none">Show resident breakdown</summary>
-                    <table className="w-full text-xs mt-2">
+                    {/* Six columns do not fit a phone. Without a scroll box the
+                        browser compresses them instead — "Case Type" was given
+                        32px at 320px and broke mid-word over four lines. Same
+                        fix as the Violations list: scroll the table inside its
+                        own box rather than squeezing it. */}
+                    <div className="overflow-x-auto">
+                    <table className="w-full min-w-[560px] text-xs mt-2">
                       <thead><tr className="text-gray-400 uppercase border-b border-gray-100">
                         <th className="text-left pb-1 pr-3">Resident</th><th className="text-left pb-1 pr-3">Case Type</th>
                         <th className="text-left pb-1 pr-3">Phase</th><th className="text-left pb-1 pr-3">Rating</th>
@@ -1984,6 +1997,7 @@ export function Dashboard() {
                         ))}
                       </tbody>
                     </table>
+                    </div>
                   </details>
                 </>
             }
