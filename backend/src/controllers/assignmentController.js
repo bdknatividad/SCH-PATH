@@ -1,5 +1,5 @@
 const { pool } = require('../config/database');
-const { insertWithGeneratedId } = require('../utils/helpers');
+const { insertWithGeneratedId, toMysqlDateTime } = require('../utils/helpers');
 const { ApiError } = require('../middleware/errorHandler');
 const { normalizeRole, isManager } = require('../utils/authorization');
 const notifications = require('../services/notificationService');
@@ -149,7 +149,18 @@ async function create(req, res, next) {
   try {
     if (!canManage(req.user)) throw new ApiError(403, 'Only Center Head or Social Worker can manage assignments');
     const { residentId } = req.params;
-    const { staffId, userId, assignmentType, startAt, endAt, notes, source } = req.body || {};
+    // `startAt` and `endAt` arrive as ISO 8601 from the browser
+    // (`new Date().toISOString()`), which MySQL rejects for a DATETIME column
+    // under its default strict sql_mode: "Incorrect datetime value:
+    // '2026-09-23T07:04:37.531Z' for column 'startAt' at row 1". Coerce before
+    // the comparison below so both the ordering check and the INSERT see the
+    // same, MySQL-accepted, value.
+    const {
+      staffId, userId, assignmentType, notes, source,
+      startAt: rawStartAt, endAt: rawEndAt,
+    } = req.body || {};
+    const startAt = toMysqlDateTime(rawStartAt);
+    const endAt = toMysqlDateTime(rawEndAt);
     if (!assignmentType || !startAt) throw new ApiError(400, 'assignmentType and startAt are required');
     if (!staffId && !userId) throw new ApiError(400, 'staffId or userId is required');
     if (endAt && new Date(endAt) < new Date(startAt)) throw new ApiError(400, 'endAt cannot be before startAt');

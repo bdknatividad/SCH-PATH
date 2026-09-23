@@ -175,7 +175,7 @@ async function create(req, res, next) {
     // A locking read cannot be used: this transaction already holds a `children`
     // row lock, so locking the whole id range would deadlock against a
     // concurrent admission (see runInTransactionWithIdRetry).
-    const { residentId, admissionId } = await runInTransactionWithIdRetry(pool, async (connection) => {
+    const { residentId, admissionId, admissionNumber } = await runInTransactionWithIdRetry(pool, async (connection) => {
 
       let residentId = body.residentId || null;
       let existingResident = null;
@@ -608,7 +608,7 @@ async function create(req, res, next) {
         [admissionId, residentId]
       );
 
-      return { residentId, admissionId };
+      return { residentId, admissionId, admissionNumber };
     });
 
     const [residentRows] = await pool.query(

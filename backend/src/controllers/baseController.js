@@ -6,7 +6,7 @@
 
 const { pool } = require('../config/database');
 const { RESOURCES } = require('../utils/constants');
-const { insertWithGeneratedId, mapRow, buildWhereClause, getCurrentTimestamp } = require('../utils/helpers');
+const { insertWithGeneratedId, mapRow, buildWhereClause, getCurrentTimestamp, normalizeDatetimes } = require('../utils/helpers');
 const { ApiError } = require('../middleware/errorHandler');
 
 /**
@@ -114,7 +114,12 @@ function createController(resource) {
      */
     async create(req, res, next) {
       try {
-        const data = req.body || {};
+        // Every `*At` / `*DateTime` field is coerced before it can be bound.
+        // The client sends ISO 8601 (`2026-09-23T07:04:36.462Z`), which MySQL
+        // rejects for a DATETIME column under its default strict sql_mode.
+        // Normalizing here covers all resources at once rather than trusting
+        // each of the frontend's `new Date().toISOString()` sites.
+        const data = normalizeDatetimes(req.body || {});
 
         // Build the non-id columns once. The id is chosen per attempt below.
         const columns = ['id'];
@@ -174,7 +179,9 @@ function createController(resource) {
     async update(req, res, next) {
       try {
         const { id } = req.params;
-        const data = req.body || {};
+        // Same coercion as create(): an ISO 8601 timestamp in a partial update
+        // would otherwise be rejected by MySQL on the way in.
+        const data = normalizeDatetimes(req.body || {});
 
         // Check if record exists
         const [existing] = await pool.query(`SELECT * FROM \`${tableName}\` WHERE id = ?`, [id]);

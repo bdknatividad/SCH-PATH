@@ -312,11 +312,122 @@ function normalizeAge(value, birthDate) {
   return Number.isFinite(derived) && derived > 0 ? derived : null;
 }
 
+/**
+ * Coerces a client-supplied timestamp into a value MySQL will accept.
+ *
+ * The browser sends `new Date().toISOString()`: `2026-09-23T07:04:36.462Z`.
+ * That is valid ISO 8601 but is NOT a format MySQL accepts for DATETIME,
+ * TIMESTAMP or DATE. MySQL 8+ (and 9.x) run with a strict `sql_mode` by
+ * default, so the statement is rejected outright:
+ *
+ *   Incorrect datetime value: '2026-09-23T07:04:36.462Z' for column
+ *   'uploadedAt' at row 1
+ *
+ * The `T` separator and the trailing `Z` are both rejected; a datetime column
+ * wants `YYYY-MM-DD HH:MM:SS`.
+ *
+ * This is fixed on the server rather than in each caller because the client is
+ * not a trustworthy source of formatting: there are dozens of
+ * `uploadedAt: new Date().toISOString()` sites across the frontend, and any new
+ * one would reintroduce the bug. Normalizing as the value is bound means every
+ * write path is covered at once — the generic controllers, the document
+ * controller and the assignment controller alike.
+ *
+ * What it accepts and returns:
+ *   - `Date`            -> `YYYY-MM-DD HH:MM:SS`
+ *   - ISO 8601 string   -> `YYYY-MM-DD HH:MM:SS` (`.000Z` offset applied)
+ *   - `YYYY-MM-DD`      -> unchanged (a DATE column, not a datetime)
+ *   - `YYYY-MM-DD HH:MM(:SS)` -> unchanged
+ *   - null / undefined  -> unchanged (nullable columns)
+ *   - anything unparseable -> unchanged, so MySQL reports the real problem
+ *     rather than this helper silently writing a wrong value
+ *
+ * Only the *local* wall-clock is written, which is what the application reads
+ * back: `dateStrings: true` is set on the pool, so a DATETIME is returned to
+ * the client as the same string that was stored. Converting to UTC here would
+ * shift every timestamp by the offset and make stored and displayed times
+ * disagree.
+ *
+ * @param {*} value - The value about to be bound to a query parameter
+ * @returns {*} A MySQL-compatible datetime string, or the original value
+ */
+function toMysqlDateTime(value) {
+  if (value === null || value === undefined) return value;
+
+  // Already a Date object — the driver would otherwise send it as a JS Date
+  // and rely on its own (locale-dependent) conversion.
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? value : formatMysqlDateTime(value);
+  }
+
+  if (typeof value !== 'string') return value;
+
+  const trimmed = value.trim();
+  if (!trimmed) return trimmed;
+
+  // Already in a MySQL-accepted shape. `YYYY-MM-DD`, `YYYY-MM-DD HH:MM` and
+  // `YYYY-MM-DD HH:MM:SS` all pass through untouched, as does a fractional
+  // seconds part, which MySQL also accepts.
+  if (/^\d{4}-\d{2}-\d{2}( \d{2}:\d{2}(:\d{2}(\.\d+)?)?)?$/.test(trimmed)) {
+    return trimmed;
+  }
+
+  // Anything else that carries a real date — the ISO 8601 form the browser
+  // sends, but also RFC 2822 and the other formats `Date` understands.
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) return value;
+
+  return formatMysqlDateTime(parsed);
+}
+
+/** Renders a Date as MySQL's `YYYY-MM-DD HH:MM:SS`, in local time. */
+function formatMysqlDateTime(date) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return (
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ` +
+    `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+  );
+}
+
+/**
+ * The columns in `RESOURCES[*].columns` that hold a point in time.
+ *
+ * Used to decide which request fields are worth normalizing. Naming them by
+ * suffix rather than listing every one of the several hundred columns keeps
+ * this correct as the schema grows: an `At` suffix is already the convention
+ * for an instant (`uploadedAt`, `startAt`, `reviewedAt`, `approvedAt`),
+ * whereas `Date` is ambiguous — `admissionDate` and `expiryDate` are DATE
+ * columns, and a datetime helper must not touch them.
+ */
+const DATETIME_COLUMN_PATTERN = /(At|DateTime|Timestamp)$/;
+
+/**
+ * Normalizes every `*At` / `*DateTime` / `*Timestamp` field in a request body
+ * so no controller can bind an unparseable datetime.
+ *
+ * Returns a shallow copy; the caller's object is not mutated, because these
+ * bodies are logged on error and a mutated one would not show what arrived.
+ *
+ * @param {Object} data - A request body
+ * @returns {Object} A copy with datetime-looking fields coerced
+ */
+function normalizeDatetimes(data) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return data;
+
+  const out = {};
+  for (const [key, value] of Object.entries(data)) {
+    out[key] = DATETIME_COLUMN_PATTERN.test(key) ? toMysqlDateTime(value) : value;
+  }
+  return out;
+}
+
 module.exports = {
   generateId,
   insertWithGeneratedId,
   runInTransactionWithIdRetry,
   normalizeAge,
+  toMysqlDateTime,
+  normalizeDatetimes,
   mapRow,
   buildWhereClause,
   getCurrentTimestamp,

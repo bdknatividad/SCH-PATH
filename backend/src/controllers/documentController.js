@@ -6,7 +6,7 @@
 
 const { pool } = require('../config/database');
 const { createController } = require('./baseController');
-const { insertWithGeneratedId, mapRow } = require('../utils/helpers');
+const { insertWithGeneratedId, mapRow, normalizeDatetimes } = require('../utils/helpers');
 const { ApiError } = require('../middleware/errorHandler');
 const { canAccessResident } = require('./assignmentController');
 const { DOCUMENT_ROLE_PERMISSIONS, PHASE_REQUIREMENTS, CASE_PHASES, RESOURCES } = require('../utils/constants');
@@ -510,7 +510,12 @@ async function getById(req, res, next) {
  */
 async function create(req, res, next) {
   try {
-    const data = req.body || {};
+    // `uploadedAt` / `submittedAt` / `approvedAt` arrive from the browser as
+    // ISO 8601, which MySQL rejects for a DATETIME column under its default
+    // strict sql_mode: "Incorrect datetime value: '2026-09-23T07:04:36.462Z'
+    // for column 'uploadedAt' at row 1". This controller binds the body
+    // directly, so it needs the same coercion the generic one applies.
+    const data = normalizeDatetimes(req.body || {});
     const uploaderRole = normalizeRole(req.user?.role || data.uploaderRole);
     const docTitle = data.title || '';
     const docPhase = data.phase || '';
