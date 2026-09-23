@@ -227,18 +227,41 @@ export function Layout({ children }: LayoutProps) {
             </div>
           </div>
 
-          <div className="flex shrink-0 items-center gap-4">
-            <button onClick={() => setMobileMenuOpen(!mobileMenuOpen)} className="lg:hidden p-2 text-white">
+          {/*
+            Notifications and the menu toggle sit together in the top-right on
+            every screen size.
+
+            The bell used to live inside `hidden lg:flex`, so on a phone it only
+            existed inside the slide-out drawer — you had to open the menu to
+            discover anything had arrived, and the unread count was invisible
+            until you did. It is now a permanent header control, which is where
+            a notification indicator is expected to be and the only place it
+            can be seen without navigating.
+
+            Order is deliberate: the bell first, then the menu button, so the
+            bell keeps the far-right corner (the conventional position) and the
+            menu toggle sits beside it on small screens.
+          */}
+          <div className="flex shrink-0 items-center gap-1 sm:gap-2 lg:gap-4">
+            <Notifications />
+
+            <button
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              aria-label={mobileMenuOpen ? 'Close menu' : 'Open menu'}
+              aria-expanded={mobileMenuOpen}
+              className="rounded-lg p-2 text-white transition-colors hover:bg-white/10 lg:hidden"
+            >
               {mobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
             </button>
 
-            <div className="hidden lg:flex items-center gap-3">
-              <Notifications />
-              <span className="text-white/60 text-xs font-medium italic mr-2">Welcome, {user?.username}</span>
+            <div className="hidden items-center gap-3 lg:flex">
+              <span className="mr-2 text-xs font-medium italic text-white/60">
+                Welcome, {user?.username}
+              </span>
               <Button
                 onClick={handleLogout}
                 variant="ghost"
-                className="flex items-center gap-2 bg-[#FFD100] text-[#2F3E46] hover:bg-[#E6BC00] font-bold px-5 rounded-lg shadow-sm transition-all"
+                className="flex items-center gap-2 rounded-lg bg-[#FFD100] px-5 font-bold text-[#2F3E46] shadow-sm transition-all hover:bg-[#E6BC00]"
               >
                 <LogOut className="w-4 h-4" />
                 <span>Logout</span>
@@ -302,13 +325,14 @@ export function Layout({ children }: LayoutProps) {
               </nav>
 
               {/*
-                Welcome/Notifications/Logout lived in a `hidden lg:flex` block,
-                which left phones with no way to log out or read notifications.
+                Welcome and Logout only. The notification bell used to be here
+                too, which meant two bells on a phone — one in the drawer and
+                none in the header. The header now owns it on every screen size,
+                so the drawer does not need its own copy.
               */}
               <div className="mt-auto space-y-3 border-t border-white/10 pt-4">
                 <div className="flex items-center justify-between gap-2">
                   <span className="truncate text-xs italic text-white/60">Welcome, {user?.username}</span>
-                  <Notifications />
                 </div>
                 <Button
                   onClick={() => {

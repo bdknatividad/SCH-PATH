@@ -270,19 +270,26 @@ export function Notifications() {
 
   return (
     <div className="relative">
+      {/*
+        The bell sits on the dark `#2F3E46` header, so it is drawn in white with
+        a hover wash instead of the old `text-gray-600` — dark grey on dark slate
+        was almost invisible, which on a phone made the control look absent.
+        `size-10` rather than the default `size-9` gives a touch target that is
+        comfortable to hit with a thumb.
+      */}
       <Button
         variant="ghost"
         size="icon"
-        className="relative"
+        className="relative size-10 rounded-lg text-white hover:bg-white/10 hover:text-white"
         data-testid="notification-bell"
         aria-label={`Notifications${roleUnreadCount > 0 ? ` (${roleUnreadCount} unread)` : ''}`}
         onClick={() => setIsOpen(!isOpen)}
       >
-        <Bell className="w-5 h-5 text-gray-600" />
+        <Bell className="h-5 w-5" />
         {roleUnreadCount > 0 && (
           <span
             data-testid="notification-badge"
-            className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center animate-pulse"
+            className="absolute -top-0.5 -right-0.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[11px] font-bold leading-none text-white ring-2 ring-[#2F3E46]"
           >
             {roleUnreadCount > 9 ? '9+' : roleUnreadCount}
           </span>
@@ -292,16 +299,27 @@ export function Notifications() {
       {isOpen && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)} />
+          {/*
+            The panel is anchored to the viewport on phones and to the button
+            from `sm` up.
+
+            `w-96` is 384px, which is wider than the viewport of a 360px Android
+            phone, and `absolute right-0` pinned the panel's right edge to the
+            bell's — so on a narrow screen the left portion (title, filter
+            toggle) was pushed off-screen and unreachable. `fixed` positioning
+            with explicit insets keeps the whole panel on screen; the `sm:`
+            variants restore the desktop popover behaviour unchanged.
+          */}
           <div
             data-testid="notification-panel"
-            className="absolute right-0 top-full mt-2 w-96 bg-white rounded-lg shadow-xl border z-50 max-h-[500px] overflow-hidden"
+            className="fixed inset-x-3 top-[4.5rem] z-50 overflow-hidden rounded-lg border bg-white shadow-xl sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 sm:w-96"
           >
-            <div className="flex items-center justify-between p-4 border-b bg-gray-50">
-              <h3 className="font-semibold text-gray-800">Notifications</h3>
-              <div className="flex items-center gap-2">
+            <div className="flex items-center justify-between gap-2 border-b bg-gray-50 p-3 sm:p-4">
+              <h3 className="truncate font-semibold text-gray-800">Notifications</h3>
+              <div className="flex shrink-0 items-center gap-2">
                 <button
                   onClick={() => setFilter(filter === 'all' ? 'unread' : 'all')}
-                  className="text-xs text-blue-600 hover:text-blue-800"
+                  className="whitespace-nowrap text-xs text-blue-600 hover:text-blue-800"
                 >
                   {filter === 'all' ? 'Show Unread' : 'Show All'}
                 </button>
@@ -317,7 +335,15 @@ export function Notifications() {
               </div>
             )}
 
-            <div className="overflow-y-auto max-h-[400px]">
+            {/*
+              A fixed 400px list plus the header and footer can exceed the
+              viewport on a short phone in landscape, which would push the
+              "Mark all as read" control out of reach. The list is capped
+              against the viewport with `dvh` (which accounts for the mobile
+              browser's collapsing chrome, unlike `vh`) and falls back to the
+              old fixed cap from `sm` up.
+            */}
+            <div className="max-h-[calc(100dvh-11rem)] overflow-y-auto sm:max-h-[400px]">
               {isLoading ? (
                 <div className="p-8 text-center text-gray-500">Loading notifications...</div>
               ) : error && alerts.length === 0 ? (
