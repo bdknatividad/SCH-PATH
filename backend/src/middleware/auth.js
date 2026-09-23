@@ -11,10 +11,60 @@ const { normalizeRole } = require('../utils/authorization');
 const { buildAccessSnapshot, isFullAccessRole } = require('../config/rbac');
 
 /**
- * JWT secret from environment
+ * JWT secret from environment.
+ *
+ * The fallback below exists so a developer can clone and run without ceremony.
+ * It must never reach production: it is a constant, it is in the repository, and
+ * anyone holding it can mint a token for any account — including the Center
+ * Head. `railway.toml` does not declare `JWT_SECRET`, so it lives only in the
+ * hosting dashboard, which means a fresh deployment from this repository would
+ * otherwise boot with the built-in value and no indication anything was wrong.
+ *
+ * So production refuses to start without it. A boot failure that names the
+ * missing variable is a far better outcome than a service that looks healthy
+ * while accepting forged credentials.
+ *
+ * Verified on the deployed API: a token signed with the fallback value is
+ * rejected (401), as is one signed with an empty or whitespace secret — so the
+ * live secret is a real one and this guard does not fire there.
+ *
  * @constant {string}
  */
-const JWT_SECRET = process.env.JWT_SECRET || 'your_jwt_secret_key_change_this_in_production';
+const JWT_SECRET = (() => {
+  const fromEnv = typeof process.env.JWT_SECRET === 'string' ? process.env.JWT_SECRET.trim() : '';
+
+  if (fromEnv) {
+    if (fromEnv.length < 32) {
+      console.warn(
+        `[auth] JWT_SECRET is only ${fromEnv.length} characters. Use at least 32 — a short secret is brute-forceable offline.`,
+      );
+    }
+    return fromEnv;
+  }
+
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'JWT_SECRET is not set. Refusing to start in production with the built-in development secret: ' +
+        'every token, including a Center Head token, would be forgeable by anyone who has read this repository. ' +
+        'Set JWT_SECRET in the deployment environment.',
+    );
+  }
+
+  return 'your_jwt_secret_key_change_this_in_production';
+})();
+
+/**
+ * Algorithms accepted when verifying a token.
+ *
+ * Pinned rather than inferred. `jwt.verify` without this infers the algorithm
+ * from the key type, which is correct today but makes the accepted set a
+ * property of the library's defaults rather than a decision this codebase made.
+ * Signing is HS256 (the `jsonwebtoken` default), so that is the only value that
+ * can legitimately appear.
+ *
+ * @constant {string[]}
+ */
+const JWT_ALGORITHMS = ['HS256'];
 
 /**
  * JWT expiration time
@@ -103,7 +153,7 @@ async function authenticate(req, res, next) {
     }
 
     // Verify token
-    const decoded = jwt.verify(token, JWT_SECRET);
+    const decoded = jwt.verify(token, JWT_SECRET, { algorithms: JWT_ALGORITHMS });
 
     // Check if user still exists in database
     const rows = await loadAccountForAuth(decoded.id);
@@ -184,7 +234,7 @@ async function optionalAuth(req, res, next) {
     const token = authHeader.substring(7);
     if (!token) return next();
 
-    const decoded = jwt.verify(token, JWT_SECRET);
+    const decoded = jwt.verify(token, JWT_SECRET, { algorithms: JWT_ALGORITHMS });
 
     // Re-read the account instead of trusting the token payload. Otherwise a
     // deactivated user, or a user whose role was changed, keeps the old role

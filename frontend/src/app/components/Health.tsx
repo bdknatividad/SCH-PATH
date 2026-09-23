@@ -452,9 +452,13 @@ export function Health() {
         rows, so there is nothing to de-duplicate.
       */}
       <Card className="border border-gray-200">
-        <CardHeader className="pb-2 flex flex-row items-center justify-between">
+        {/* Stacks on a phone. In a row, the hint text and the title compete for
+            320px and the title loses — "Medical Documents" broke mid-word
+            ("Documen / ts"), which is the same unreadable compression the table
+            fixes removed. Side by side again from `sm` up. */}
+        <CardHeader className="pb-2 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
           <CardTitle className="text-sm font-bold text-slate-700 flex items-center gap-2">
-            <FileText className="w-4 h-4 text-[#2F3E46]" /> Medical Documents
+            <FileText className="w-4 h-4 text-[#2F3E46] shrink-0" /> Medical Documents
             <Badge className="bg-[#2F3E46]/10 text-[#2F3E46]">{medicalDocuments.length}</Badge>
           </CardTitle>
           <p className="text-[11px] text-gray-400">Filed under Documents → Medical Records</p>
