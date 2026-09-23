@@ -21,8 +21,14 @@ services:
     # database, so a slow database does not cause the service to be recycled.
     healthCheckPath: /api/health
     envVars:
-      # Set every one of these in the Render dashboard. `sync: false` marks a
-      # value that must be supplied there and is never read from this file.
+      # Every secret below uses `sync: false`, which tells Render "prompt for
+      # this in the dashboard and never read a value from this file."
+      #
+      # NEVER put a real value here. This file is committed to a public
+      # repository, so any credential written into it is published — and
+      # `sync:` is a boolean, not a value holder: `sync: somepassword` is
+      # invalid YAML for Render and fails the Blueprint with
+      # "A Blueprint file was found, but there was an issue."
       - key: NODE_ENV
         value: production
 
@@ -30,26 +36,31 @@ services:
       # The application uses MySQL-specific SQL, so the server must be
       # MySQL-compatible. A PostgreSQL instance will not work.
       - key: DB_HOST
-        sync: mysql.railway.internal
+        sync: false
       - key: DB_PORT
-        sync: 3306
+        sync: false
       - key: DB_USER
-        sync: root
+        sync: false
       - key: DB_PASSWORD
-        sync: FpftHGNfclDrxpIRFlNLpbeFoqIoLomL
+        sync: false
       - key: DB_NAME
-        sync: railway
+        sync: false
       # Managed MySQL requires TLS. Set to "true" unless your provider says
       # otherwise.
       - key: DB_SSL
-        sync: true
+        sync: false
+      # Ceiling on simultaneous database access. Keep it under the provider
+      # plan's connection allowance; too high returns "Too many connections"
+      # for everyone at once.
+      - key: DB_POOL_LIMIT
+        value: "20"
 
       # ── Authentication ──
       # Generate with:
       #   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
       # The server refuses to start on a missing, short, or placeholder value.
       - key: JWT_SECRET
-        sync: b2fd1b37df26e8e264f02d4863d991b4daa1054276782fa39d87af6f88670cc8
+        sync: false
       - key: JWT_EXPIRE
         value: 24h
 
