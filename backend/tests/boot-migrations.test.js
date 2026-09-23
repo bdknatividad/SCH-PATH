@@ -160,6 +160,93 @@ test('the migrations that add the admission column run before the backfill', () 
 // provisioned Render database, admission records, discharge planning and
 // phase-to-admission linkage were all dead while the deploy reported success.
 
+// ── users / accessRequests ────────────────────────────────────────────────
+//
+// The third and final instance of the same omission, and the one with the worst
+// symptom. `users` had no CREATE anywhere outside schema.sql, which nothing
+// executes — yet runMigrations() ALTERs it, backfills it, and the seed step
+// inserts into it. On a fresh database the boot produced:
+//
+//   Migration warning (childRecordTabs): Table 'railway.users' doesn't exist
+//   Seeding failed: Table 'railway.users' doesn't exist
+//
+// and then reported itself healthy. The server was up, the health endpoint
+// answered, and there was no account to sign in with — so the application was
+// unreachable while every signal said otherwise. That is the failure mode worth
+// pinning down: not a crash, a lie.
+
+test('runMigrations creates the users table itself', () => {
+  const migrations = functionBody(source, 'runMigrations');
+  assert.ok(migrations, 'expected runMigrations');
+
+  assert.match(
+    migrations,
+    /CREATE TABLE IF NOT EXISTS users/i,
+    'users must be created by a migration — schema.sql is never executed',
+  );
+});
+
+test('nothing alters users before the table is created', () => {
+  // The user table is ALTERed in several places (childRecordTabs, subModules,
+  // displayName, fullName). Each of those runs inside a shared try/catch, so a
+  // missing table does not just skip its own column — it abandons every
+  // statement after it in the same block.
+  const migrations = withoutComments(functionBody(source, 'runMigrations'));
+
+  const createAt = migrations.search(/CREATE TABLE IF NOT EXISTS users/i);
+  const alterAt = migrations.search(/ensureColumn\(\s*'users'|ALTER TABLE users\b/i);
+
+  assert.ok(alterAt !== -1, 'expected the users migrations to still exist');
+  assert.ok(
+    createAt < alterAt,
+    'users must exist before any ALTER TABLE touches it',
+  );
+});
+
+test('runMigrations creates the accessRequests table itself', () => {
+  const migrations = functionBody(source, 'runMigrations');
+  assert.ok(migrations, 'expected runMigrations');
+
+  assert.match(
+    migrations,
+    /CREATE TABLE IF NOT EXISTS accessRequests/i,
+    'accessRequests must be created by a migration — schema.sql is never executed',
+  );
+});
+
+test('nothing alters accessRequests before the table is created', () => {
+  // Two raw ALTER TABLE statements target it (documentId, requesterRole) —
+  // these predate the ensureColumn helper and were never converted. Both warned
+  // "Table 'railway.accessRequests' doesn't exist" on the live deploy.
+  const migrations = withoutComments(functionBody(source, 'runMigrations'));
+
+  const createAt = migrations.search(/CREATE TABLE IF NOT EXISTS accessRequests/i);
+  const alterAt = migrations.search(/ALTER TABLE accessRequests\b|ensure(?:Column|Index)\(\s*'accessRequests'/);
+
+  assert.ok(alterAt !== -1, 'expected the accessRequests migrations to still exist');
+  assert.ok(
+    createAt < alterAt,
+    'accessRequests must exist before any ALTER TABLE touches it',
+  );
+});
+
+test('the users table is created before the default-user seed runs', () => {
+  // Ordering across functions: runMigrations() must complete before
+  // seedDatabase(), because the seed inserts into users on its first statement.
+  const boot = functionBody(source, 'startServer');
+  assert.ok(boot, 'expected startServer');
+
+  const migrateAt = boot.search(/await runMigrations\(\)/);
+  const seedAt = boot.search(/await seedDatabase\(\)/);
+
+  assert.ok(migrateAt !== -1, 'expected startServer to await runMigrations()');
+  assert.ok(seedAt !== -1, 'expected startServer to await seedDatabase()');
+  assert.ok(
+    migrateAt < seedAt,
+    'runMigrations() must finish before seedDatabase() inserts into users',
+  );
+});
+
 test('runMigrations creates the admissions table itself', () => {
   const migrations = functionBody(source, 'runMigrations');
   assert.ok(migrations, 'expected runMigrations');

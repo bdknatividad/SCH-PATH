@@ -303,6 +303,88 @@ async function runMigrations() {
     return true;
   }
 
+  // ── users ─────────────────────────────────────────────────────────────────
+  //
+  // The same omission as `admissions` and `violations`, but this one is fatal
+  // rather than merely disabling. `users` is written and read by name all over
+  // this function — `ALTER TABLE users ADD COLUMN childRecordTabs`, the
+  // `subModules` backfill, the `displayName`/`fullName` compatibility columns —
+  // and none of them guard against the table being absent, because until now it
+  // was assumed to exist.
+  //
+  // On a freshly provisioned database it did not exist, and the boot log said
+  // so plainly without anyone reading it as the emergency it was:
+  //
+  //   Migration warning (childRecordTabs): Table 'railway.users' doesn't exist
+  //   Seeding failed: Table 'railway.users' doesn't exist
+  //
+  // Two consequences. First, the default-admin seed cannot run, so there is no
+  // account to sign in with — the application is unreachable even though the
+  // server reports itself healthy. Second, because several of those statements
+  // sit inside shared try/catch blocks, each failure also abandoned whatever
+  // followed it in that block.
+  //
+  // `accessRequests` is created alongside it below for the same reason; it is
+  // referenced by `ensureColumn('accessRequests', …)` further down.
+  //
+  // Column order and constraints mirror schema.sql exactly, so this is a no-op
+  // on any database that already has the table.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS users (
+      id VARCHAR(40) PRIMARY KEY,
+      username VARCHAR(100) NOT NULL UNIQUE,
+      displayName VARCHAR(150) NULL,
+      fullName VARCHAR(150) NULL,
+      password VARCHAR(255) NOT NULL,
+      role VARCHAR(50) NOT NULL,
+      accessibleModules JSON NOT NULL,
+      childRecordTabs JSON NULL,
+      subModules JSON NULL,
+      status ENUM('Active', 'Inactive') NOT NULL DEFAULT 'Active',
+      createdDate DATE NOT NULL,
+      createdBy VARCHAR(100) NULL,
+      modifiedBy VARCHAR(100) NULL,
+      createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+  console.log('Migration: users table ensured.');
+
+  // ── accessRequests ────────────────────────────────────────────────────────
+  //
+  // Has no foreign keys, so ordering against `users` is irrelevant — but it must
+  // exist before `ensureColumn('accessRequests', 'documentId', …)` and the
+  // `requesterRole` addition reach it, or those ALTERs throw ER_NO_SUCH_TABLE
+  // and take their block with them.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS accessRequests (
+      id VARCHAR(40) PRIMARY KEY,
+      requesterId VARCHAR(40) NOT NULL,
+      requesterUsername VARCHAR(100) NOT NULL,
+      requesterRole VARCHAR(50) NULL,
+      targetUserId VARCHAR(40) NULL,
+      targetRole VARCHAR(50) NULL,
+      documentId VARCHAR(40) NULL,
+      residentId VARCHAR(40) NULL,
+      moduleName VARCHAR(100) NULL,
+      recordTab VARCHAR(100) NULL,
+      reason TEXT NOT NULL,
+      status ENUM('Pending', 'Approved', 'Rejected') NOT NULL DEFAULT 'Pending',
+      reviewedBy VARCHAR(100) NULL,
+      reviewedAt TIMESTAMP NULL,
+      reviewerNote TEXT NULL,
+      createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_access_requesterId (requesterId),
+      INDEX idx_access_status (status),
+      INDEX idx_access_targetRole (targetRole),
+      INDEX idx_access_documentId (documentId)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+  console.log('Migration: accessRequests table ensured.');
+
   // ── Ensure foundational entity tables exist (schema.sql definitions) ──
   //
   // Order matters here. `children` is created first because `admissions`
