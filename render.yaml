@@ -30,26 +30,26 @@ services:
       # The application uses MySQL-specific SQL, so the server must be
       # MySQL-compatible. A PostgreSQL instance will not work.
       - key: DB_HOST
-        sync: false
+        sync: mysql.railway.internal
       - key: DB_PORT
-        sync: false
+        sync: 3306
       - key: DB_USER
-        sync: false
+        sync: root
       - key: DB_PASSWORD
-        sync: false
+        sync: FpftHGNfclDrxpIRFlNLpbeFoqIoLomL
       - key: DB_NAME
-        sync: false
+        sync: railway
       # Managed MySQL requires TLS. Set to "true" unless your provider says
       # otherwise.
       - key: DB_SSL
-        sync: false
+        sync: true
 
       # ── Authentication ──
       # Generate with:
       #   node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
       # The server refuses to start on a missing, short, or placeholder value.
       - key: JWT_SECRET
-        sync: false
+        sync: b2fd1b37df26e8e264f02d4863d991b4daa1054276782fa39d87af6f88670cc8
       - key: JWT_EXPIRE
         value: 24h
 
