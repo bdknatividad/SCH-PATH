@@ -1,0 +1,408 @@
+import { useState, useEffect } from 'react';
+import { Bell, X, AlertTriangle, AlertCircle, Info, CheckCircle } from 'lucide-react';
+import { Button } from '@/app/components/ui/button';
+import { Badge } from '@/app/components/ui/badge';
+import { useNavigate } from 'react-router-dom';
+import { useData, Alert } from '../state/DataContext';
+import { useAuth } from '../state/AuthContext';
+import { MODULE_TREE, canOpenModule } from '../config/moduleAccess';
+
+/**
+ * Which module a route belongs to, derived from the RBAC hierarchy.
+ *
+ * Used to answer "can this user actually open that page?" before sending them
+ * there. `ProtectedRoute` would otherwise bounce them to their first accessible
+ * module, so a notification would appear to do nothing.
+ *
+ * Derived rather than hand-written: a module added to the definition is
+ * reachable from here with no edit, and the two cannot disagree about routes.
+ */
+const ROUTE_MODULE: Record<string, string> = MODULE_TREE.reduce<Record<string, string>>(
+  (accumulator, module) => {
+    const segment = module.route.replace(/^\//, '').split('/').filter(Boolean)[0];
+    if (segment) accumulator[segment] = module.key;
+    return accumulator;
+  },
+  {},
+);
+
+/** The child-detail tabs that actually exist. `case` was never one of them. */
+const CHILD_TABS = new Set(['personal', 'timeline', 'education', 'medical', 'behavioral']);
+
+export function Notifications() {
+  const navigate = useNavigate();
+  const {
+    alerts, markAlertAsRead, markAllAlertsAsRead, deleteAlert,
+    refreshAlerts, unreadAlertsCount, isLoading, error,
+  } = useData();
+  const { user } = useAuth();
+  const [isOpen, setIsOpen] = useState(false);
+  const [filter, setFilter] = useState<'all' | 'unread'>('unread');
+  const [pendingAlertId, setPendingAlertId] = useState<string | null>(null);
+
+  // Poll only the notification feed. The old handler re-fetched every
+  // collection in the system (children, documents, base64 file data) once every
+  // 30 seconds just to notice a new alert.
+  useEffect(() => {
+    const interval = setInterval(() => { void refreshAlerts(); }, 30000);
+    return () => clearInterval(interval);
+  }, [refreshAlerts]);
+
+  // Refreshing on window focus means switching back to the app shows what
+  // happened while it was in the background, instead of waiting up to 30s.
+  useEffect(() => {
+    const onFocus = () => { void refreshAlerts(); };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [refreshAlerts]);
+
+  // The list is already scoped to this user by the backend. The `targetRole`
+  // filter that used to sit here compared raw strings ("SocialWorker") against a
+  // lower-cased role, so it silently dropped alerts the user was entitled to —
+  // and it was the only thing hiding other roles' alerts from the panel.
+  const filteredAlerts = alerts.filter(a => (filter === 'unread' ? !a.isRead : true)).slice(0, 20);
+
+  // The badge is the server's number, so it always matches the list above.
+  const roleUnreadCount = unreadAlertsCount;
+
+  const getPriorityIcon = (priority: string) => {
+    switch (priority) {
+      case 'Urgent': return <AlertTriangle className="w-4 h-4 text-red-500" />;
+      case 'High': return <AlertCircle className="w-4 h-4 text-orange-500" />;
+      case 'Medium': return <Info className="w-4 h-4 text-yellow-500" />;
+      default: return <CheckCircle className="w-4 h-4 text-green-500" />;
+    }
+  };
+
+  const getPriorityColor = (priority: string) => {
+    switch (priority) {
+      case 'Urgent': return 'bg-red-100 text-red-800 border-red-200';
+      case 'High': return 'bg-orange-100 text-orange-800 border-orange-200';
+      case 'Medium': return 'bg-yellow-100 text-yellow-800 border-yellow-200';
+      default: return 'bg-green-100 text-green-800 border-green-200';
+    }
+  };
+
+  /**
+   * Is this destination reachable by the signed-in user?
+   *
+   * Answered by the RBAC model, so it agrees with `ProtectedRoute` by
+   * construction: full-access roles pass everything and a role holding every
+   * module passes without a special case. Ungated routes — `/intervention-tracker`
+   * has no `moduleName` — are open to everyone.
+   */
+  const canReach = (path: string) => {
+    const segment = path.split('?')[0].split('/').filter(Boolean)[0] || '';
+    const moduleName = ROUTE_MODULE[segment];
+    if (!moduleName) return true;
+    return canOpenModule(user?.role, user?.accessibleModules, moduleName);
+  };
+
+  /** The same fallback ProtectedRoute would pick, so nothing appears to happen. */
+  const fallbackPath = () => {
+    const first = MODULE_TREE
+      .filter(module => canOpenModule(user?.role, user?.accessibleModules, module.key))
+      .map(module => module.route.replace(/^\//, '').split('/')[0])
+      .find(Boolean);
+    return first ? `/${first}` : '/dashboard';
+  };
+
+  const getNavigationPath = (alert: Alert) => {
+    const relatedRecordType = alert.relatedRecordType?.toLowerCase();
+    const relatedRecordId = alert.relatedRecordId;
+    const resident = alert.residentId;
+
+    const childTab = (tab: string) =>
+      resident ? `/children/${encodeURIComponent(resident)}?tab=${CHILD_TABS.has(tab) ? tab : 'personal'}` : null;
+
+    let target: string | null = null;
+
+    switch (relatedRecordType) {
+      case 'accessrequests':
+        // The standalone Access Requests page was removed — document-level
+        // access requests are handled directly within Documents.
+        target = '/documents';
+        break;
+      case 'activities':
+        target = relatedRecordId ? `/activities/${encodeURIComponent(relatedRecordId)}` : '/activities';
+        break;
+      case 'assessments':
+        target = relatedRecordId ? `/assessments/${encodeURIComponent(relatedRecordId)}` : '/assessments';
+        break;
+      case 'tri':
+        target = `/tri?residentId=${encodeURIComponent(resident || '')}`;
+        break;
+      // "Anecdotal Report needs review" opens the Social Worker's Needs Review
+      // tab with the submitted report already loaded.
+      case 'anecdotal report':
+        target = relatedRecordId
+          ? `/reports?tab=review&anecdotalId=${encodeURIComponent(relatedRecordId)}`
+          : '/reports';
+        break;
+      // Assignment, submission and approval notices all open the exact report,
+      // so the recipient lands on the section they were told about. The report
+      // is a card inside the Reports module, so the deep link carries the report
+      // id and the page opens it.
+      case 'quarterly progress report':
+        target = relatedRecordId
+          ? `/reports?quarterlyReportId=${encodeURIComponent(relatedRecordId)}`
+          : '/reports';
+        break;
+      case 'healthrecords':
+        target = resident ? `/health?residentId=${encodeURIComponent(resident)}` : '/health';
+        break;
+      case 'documents':
+        target = '/documents';
+        break;
+      // Form 08 and the intervention it belongs to both live in the Violations
+      // module, which every role that can act on them holds.
+      case 'incidentreports':
+      case 'violation':
+        target = childTab('behavioral') || '/violations';
+        break;
+      case 'phaseprogress':
+        target = childTab('timeline') || '/children';
+        break;
+      case 'residentassignments':
+        target = childTab('personal') || '/children';
+        break;
+      case 'admissions':
+      case 'children':
+        target = childTab('personal') || '/children';
+        break;
+      default:
+        target = null;
+    }
+
+    // Fall back to the alert type when there is no record link to follow.
+    if (!target) {
+      switch (alert.type) {
+        case 'Violation Intervention':
+          // The tracker lives inside the Violations module, but it must open for
+          // EVERY role that can receive this alert — including ones with no
+          // Violations access. `/violations?tab=interventions` is gated by
+          // `canReach`, so those roles were bounced to the fallback page and the
+          // alert appeared to do nothing. `/intervention-tracker` has no
+          // `moduleName` (it redirects to the same tab), so it is reachable by
+          // everyone.
+          target = '/intervention-tracker';
+          break;
+        case 'Phase Demotion':
+        case 'Phase Progress':
+          target = childTab('timeline');
+          break;
+        case 'Document Approved':
+        case 'Document Rejected':
+        case 'Document For Reassessment':
+        case 'Incident Report Failed':
+        case 'Incident Report For Reassessment':
+        case 'Incident Report Resubmitted':
+        case 'TRI For Reassessment':
+        case 'TRI Resubmitted':
+        case 'TRI Submitted':
+        case 'TRI Finalized':
+        case 'Assessment Completed':
+        case 'Assessment Required':
+        case 'Document':
+          target = '/documents';
+          break;
+        case 'Quarterly Progress Report':
+          target = '/reports';
+          break;
+        case 'Incident Report':
+        case 'Violation':
+          target = childTab('behavioral') || '/violations';
+          break;
+        case 'Admission':
+        case 'Assignment':
+          target = childTab('personal');
+          break;
+        default:
+          target = resident ? childTab('personal') : null;
+      }
+    }
+
+    if (!target) target = '/dashboard';
+
+    // Never send someone to a page their role cannot open — ProtectedRoute
+    // would bounce them and the click would look broken.
+    return canReach(target) ? target : fallbackPath();
+  };
+
+  const handleNotificationClick = async (alert: Alert) => {
+    if (pendingAlertId) return;
+
+    setPendingAlertId(alert.id);
+    try {
+      if (!alert.isRead && user?.username) {
+        await markAlertAsRead(alert.id, user.username);
+      }
+      setIsOpen(false);
+      navigate(getNavigationPath(alert));
+    } finally {
+      setPendingAlertId(null);
+    }
+  };
+
+  const handleMarkAsRead = async (e: React.MouseEvent, alertId: string) => {
+    e.stopPropagation();
+    if (!user?.username || pendingAlertId) return;
+
+    setPendingAlertId(alertId);
+    try {
+      await markAlertAsRead(alertId, user.username);
+    } finally {
+      setPendingAlertId(null);
+    }
+  };
+
+  const handleDelete = async (e: React.MouseEvent, alertId: string) => {
+    e.stopPropagation();
+    await deleteAlert(alertId);
+  };
+
+  const handleMarkAllAsRead = async () => {
+    if (user?.username) {
+      await markAllAlertsAsRead(user.username);
+      setFilter('all');
+    }
+  };
+
+  return (
+    <div className="relative">
+      <Button
+        variant="ghost"
+        size="icon"
+        className="relative"
+        data-testid="notification-bell"
+        aria-label={`Notifications${roleUnreadCount > 0 ? ` (${roleUnreadCount} unread)` : ''}`}
+        onClick={() => setIsOpen(!isOpen)}
+      >
+        <Bell className="w-5 h-5 text-gray-600" />
+        {roleUnreadCount > 0 && (
+          <span
+            data-testid="notification-badge"
+            className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center animate-pulse"
+          >
+            {roleUnreadCount > 9 ? '9+' : roleUnreadCount}
+          </span>
+        )}
+      </Button>
+
+      {isOpen && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setIsOpen(false)} />
+          <div
+            data-testid="notification-panel"
+            className="absolute right-0 top-full mt-2 w-96 bg-white rounded-lg shadow-xl border z-50 max-h-[500px] overflow-hidden"
+          >
+            <div className="flex items-center justify-between p-4 border-b bg-gray-50">
+              <h3 className="font-semibold text-gray-800">Notifications</h3>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setFilter(filter === 'all' ? 'unread' : 'all')}
+                  className="text-xs text-blue-600 hover:text-blue-800"
+                >
+                  {filter === 'all' ? 'Show Unread' : 'Show All'}
+                </button>
+                <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => setIsOpen(false)}>
+                  <X className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+
+            {error && (
+              <div className="px-4 py-2 text-xs text-red-600 bg-red-50 border-b border-red-100">
+                Unable to update notifications: {error}
+              </div>
+            )}
+
+            <div className="overflow-y-auto max-h-[400px]">
+              {isLoading ? (
+                <div className="p-8 text-center text-gray-500">Loading notifications...</div>
+              ) : error && alerts.length === 0 ? (
+                <div className="p-8 text-center text-red-600">Unable to load notifications.</div>
+              ) : filteredAlerts.length === 0 ? (
+                <div className="p-8 text-center text-gray-500">
+                  <Bell className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+                  <p>{filter === 'unread' ? 'No unread notifications' : 'No notifications'}</p>
+                </div>
+              ) : (
+                <div className="divide-y">
+                  {filteredAlerts.map((alert: Alert) => (
+                    <div
+                      key={alert.id}
+                      data-testid="notification-row"
+                      data-alert-id={alert.id}
+                      data-unread={!alert.isRead ? 'true' : 'false'}
+                      onClick={() => handleNotificationClick(alert)}
+                      className={`p-4 hover:bg-gray-50 transition-colors cursor-pointer ${!alert.isRead ? 'bg-blue-50/50' : ''}`}
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="mt-0.5">{getPriorityIcon(alert.priority)}</div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-xs font-medium text-gray-500">{alert.type}</span>
+                            <Badge variant="outline" className={`text-xs ${getPriorityColor(alert.priority)}`}>
+                              {alert.priority}
+                            </Badge>
+                            {!alert.isRead && (
+                              <span className="w-2 h-2 bg-blue-500 rounded-full" />
+                            )}
+                          </div>
+                          <p className="text-sm font-medium text-gray-900 mb-1">{alert.title}</p>
+                          <p className="text-xs text-gray-600 mb-2 line-clamp-2">{alert.message}</p>
+                          {alert.actionRequired && (
+                            <p className="text-xs text-blue-600 mb-2">Action: {alert.actionRequired}</p>
+                          )}
+                          <div className="flex items-center gap-2 text-xs text-gray-400">
+                            <span>{alert.createdAt ? new Date(alert.createdAt).toLocaleDateString() : ''}</span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex justify-end gap-2 mt-2" onClick={(e) => e.stopPropagation()}>
+                        {!alert.isRead && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs"
+                            data-testid="notification-mark-read"
+                            disabled={pendingAlertId === alert.id}
+                            onClick={(e) => handleMarkAsRead(e, alert.id)}
+                          >
+                            {pendingAlertId === alert.id ? 'Saving...' : 'Mark as Read'}
+                          </Button>
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 text-xs text-red-600 hover:text-red-700"
+                          data-testid="notification-delete"
+                          onClick={(e) => handleDelete(e, alert.id)}
+                        >
+                          Delete
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {filteredAlerts.length > 0 && filter === 'unread' && roleUnreadCount > 0 && (
+              <div className="p-3 border-t bg-gray-50 text-center">
+                <button
+                  data-testid="notification-mark-all"
+                  onClick={handleMarkAllAsRead}
+                  className="text-sm text-blue-600 hover:text-blue-800 font-semibold"
+                >
+                  Mark all as read
+                </button>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}

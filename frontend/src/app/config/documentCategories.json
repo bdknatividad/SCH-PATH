@@ -1,0 +1,86 @@
+{
+  "$comment": "The Documents module's folder structure. Kept BYTE-IDENTICAL in backend/src/config/documentCategories.json and frontend/src/app/config/documentCategories.json; backend/tests/document-categories.test.js fails if the two diverge. Documents are filed by Child -> Category -> File. Nothing is ever filed under the account that uploaded it. `rules` is evaluated in order and the FIRST match wins, so put the specific signals (a published `type`) above the loose keyword ones. `defaultFolder` is the fallback and must also appear in `folders`.",
+  "folders": [
+    "Admission Files",
+    "TRI Records",
+    "Anecdotal Reports",
+    "Assessments",
+    "Medical Records",
+    "Educational Records",
+    "Behavioral Records",
+    "Violation Records",
+    "Intervention Records",
+    "Quarterly Reports",
+    "Other Documents"
+  ],
+  "defaultFolder": "Other Documents",
+  "rules": [
+    {
+      "folder": "TRI Records",
+      "types": ["TRI"],
+      "categories": ["TRI"],
+      "keywords": ["treatment and rehabilitation", "treatment & rehabilitation", "triage", "tri record"]
+    },
+    {
+      "folder": "Anecdotal Reports",
+      "types": ["Anecdotal Report"],
+      "categories": ["Anecdotal"],
+      "keywords": ["anecdotal"]
+    },
+    {
+      "folder": "Quarterly Reports",
+      "types": ["Quarterly Progress Report"],
+      "categories": ["Progress Report"],
+      "keywords": ["quarterly progress report"]
+    },
+    {
+      "folder": "Intervention Records",
+      "types": ["Intervention"],
+      "categories": ["Intervention"],
+      "keywords": ["intervention"]
+    },
+    {
+      "folder": "Violation Records",
+      "types": ["Incident Report", "Violation"],
+      "categories": ["Violation"],
+      "keywords": ["violation", "incident report"]
+    },
+    {
+      "folder": "Medical Records",
+      "types": [],
+      "categories": ["Medical", "Medical Record", "Health"],
+      "keywords": ["medical", "health", "nursing", "medication", "prescription", "checkup", "check-up", "consultation", "laboratory", "x-ray", "xray", "radiolog", "ultrasound", "vital signs", "immunization", "vaccination", "dental", "nutritional"]
+    },
+    {
+      "folder": "Behavioral Records",
+      "types": [],
+      "categories": ["Behavioral", "Behavioural"],
+      "keywords": ["behavioral", "behavioural", "behavior", "behaviour", "counseling", "counselling"]
+    },
+    {
+      "$note": "Sits above the Educational rule on purpose: a home-visit form is a casework record, but its title contains the word \"school\", so the Educational rule would claim it if it were evaluated first. This is the one place where a more specific rule has to outrank a broader one.",
+      "folder": "Assessments",
+      "types": [],
+      "categories": [],
+      "keywords": ["home visit", "home/school visit", "home visitation", "social case study"]
+    },
+    {
+      "folder": "Educational Records",
+      "types": [],
+      "categories": ["Education", "Educational"],
+      "keywords": ["education", "educational", "school", "academic", "learning", "enrollment", "form 137", "report card", "quarterly education report"]
+    },
+    {
+      "folder": "Assessments",
+      "types": [],
+      "categories": ["Assessment"],
+      "keywords": ["assessment", "psychological", "psychosocial", "discernment"]
+    },
+    {
+      "folder": "Admission Files",
+      "types": [],
+      "categories": ["Admission", "Admission Document", "Admission Files"],
+      "keywords": ["admission", "intake", "admission slip", "case study report"]
+    }
+  ]
+}

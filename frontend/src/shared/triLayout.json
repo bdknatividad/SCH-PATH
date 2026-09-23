@@ -1,0 +1,1422 @@
+{
+  "$comment": "Generated from frontend/src/app/components/Tri.tsx. Shared by the frontend overlay and the backend PDF writer so the coordinates exist once.",
+  "partOne": [
+    {
+      "section": "Physical Development — Personal Grooming & Hygiene",
+      "items": [
+        {
+          "id": "p1",
+          "label": "Taas at timbang ay naaayon sa edad"
+        },
+        {
+          "id": "p2",
+          "label": "Napapanatiling Malinis at Maayos ang Sarili"
+        },
+        {
+          "id": "p3",
+          "label": "Dalawang beses magsipilyo ng ngipin sa isang araw"
+        },
+        {
+          "id": "p4",
+          "label": "Araw-araw nagpapalit ng malinis na Damit"
+        },
+        {
+          "id": "p5",
+          "label": "Maayos at naaayon sa pamantayan ang gupit"
+        },
+        {
+          "id": "p6",
+          "label": "Nagsusuot ng Tsinelas"
+        },
+        {
+          "id": "p7",
+          "label": "Hindi nagtatattoo at nagbubutas ng ibat-ibang bahagi ng katawan"
+        },
+        {
+          "id": "p8",
+          "label": "Araw-araw na naliligo at sumusunod sa mga payong pangkalusugan"
+        },
+        {
+          "id": "p9",
+          "label": "Naghuhugas ng mga paa at naglilinis ng katawan bago matulog"
+        },
+        {
+          "id": "p10",
+          "label": "Laging malinis at maigsi ang mga kuko sa kamay at paa"
+        },
+        {
+          "id": "p11",
+          "label": "Laging malinis ang suot na damit pagkatapos maligo, hindi inuulit ang hinubad na damit"
+        }
+      ]
+    },
+    {
+      "section": "Physical Development — Personal Belonging",
+      "items": [
+        {
+          "id": "b1",
+          "label": "Malinis at maayos ang mga damit"
+        },
+        {
+          "id": "b2",
+          "label": "Naglalaba ng mga gamit at damit sa itinakdang panahon"
+        },
+        {
+          "id": "b3",
+          "label": "Tiklop at maayos ang mga damit sa loob ng damitan"
+        },
+        {
+          "id": "b4",
+          "label": "Napapanatiling maayos ang mga gamit pantulog"
+        },
+        {
+          "id": "b5",
+          "label": "Maayos na nakasalansan ang mga gamit sa loob ng silid"
+        },
+        {
+          "id": "b6",
+          "label": "Pinangangalagaan na mabuti ang mga gamit na ipinagkaloob ng center"
+        },
+        {
+          "id": "b7",
+          "label": "Ipinaaalam sa Houseparent ang pakikipagpalit / panghihiram ng gamit sa kapwa bata"
+        }
+      ]
+    },
+    {
+      "section": "Physical Development — Table Etiquette",
+      "items": [
+        {
+          "id": "t1",
+          "label": "Nagpapakita ng tamang ugali sa hapag-kainan"
+        },
+        {
+          "id": "t2",
+          "label": "Naghuhugas at malinis ang kamay bago at matapos kumain"
+        },
+        {
+          "id": "t3",
+          "label": "Sumasabay sa tamang oras ng pagkain"
+        },
+        {
+          "id": "t4",
+          "label": "Hindi nagsasalita habang may laman ang bibig"
+        },
+        {
+          "id": "t5",
+          "label": "Gumagamit ng \"pakisuyo\" kapag nagpapaabot ng tubig o pagkain na hindi kayang maabot"
+        },
+        {
+          "id": "t6",
+          "label": "Kumukuha ng tama lang sa kanyang pagkain"
+        },
+        {
+          "id": "t7",
+          "label": "Inuubos ang pagkain na nasa kanyang plato"
+        },
+        {
+          "id": "t8",
+          "label": "Walang kalat o mumo na natatapon habang kumakain"
+        },
+        {
+          "id": "t9",
+          "label": "Hindi ipinagpapalit ang pagkain kahit ito’y mukhang mas maliit kaysa sa pagkain ng kasama"
+        },
+        {
+          "id": "t10",
+          "label": "Maganang kumain"
+        },
+        {
+          "id": "t11",
+          "label": "Kumakain ng gulay"
+        },
+        {
+          "id": "t12",
+          "label": "Marunong gumamit ng kutsara at tinidor"
+        },
+        {
+          "id": "t13",
+          "label": "Marunong mag-ayos ng hapag-kainan"
+        },
+        {
+          "id": "t14",
+          "label": "Hindi lumilikha ng ingay kapag kumain — maayos at tahimik kumain"
+        }
+      ]
+    },
+    {
+      "section": "Spiritual Development — Spiritual Activities",
+      "items": [
+        {
+          "id": "s1",
+          "label": "Masigasig sa mga Gawaing pang ispirituwal"
+        },
+        {
+          "id": "s2",
+          "label": "Kakikitaan ng malalim na paggalang kapag nagdarasal"
+        },
+        {
+          "id": "s3",
+          "label": "Marunong at alam ang mga pangunahing panalangin (umaga, gabi, bago at pagkatapos kumain)"
+        },
+        {
+          "id": "s4",
+          "label": "Nasa oras ang pagdalo sa mga gawaing pang-ispirituwal"
+        },
+        {
+          "id": "s5",
+          "label": "Maayos at nasa tamang pagkilos at pag-uugali kapag nasa gawaing pang-ispirituwal"
+        },
+        {
+          "id": "s6",
+          "label": "Maayos manamit at naaayon ang kasuotan sa mga dinadaluhang Gawain"
+        },
+        {
+          "id": "s7",
+          "label": "Marunong gumalang at magpakita ng pagsamba"
+        },
+        {
+          "id": "s8",
+          "label": "Tahimik, aktibong nakikinig at nakikilahok tuwing devotion"
+        },
+        {
+          "id": "s9",
+          "label": "Kakikitaan na nagbabasa ng bibliya"
+        },
+        {
+          "id": "s10",
+          "label": "Regular na dumadalo kapag may gawaing pang-ispirituwal"
+        },
+        {
+          "id": "s11",
+          "label": "Kinikilala na ang Panginoon ay laging nagmamahal at handang magkaloob ng kalakasan"
+        },
+        {
+          "id": "s12",
+          "label": "Nagpapakita ng paggalang at respeto sa buhay"
+        }
+      ]
+    },
+    {
+      "section": "Moral Values",
+      "items": [
+        {
+          "id": "m1",
+          "label": "May respeto sa sarili at pamilya"
+        },
+        {
+          "id": "m2",
+          "label": "Marunong magpakita at magpahayag ng respeto sa kapwa at mga bagay-bagay"
+        },
+        {
+          "id": "m3",
+          "label": "May angking katapatan sa sarili"
+        },
+        {
+          "id": "m4",
+          "label": "May kakayahang maging pantay at parehas sa pagtingin sa kapwa"
+        }
+      ]
+    },
+    {
+      "section": "Personal Development — Aesthetic Sense",
+      "items": [
+        {
+          "id": "a1",
+          "label": "Naipapahayag ang sarili sa pamamagitan ng pagkanta, pagsayaw, pagguhit at iba pa"
+        },
+        {
+          "id": "a2",
+          "label": "Nakakasulat ng kanyang pangalan ng maayos at tama"
+        },
+        {
+          "id": "a3",
+          "label": "Marunong makinig at natututo ng naaayon sa kanyang edad"
+        },
+        {
+          "id": "a4",
+          "label": "Marunong sumulat, bumasa, magkuwenta at magpahayag"
+        },
+        {
+          "id": "a5",
+          "label": "Naipapahayag ng maayos ang kanyang mga pangangailangan"
+        },
+        {
+          "id": "a6",
+          "label": "Maayos at hindi nahihiyang ipahayag ang kanyang sarili"
+        }
+      ]
+    },
+    {
+      "section": "Problem Solving and Decision Making",
+      "items": [
+        {
+          "id": "ps1",
+          "label": "May kakayahan na lutasin ang problema sa maayos na pamamaraan"
+        },
+        {
+          "id": "ps2",
+          "label": "Naiintindihan ang ugat at epekto ng problema"
+        },
+        {
+          "id": "ps3",
+          "label": "Nalulutas ang problema sa tamang solusyon at pamamaraan"
+        },
+        {
+          "id": "ps4",
+          "label": "May kakayahang tanggapin ano man ang epekto ng problema"
+        },
+        {
+          "id": "ps5",
+          "label": "Naipapahayag ng maayos ang karanasang problema sa kapwa"
+        },
+        {
+          "id": "ps6",
+          "label": "May kakayahang magdesisyon, ipangatwiran at unawain ang problema"
+        },
+        {
+          "id": "ps7",
+          "label": "Marunong magbuo ng mga aral sa mga naranasang problema"
+        },
+        {
+          "id": "ps8",
+          "label": "Marunong tumanggap ng pagkakamali"
+        }
+      ]
+    },
+    {
+      "section": "Leadership Peer Relationship",
+      "items": [
+        {
+          "id": "l1",
+          "label": "May magandang relasyon sa kapwa bata"
+        },
+        {
+          "id": "l2",
+          "label": "Tinatanggap ang kanyang kasama kung ano siya"
+        },
+        {
+          "id": "l3",
+          "label": "Marunong makisalamuha sa kapwa"
+        },
+        {
+          "id": "l4",
+          "label": "Marunong magbigay ng konsiderasyon sa kapwa"
+        },
+        {
+          "id": "l5",
+          "label": "Marunong tumanggap ng pagkakamali, puna at mga negatibong pagpansin buhat sa iba"
+        },
+        {
+          "id": "l6",
+          "label": "May mataas at magandang pagtingin sa sarili at sa kapwa"
+        },
+        {
+          "id": "l7",
+          "label": "Naniniwala sa kanyang kakayahan at abilidad"
+        },
+        {
+          "id": "l8",
+          "label": "May kakayahang manguna o mamuno sa kapwa bata"
+        },
+        {
+          "id": "l9",
+          "label": "Ibinabahagi ang kanyang kaalaman sa kapwa bata"
+        },
+        {
+          "id": "l10",
+          "label": "May kahandaang tumulong para lumago ang kapwa bata"
+        }
+      ]
+    },
+    {
+      "section": "Family Relationship",
+      "items": [
+        {
+          "id": "f1",
+          "label": "Nagpapakita ng pagmamahal at respeto sa bawat miyembro ng pamilya"
+        },
+        {
+          "id": "f2",
+          "label": "Marunong magdala ng pangungulila sa pamilya"
+        },
+        {
+          "id": "f3",
+          "label": "Naipapahayag na mabuti ang sarili sa pamilya"
+        },
+        {
+          "id": "f4",
+          "label": "May pagnanais na makabalik at makapiling ang pamilya"
+        }
+      ]
+    },
+    {
+      "section": "Work Habit",
+      "items": [
+        {
+          "id": "w1",
+          "label": "Nakikiisa sa mga gawain at aktibidad sa center"
+        },
+        {
+          "id": "w2",
+          "label": "Tumutulong sa kanyang kapwa sa pagtatrabaho"
+        },
+        {
+          "id": "w3",
+          "label": "Gumagawa ng maayos kahit hindi binabantayan"
+        },
+        {
+          "id": "w4",
+          "label": "Natatapos na mabuti ang trabaho sa takdang oras"
+        },
+        {
+          "id": "w5",
+          "label": "Maayos at iniingatan ang mga gamit kaugnay sa trabaho"
+        },
+        {
+          "id": "w6",
+          "label": "Nangunguna sa trabaho kahit hindi pinipili"
+        }
+      ]
+    },
+    {
+      "section": "Social and Emotional Development",
+      "items": [
+        {
+          "id": "se1",
+          "label": "Nakikibahagi at nakikipaglaro sa kapwa"
+        },
+        {
+          "id": "se2",
+          "label": "Nakikiisa sa mga pang-grupong Gawain"
+        },
+        {
+          "id": "se3",
+          "label": "Marunong tumanggap at tumugon ng positibo sa mga responsibilidad at mga payo"
+        },
+        {
+          "id": "se4",
+          "label": "Hindi dumadabog at hindi nagpapansin sa kapwa bata at sa staff"
+        },
+        {
+          "id": "se5",
+          "label": "Naiintindihan at nauunawaan ang pagkakaiba ng mali at tamang pag-uugali"
+        },
+        {
+          "id": "se6",
+          "label": "Nagpapakita ng paggalang sa nakakatanda at kapwa"
+        },
+        {
+          "id": "se7",
+          "label": "Ipinakikita ang kanyang sariling pagkakaiba sa grupo"
+        },
+        {
+          "id": "se8",
+          "label": "Matapat at handang tumanggap ng kanyang pagkakamali o pagkatalo"
+        },
+        {
+          "id": "se9",
+          "label": "Marunong magtimpi ng galit na nararamdaman"
+        },
+        {
+          "id": "se10",
+          "label": "Kayang harapin ang nararanasang kalungkutan at hindi hinahayaang maapektuhan nito ang mga Gawain at relasyon sa iba"
+        },
+        {
+          "id": "se11",
+          "label": "Handang humingi ng kapatawaran sa mga taong nagawan niya ng kasalanan"
+        },
+        {
+          "id": "se12",
+          "label": "Naniniwala na may mga taong tunay na interesadong mangalaga sa kanyang kapakanan"
+        }
+      ]
+    },
+    {
+      "section": "Socio-Cultural, Recreational Development — Sports",
+      "items": [
+        {
+          "id": "sp1",
+          "label": "Marunong makipaglaro at hindi pikon"
+        },
+        {
+          "id": "sp2",
+          "label": "Dumadalo sa mga panlaruang aktibidad ng center"
+        },
+        {
+          "id": "sp3",
+          "label": "May talento sa pagsayaw, pagkanta, paggamit ng mga instrumento, paglikha ng tula, pagguhit at iba pa"
+        },
+        {
+          "id": "sp4",
+          "label": "Hindi nangbubuska o nang-aasar sa mga kasama sa oras ng paglalaro"
+        },
+        {
+          "id": "sp5",
+          "label": "Nakikiisa para sa kabutihan ng grupo"
+        }
+      ]
+    },
+    {
+      "section": "Education / Intellectual Involvement — Education",
+      "items": [
+        {
+          "id": "ed1",
+          "label": "Naisusulat ang kanyang pangalan ng tama"
+        },
+        {
+          "id": "ed2",
+          "label": "Marunong sumulat, bumilang at magbasa"
+        },
+        {
+          "id": "ed3",
+          "label": "Nakakasunod sa mga simpleng instrukyon"
+        },
+        {
+          "id": "ed4",
+          "label": "Maayos at pamalagiang dumadalo sa akademyang klase at hindi nahuhuli sa klase"
+        },
+        {
+          "id": "ed5",
+          "label": "Masigasig sa mga takdang aralin / asignaturang pampaaralan"
+        },
+        {
+          "id": "ed6",
+          "label": "Nakikilahok sa mga Gawain at aktibidades sa paaralan"
+        },
+        {
+          "id": "ed7",
+          "label": "Nagsusuot ng damit na angkop o uniporme para sa isang mag-aaral ng hindi na sinasabihan"
+        },
+        {
+          "id": "ed8",
+          "label": "Hindi patayo-tayo at paalis-alis sa klase"
+        },
+        {
+          "id": "ed9",
+          "label": "Sumusunod sa tamang etiketa at pag-uugali sa klase at iba pang Gawain"
+        }
+      ]
+    },
+    {
+      "section": "Vocational / Occupational Skills",
+      "items": [
+        {
+          "id": "vk1",
+          "label": "Nakikilahok sa iba't-ibang gawaing pangkabuhayan"
+        },
+        {
+          "id": "vk2",
+          "label": "Interesado na magkaroon ng kakayahang pangkabuhayan"
+        },
+        {
+          "id": "vk3",
+          "label": "Nakakatapos ng mga Gawain sa itinakdang oras"
+        },
+        {
+          "id": "vk4",
+          "label": "May kakayahan na mapalago at magamit ng tama ang kinita sa pangkabuhayan"
+        },
+        {
+          "id": "vk5",
+          "label": "Napapanatiling maayos ang mga kagamitan pagkatapos gamitin"
+        },
+        {
+          "id": "vk6",
+          "label": "Hindi dinadala sa cottage ang mga gamit sa pagsasanay at hindi gumagawa ng matutulis na bagay"
+        }
+      ]
+    },
+    {
+      "section": "Household Chores — Kitchen",
+      "items": [
+        {
+          "id": "kh1",
+          "label": "Napapanatiling malinis ang sahig at dingding at buong kapaligiran"
+        },
+        {
+          "id": "kh2",
+          "label": "Ang mga kaserola at mga gamit pangkusina ay inilalagay ng maayos sa tamang lalagyan pagkatapos gamitin"
+        },
+        {
+          "id": "kh3",
+          "label": "Ang kutsilyo at iba pang matatalas at matulis na ginagamit sa kusina ay binabalik sa staff upang maitabi ng maayos sa lalagyan"
+        },
+        {
+          "id": "kh4",
+          "label": "Nakikiisa sa pagtitipid ng tubig, ilaw, gas at pagkain"
+        },
+        {
+          "id": "kh5",
+          "label": "Itinatapon ng tama ang mga basura"
+        },
+        {
+          "id": "kh6",
+          "label": "Sinisiguro na malinis o nililinis ng mabuti ang lahat ng gagamitin sa paghahanda ng pagkain gayundin ang maghahanda nito"
+        }
+      ]
+    },
+    {
+      "section": "Household Chores — Refectory / Dining Area",
+      "items": [
+        {
+          "id": "rd1",
+          "label": "Malinis at maayos ang lugar kainan"
+        },
+        {
+          "id": "rd2",
+          "label": "Walang masamang amoy at hindi malagkit ang mga lamesa sa lugar kainan"
+        },
+        {
+          "id": "rd3",
+          "label": "Maayos at tama ang paghugas sa mga baso at gamit pangkusina at kainan"
+        },
+        {
+          "id": "rd4",
+          "label": "Nilalabhan ang mga basahan at pinatutuyo ito sa sampayan pagkatapos gamitin"
+        },
+        {
+          "id": "rd5",
+          "label": "Naiihain ang pagkain sa tamang oras"
+        },
+        {
+          "id": "rd6",
+          "label": "Maayos ang suot na damit kapag naghahanda ng pagkain"
+        }
+      ]
+    },
+    {
+      "section": "Household Chores — Sala / Pasillo",
+      "items": [
+        {
+          "id": "sl1",
+          "label": "Nililinis ang sahig upang maging kaaya-aya"
+        },
+        {
+          "id": "sl2",
+          "label": "Pinupunasan ang mga bintana upang mawala ang mga dumi at alikabok"
+        },
+        {
+          "id": "sl3",
+          "label": "Napapanatiling malinis ang mga dingding"
+        },
+        {
+          "id": "sl4",
+          "label": "Inaalis ang mga agiw at iba pang dumi sa lugar"
+        },
+        {
+          "id": "sl5",
+          "label": "Pinanatiling malinis ang basurahan at itinatapon ang laman araw-araw"
+        },
+        {
+          "id": "sl6",
+          "label": "Maayos at nasa tamang lugar ang mga upuan at iba pang gamit"
+        }
+      ]
+    },
+    {
+      "section": "Household Chores — Laundry Area",
+      "items": [
+        {
+          "id": "la1",
+          "label": "Nililinis ng mabuti ang mga batya at timba matapos gamitin"
+        },
+        {
+          "id": "la2",
+          "label": "Isinasalansan ang mga ginamit na batya at timba sa tamang lagayan"
+        },
+        {
+          "id": "la3",
+          "label": "Itinatapon sa tamang basurahan ang mga balat ng sabon"
+        },
+        {
+          "id": "la4",
+          "label": "Nililinis ng mabuti ang lugar lalo na ang pagkuskus ng mga tiles"
+        },
+        {
+          "id": "la5",
+          "label": "Maayos na ginagamit ang gripo sa paglalaba para di masira"
+        },
+        {
+          "id": "la6",
+          "label": "Hindi nagsasampay ng mga basahan o naglalagay ng mga gamit na basa sa bintana"
+        }
+      ]
+    },
+    {
+      "section": "Household Chores — Comfort Room / Toilet",
+      "items": [
+        {
+          "id": "ct1",
+          "label": "Nililinis na mabuti ang tiles ng buong Palikuran"
+        },
+        {
+          "id": "ct2",
+          "label": "Walang amoy at malinis ang mga Toilet bowls at urinals"
+        },
+        {
+          "id": "ct3",
+          "label": "Ang mga basahan at iba pang gamit pangkubeta ay malinis at maayos"
+        },
+        {
+          "id": "ct4",
+          "label": "Nag-iipon ng tubig sa mga timba at malinis ito"
+        }
+      ]
+    },
+    {
+      "section": "Isolation / Storage Area",
+      "items": [
+        {
+          "id": "i1",
+          "label": "Nililinis ang sahig upang maging kaaya-aya"
+        },
+        {
+          "id": "i2",
+          "label": "Pinupunasan ang mga bintana upang mawala ang mga dumi at alikabok"
+        },
+        {
+          "id": "i3",
+          "label": "Napapanatiling malinis ang mga dingding"
+        },
+        {
+          "id": "i4",
+          "label": "Inaalis ang mga agiw at iba pang dumi sa lugar"
+        },
+        {
+          "id": "i5",
+          "label": "Pinanatiling malinis at maayos ang pagkakasalansan ng mga gamit sa lugar"
+        }
+      ]
+    },
+    {
+      "section": "Other Related Task",
+      "items": [
+        {
+          "id": "o1",
+          "label": "Sumusunod sa mga pinaguutos ng staff"
+        },
+        {
+          "id": "o2",
+          "label": "Gumagawa ng trabaho ng naaayon sa kalooban"
+        },
+        {
+          "id": "o3",
+          "label": "Ginagampanan ang trabaho ng may pagkukusa"
+        }
+      ]
+    }
+  ],
+  "scoreX": [
+    459,
+    486,
+    513,
+    542
+  ],
+  "pageItems": [
+    {
+      "page": 0,
+      "ids": [
+        "p1",
+        "p2",
+        "p3",
+        "p4",
+        "p5",
+        "p6",
+        "p7",
+        "p8",
+        "p9",
+        "p10",
+        "p11",
+        "b1",
+        "b2",
+        "b3",
+        "b4",
+        "b5",
+        "b6",
+        "b7",
+        "t1",
+        "t2",
+        "t3",
+        "t4",
+        "t5"
+      ]
+    },
+    {
+      "page": 1,
+      "ids": [
+        "t6",
+        "t7",
+        "t8",
+        "t9",
+        "t10",
+        "t11",
+        "t12",
+        "t13",
+        "t14",
+        "s1",
+        "s2",
+        "s3",
+        "s4",
+        "s5",
+        "s6",
+        "s7",
+        "s8",
+        "s9",
+        "s10",
+        "s11",
+        "s12",
+        "m1",
+        "m2",
+        "m3",
+        "m4",
+        "a1",
+        "a2",
+        "a3",
+        "a4",
+        "a5",
+        "a6"
+      ]
+    },
+    {
+      "page": 2,
+      "ids": [
+        "ps1",
+        "ps2",
+        "ps3",
+        "ps4",
+        "ps5",
+        "ps6",
+        "ps7",
+        "ps8",
+        "l1",
+        "l2",
+        "l3",
+        "l4",
+        "l5",
+        "l6",
+        "l7",
+        "l8",
+        "l9",
+        "l10",
+        "f1",
+        "f2",
+        "f3",
+        "f4",
+        "w1",
+        "w2",
+        "w3",
+        "w4",
+        "w5",
+        "w6",
+        "se1",
+        "se2"
+      ]
+    },
+    {
+      "page": 3,
+      "ids": [
+        "se3",
+        "se4",
+        "se5",
+        "se6",
+        "se7",
+        "se8",
+        "se9",
+        "se10",
+        "se11",
+        "se12",
+        "sp1",
+        "sp2",
+        "sp3",
+        "sp4",
+        "sp5",
+        "ed1",
+        "ed2",
+        "ed3",
+        "ed4",
+        "ed5",
+        "ed6",
+        "ed7",
+        "ed8",
+        "ed9",
+        "vk1",
+        "vk2",
+        "vk3",
+        "vk4"
+      ]
+    },
+    {
+      "page": 4,
+      "ids": [
+        "vk5",
+        "vk6",
+        "kh1",
+        "kh2",
+        "kh3",
+        "kh4",
+        "kh5",
+        "kh6",
+        "rd1",
+        "rd2",
+        "rd3",
+        "rd4",
+        "rd5",
+        "rd6",
+        "sl1",
+        "sl2",
+        "sl3",
+        "sl4",
+        "sl5",
+        "sl6",
+        "la1",
+        "la2",
+        "la3",
+        "la4",
+        "la5",
+        "la6",
+        "ct1",
+        "ct2",
+        "ct3"
+      ]
+    },
+    {
+      "page": 5,
+      "ids": [
+        "ct4",
+        "i1",
+        "i2",
+        "i3",
+        "i4",
+        "i5",
+        "o1",
+        "o2",
+        "o3"
+      ]
+    }
+  ],
+  "itemY": {
+    "p1": 600,
+    "p2": 579,
+    "p3": 558,
+    "p4": 537,
+    "p5": 516,
+    "p6": 495,
+    "p7": 474,
+    "p8": 453,
+    "p9": 433,
+    "p10": 412,
+    "p11": 391,
+    "b1": 349,
+    "b2": 328,
+    "b3": 306,
+    "b4": 285,
+    "b5": 264,
+    "b6": 243,
+    "b7": 222,
+    "t1": 180,
+    "t2": 160,
+    "t3": 139,
+    "t4": 118,
+    "t5": 97,
+    "t6": 862,
+    "t7": 841,
+    "t8": 820,
+    "t9": 799,
+    "t10": 778,
+    "t11": 757,
+    "t12": 736,
+    "t13": 715,
+    "t14": 694,
+    "s1": 631,
+    "s2": 610,
+    "s3": 589,
+    "s4": 556,
+    "s5": 535,
+    "s6": 514,
+    "s7": 493,
+    "s8": 472,
+    "s9": 451,
+    "s10": 430,
+    "s11": 409,
+    "s12": 375,
+    "m1": 333,
+    "m2": 312,
+    "m3": 291,
+    "m4": 270,
+    "a1": 207,
+    "a2": 186,
+    "a3": 165,
+    "a4": 144,
+    "a5": 123,
+    "a6": 102,
+    "ps1": 841,
+    "ps2": 820,
+    "ps3": 799,
+    "ps4": 778,
+    "ps5": 757,
+    "ps6": 736,
+    "ps7": 715,
+    "ps8": 694,
+    "l1": 652,
+    "l2": 631,
+    "l3": 610,
+    "l4": 589,
+    "l5": 568,
+    "l6": 547,
+    "l7": 526,
+    "l8": 505,
+    "l9": 484,
+    "l10": 463,
+    "f1": 421,
+    "f2": 400,
+    "f3": 379,
+    "f4": 358,
+    "w1": 316,
+    "w2": 295,
+    "w3": 274,
+    "w4": 253,
+    "w5": 232,
+    "w6": 211,
+    "se1": 128,
+    "se2": 107,
+    "se3": 862,
+    "se4": 841,
+    "se5": 820,
+    "se6": 799,
+    "se7": 778,
+    "se8": 757,
+    "se9": 736,
+    "se10": 715,
+    "se11": 682,
+    "se12": 661,
+    "sp1": 598,
+    "sp2": 577,
+    "sp3": 556,
+    "sp4": 522,
+    "sp5": 501,
+    "ed1": 438,
+    "ed2": 417,
+    "ed3": 396,
+    "ed4": 375,
+    "ed5": 354,
+    "ed6": 333,
+    "ed7": 312,
+    "ed8": 279,
+    "ed9": 258,
+    "vk1": 170,
+    "vk2": 149,
+    "vk3": 128,
+    "vk4": 107,
+    "vk5": 862,
+    "vk6": 841,
+    "kh1": 778,
+    "kh2": 757,
+    "kh3": 724,
+    "kh4": 690,
+    "kh5": 669,
+    "kh6": 648,
+    "rd1": 594,
+    "rd2": 573,
+    "rd3": 552,
+    "rd4": 531,
+    "rd5": 510,
+    "rd6": 489,
+    "sl1": 447,
+    "sl2": 426,
+    "sl3": 405,
+    "sl4": 384,
+    "sl5": 363,
+    "sl6": 342,
+    "la1": 300,
+    "la2": 279,
+    "la3": 258,
+    "la4": 237,
+    "la5": 216,
+    "la6": 195,
+    "ct1": 140,
+    "ct2": 119,
+    "ct3": 98,
+    "ct4": 862,
+    "i1": 820,
+    "i2": 799,
+    "i3": 778,
+    "i4": 757,
+    "i5": 736,
+    "o1": 694,
+    "o2": 673,
+    "o3": 652
+  },
+  "offensePos": [
+    {
+      "page": 5,
+      "y": 527.18
+    },
+    {
+      "page": 5,
+      "y": 506.18
+    },
+    {
+      "page": 5,
+      "y": 485.17
+    },
+    {
+      "page": 5,
+      "y": 464.16
+    },
+    {
+      "page": 5,
+      "y": 443.28
+    },
+    {
+      "page": 5,
+      "y": 422.28
+    },
+    {
+      "page": 5,
+      "y": 401.27
+    },
+    {
+      "page": 5,
+      "y": 380.26
+    },
+    {
+      "page": 5,
+      "y": 353.02
+    },
+    {
+      "page": 5,
+      "y": 325.78
+    },
+    {
+      "page": 5,
+      "y": 298.53
+    },
+    {
+      "page": 5,
+      "y": 271.27
+    },
+    {
+      "page": 5,
+      "y": 250.27
+    },
+    {
+      "page": 5,
+      "y": 229.39
+    },
+    {
+      "page": 5,
+      "y": 208.39
+    },
+    {
+      "page": 5,
+      "y": 187.38
+    },
+    {
+      "page": 5,
+      "y": 166.37
+    },
+    {
+      "page": 5,
+      "y": 139.13
+    },
+    {
+      "page": 5,
+      "y": 111.89
+    },
+    {
+      "page": 5,
+      "y": 90.88
+    },
+    {
+      "page": 6,
+      "y": 853.54
+    },
+    {
+      "page": 6,
+      "y": 832.54
+    },
+    {
+      "page": 6,
+      "y": 805.28
+    },
+    {
+      "page": 6,
+      "y": 778.03
+    },
+    {
+      "page": 6,
+      "y": 757.03
+    },
+    {
+      "page": 6,
+      "y": 736.03
+    },
+    {
+      "page": 6,
+      "y": 715.03
+    },
+    {
+      "page": 6,
+      "y": 694.14
+    },
+    {
+      "page": 6,
+      "y": 673.13
+    },
+    {
+      "page": 6,
+      "y": 652.13
+    },
+    {
+      "page": 6,
+      "y": 631.13
+    },
+    {
+      "page": 6,
+      "y": 610.13
+    },
+    {
+      "page": 6,
+      "y": 589.12
+    },
+    {
+      "page": 6,
+      "y": 568.1
+    },
+    {
+      "page": 6,
+      "y": 547.1
+    },
+    {
+      "page": 6,
+      "y": 526.1
+    },
+    {
+      "page": 6,
+      "y": 505.22
+    },
+    {
+      "page": 6,
+      "y": 484.21
+    },
+    {
+      "page": 6,
+      "y": 463.2
+    },
+    {
+      "page": 6,
+      "y": 442.2
+    },
+    {
+      "page": 6,
+      "y": 421.2
+    },
+    {
+      "page": 6,
+      "y": 400.19
+    },
+    {
+      "page": 6,
+      "y": 379.18
+    },
+    {
+      "page": 6,
+      "y": 358.18
+    },
+    {
+      "page": 6,
+      "y": 337.18
+    }
+  ],
+  "partTwoOffenses": [
+    {
+      "points": 30,
+      "label": "Nakikipagaway sa pamamagitan ng kamao at paggamit ng mga nakakasakit na bagay"
+    },
+    {
+      "points": 30,
+      "label": "Pananakit sa kapwa bata"
+    },
+    {
+      "points": 30,
+      "label": "Nagdadala o gumagamit ng mga ipinagbabawal na gamot"
+    },
+    {
+      "points": 30,
+      "label": "Paggawa ng matutulis na bagay na nakakapinsala sa kapwa"
+    },
+    {
+      "points": 30,
+      "label": "Pagbili at pag-inom ng alak o iba pang bagay na nakakalasing"
+    },
+    {
+      "points": 30,
+      "label": "Paninira ng room gaya ng bintana, pintuan, kisame, padlock at iba pa"
+    },
+    {
+      "points": 30,
+      "label": "Gumagamit at nagtatabi ng cellphone"
+    },
+    {
+      "points": 30,
+      "label": "Pagtatattoo (naglagay at nagpalagay)"
+    },
+    {
+      "points": 30,
+      "label": "Pagmamayari o pag-iingat ng pera at iba pang ipinagbabawal na bagay"
+    },
+    {
+      "points": 30,
+      "label": "Paglikha ng ingay at pagkadistorbo ng iba sa oras ng tulugan at pamamahinga"
+    },
+    {
+      "points": 20,
+      "label": "Nagbubuo ng grupo na nakakapagpagulo o nakakasira sa rehabilitasyon ng kapwa bata"
+    },
+    {
+      "points": 20,
+      "label": "Gumagamit ng tablet at iba pa ng walang pahintulot ng staff"
+    },
+    {
+      "points": 20,
+      "label": "Pagnanakaw"
+    },
+    {
+      "points": 20,
+      "label": "Pagtakas sa center (LWOP)"
+    },
+    {
+      "points": 20,
+      "label": "Pakikipag-usap sa residente na nasa isolation room"
+    },
+    {
+      "points": 20,
+      "label": "Dagliang paglalagay ng mga linya ng kuryente na lingid sa kaalaman ng staff"
+    },
+    {
+      "points": 20,
+      "label": "Nagbabanta sa buhay ng kapwa (grave threat)"
+    },
+    {
+      "points": 20,
+      "label": "Pagpapakita ng walang galang sa staff at mga panauhin"
+    },
+    {
+      "points": 20,
+      "label": "Pag-aaksaya ng pagkain"
+    },
+    {
+      "points": 20,
+      "label": "Di naayon na gawaing pangsexual"
+    },
+    {
+      "points": 20,
+      "label": "Paglalagay ng bolitas sa ari"
+    },
+    {
+      "points": 20,
+      "label": "Nagbabansag ng masama sa kapwa bata o staff"
+    },
+    {
+      "points": 20,
+      "label": "Pang-aabuso sa kapwa bata tulad ng pagpapamasahe, pagpapalaba at pag-uutos"
+    },
+    {
+      "points": 20,
+      "label": "Pagsusuot ng hikaw at pagbubutas ng ibat ibang parte ng katawan tulad ng dila at iba pa"
+    },
+    {
+      "points": 20,
+      "label": "Di pagsali sa activities ng shelter kasama ang di pakikiisa sa pagpa-practice"
+    },
+    {
+      "points": 15,
+      "label": "Di tamang pagbibiro sa kapwa bata, panauhin, kaibigan, mga taga labas, guro at staff"
+    },
+    {
+      "points": 15,
+      "label": "Paninigarilyo"
+    },
+    {
+      "points": 15,
+      "label": "Paglabas ng center ng walang paalam"
+    },
+    {
+      "points": 15,
+      "label": "Pagtatangkang pagtakas sa center"
+    },
+    {
+      "points": 15,
+      "label": "Pagkabigong pagtakas sa center"
+    },
+    {
+      "points": 15,
+      "label": "Pagsusugal"
+    },
+    {
+      "points": 15,
+      "label": "Pambabastos sa staff kapag kinakausap"
+    },
+    {
+      "points": 10,
+      "label": "Pagsilip sa bintana"
+    },
+    {
+      "points": 10,
+      "label": "Pagpasok sa kuwarto ng staff ng walang pahintulot"
+    },
+    {
+      "points": 10,
+      "label": "Pagbaba sa receiving area ng walang pahintulot o paalam sa staff"
+    },
+    {
+      "points": 10,
+      "label": "Pagkuha, pagtago o pag-akyat ng pagkain"
+    },
+    {
+      "points": 10,
+      "label": "Pagbebenta o pagpapalit ng mga gamit maging personal o issue"
+    },
+    {
+      "points": 10,
+      "label": "Pagsalungat at di pagsunod sa tamang gupit ng buhok"
+    },
+    {
+      "points": 10,
+      "label": "Pagkukulay ng buhok"
+    },
+    {
+      "points": 10,
+      "label": "Vandalism"
+    },
+    {
+      "points": 10,
+      "label": "Panghihingi ng pera o anumang bagay sa mga bisita o mga nagdadaan sa kalsada"
+    },
+    {
+      "points": 10,
+      "label": "Di pagtulog sa tamang oras ng walang sapat o matibay na dahilan"
+    },
+    {
+      "points": 10,
+      "label": "Pagmumura o pagbigkas ng mahahalay na Salita"
+    },
+    {
+      "points": 5,
+      "label": "Nagbubukas ng TV, DVD, electric fans, at iba pa ng walang pahintulot sa staff"
+    },
+    {
+      "points": 5,
+      "label": "Paglalagay ng headband sa ulo/buhok at pagpony ng buhok"
+    }
+  ],
+  "houseparentSignatureBox": {
+    "$comment": "The blank band above the page-8 \"Houseparent\" rule. Measured against the template: the underscore run is 90.24pt wide at x 72.02 with its baseline at y 772.75, the caption sits 20.6pt below it, and the line above the block ends at y 804. Shared so the on-screen overlay, the browser export and the backend PDF writer stamp the signature in the same place.",
+    "page": 7, "x": 72.02, "y": 774, "width": 90.24, "height": 22
+  },
+  "houseparentNamePos": {
+    "$comment": "Where the Houseparent's printed name goes, directly above their signature rule. Baseline y 800 clears the 774-796 signature box below and the descenders of the block heading above.",
+    "page": 7, "x": 72.02, "y": 800, "size": 8, "width": 90.24
+  }
+}

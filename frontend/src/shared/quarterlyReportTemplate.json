@@ -1,0 +1,26 @@
+{
+  "$comment": "Fill-in geometry for the Quarterly Progress Report. Shared by the frontend overlay (frontend/src/app/components/QuarterlyProgressReport.tsx) and the backend PDF writer (backend/src/utils/quarterlyReportPdf.js) so the coordinates exist once — the same arrangement as triLayout.json. All values are PDF points; y is measured from the bottom of the page, as pdf-lib draws it. A backend test fails if the writer's own derived geometry stops agreeing with this file.",
+  "page": {
+    "width": 595.28,
+    "height": 841.89,
+    "marginX": 45,
+    "marginBottom": 52
+  },
+  "table": {
+    "cellPad": 5,
+    "rowHeight": 130,
+    "rowsPerPage": 3,
+    "tableTops": [451.89, 751.89],
+    "columns": [
+      { "key": "presentLevel", "x": 137, "width": 131 },
+      { "key": "observations", "x": 268, "width": 137 },
+      { "key": "interventions", "x": 405, "width": 145.28 }
+    ]
+  },
+  "signature": {
+    "x": 45,
+    "top": 335.89,
+    "width": 232.64,
+    "height": 36
+  }
+}

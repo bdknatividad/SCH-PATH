@@ -1,0 +1,519 @@
+{
+  "version": 1,
+  "description": "Canonical RBAC definition for SCH-PATH. This file is the single source of truth for the permission vocabulary, the module/submenu hierarchy, and every role's access matrix. The frontend keeps a byte-identical copy at frontend/src/app/config/rbac.definition.json; backend/tests/rbac.test.js fails if the two ever diverge.",
+  "permissions": {
+    "view": "View",
+    "create": "Create",
+    "edit": "Edit",
+    "delete": "Delete",
+    "verify": "Verify",
+    "approve": "Approve",
+    "export": "Export",
+    "manageUsers": "Manage Users",
+    "manageRoles": "Manage Roles",
+    "manageSettings": "Manage Settings"
+  },
+  "modules": [
+    {
+      "key": "Dashboard",
+      "label": "Dashboard",
+      "route": "/dashboard",
+      "icon": "Home",
+      "subModules": []
+    },
+    {
+      "key": "Child Records",
+      "label": "Child Records",
+      "route": "/children",
+      "icon": "Users",
+      "subModules": [
+        {
+          "key": "Personal Info",
+          "label": "Personal Info",
+          "tab": "personal"
+        },
+        {
+          "key": "Phase Timeline",
+          "label": "Phase Timeline",
+          "tab": "timeline"
+        },
+        {
+          "key": "Education",
+          "label": "Education",
+          "tab": "education"
+        },
+        {
+          "key": "Medical",
+          "label": "Medical",
+          "tab": "medical"
+        },
+        {
+          "key": "Behavioral",
+          "label": "Behavioral",
+          "tab": "behavioral"
+        }
+      ]
+    },
+    {
+      "key": "Violations",
+      "label": "Violations",
+      "route": "/violations",
+      "icon": "ShieldAlert",
+      "legacyKeys": [
+        "Intervention Tracker"
+      ],
+      "subModules": [
+        {
+          "key": "Violation List",
+          "label": "Violation List",
+          "tab": "list"
+        },
+        {
+          "key": "Intervention Tracker",
+          "label": "Intervention Tracker",
+          "tab": "interventions"
+        },
+        {
+          "key": "For Verification",
+          "label": "For Verification",
+          "tab": "verification"
+        },
+        {
+          "key": "Manage Violations & Interventions",
+          "label": "Manage Violations & Interventions",
+          "tab": "manage"
+        },
+        {
+          "key": "Anecdotal Reports",
+          "label": "Anecdotal Reports",
+          "tab": "anecdotal"
+        }
+      ]
+    },
+    {
+      "key": "Activities",
+      "label": "Activities",
+      "route": "/activities",
+      "icon": "Calendar",
+      "subModules": []
+    },
+    {
+      "key": "Assessments",
+      "label": "Assessments",
+      "route": "/assessments",
+      "icon": "ClipboardCheck",
+      "subModules": []
+    },
+    {
+      "key": "Court Records",
+      "label": "Court Records",
+      "route": "/court-records",
+      "icon": "Gavel",
+      "subModules": []
+    },
+    {
+      "key": "Houseparent",
+      "label": "Houseparent",
+      "route": "/tri",
+      "icon": "ClipboardList",
+      "legacyKeys": [
+        "TRI"
+      ],
+      "subModules": [
+        {
+          "key": "Case Load",
+          "label": "Case Load",
+          "tab": "caseload"
+        },
+        {
+          "key": "TRI Records",
+          "label": "TRI Records",
+          "tab": "records"
+        },
+        {
+          "key": "Anecdotal Reports",
+          "label": "Anecdotal Reports",
+          "tab": "anecdotal"
+        }
+      ]
+    },
+    {
+      "key": "Documents",
+      "label": "Documents",
+      "route": "/documents",
+      "icon": "FileText",
+      "subModules": [
+        {
+          "key": "Folders by Child",
+          "label": "Folders by Child",
+          "tab": "folders"
+        },
+        {
+          "key": "All Documents",
+          "label": "All Documents",
+          "tab": "all"
+        },
+        {
+          "key": "Pending Review",
+          "label": "Pending Review",
+          "tab": "pending"
+        },
+        {
+          "key": "Access Requests",
+          "label": "Access Requests",
+          "tab": "access"
+        },
+        {
+          "key": "Access Request History",
+          "label": "Access Request History",
+          "tab": "history"
+        }
+      ]
+    },
+    {
+      "key": "Health",
+      "label": "Health",
+      "route": "/health",
+      "icon": "HeartPulse",
+      "subModules": []
+    },
+    {
+      "key": "Education",
+      "label": "Education",
+      "route": "/education",
+      "icon": "GraduationCap",
+      "subModules": []
+    },
+    {
+      "key": "Reports",
+      "label": "Reports",
+      "route": "/reports",
+      "icon": "FileText",
+      "subModules": []
+    },
+    {
+      "key": "Account Management",
+      "label": "Account Management",
+      "route": "/staff",
+      "icon": "Settings",
+      "subModules": []
+    }
+  ],
+  "roles": {
+    "centerhead": {
+      "label": "Center Head",
+      "fullAccess": true,
+      "description": "Full System Access. Unrestricted access to every route, API, record and action. Bypasses all permission checks.",
+      "modules": "*",
+      "subModules": "*",
+      "permissions": "*"
+    },
+    "admin": {
+      "label": "Administrator",
+      "fullAccess": false,
+      "description": "Holds every module and every permission, but is not a bypass: routes that are deliberately restricted to the Center Head (account management, phase transitions) stay Center Head-only.",
+      "modules": "*",
+      "subModules": "*",
+      "permissions": "*"
+    },
+    "socialworker": {
+      "label": "Social Worker",
+      "fullAccess": false,
+      "description": "Case management across residents, violations, interventions, court records, houseparent oversight and reports. No access to Health, Education (main module) or Account Management.",
+      "modules": [
+        "Dashboard",
+        "Child Records",
+        "Violations",
+        "Activities",
+        "Assessments",
+        "Court Records",
+        "Houseparent",
+        "Documents",
+        "Reports"
+      ],
+      "subModules": {
+        "Child Records": [
+          "Personal Info",
+          "Phase Timeline",
+          "Education",
+          "Medical",
+          "Behavioral"
+        ],
+        "Violations": [
+          "Violation List",
+          "Intervention Tracker",
+          "For Verification",
+          "Manage Violations & Interventions"
+        ],
+        "Houseparent": [
+          "Case Load",
+          "TRI Records",
+          "Anecdotal Reports"
+        ],
+        "Documents": [
+          "Folders by Child",
+          "All Documents",
+          "Pending Review",
+          "Access Request History"
+        ]
+      },
+      "permissions": {
+        "*": [
+          "view"
+        ],
+        "Child Records": [
+          "view",
+          "create",
+          "edit",
+          "delete",
+          "export"
+        ],
+        "Violations": [
+          "view",
+          "create",
+          "edit",
+          "delete",
+          "verify",
+          "approve",
+          "export"
+        ],
+        "Activities": [
+          "view",
+          "create",
+          "edit",
+          "delete",
+          "export"
+        ],
+        "Assessments": [
+          "view",
+          "create",
+          "edit",
+          "delete",
+          "export"
+        ],
+        "Court Records": [
+          "view",
+          "create",
+          "edit",
+          "delete",
+          "export"
+        ],
+        "Houseparent": [
+          "view",
+          "create",
+          "edit",
+          "verify",
+          "approve",
+          "export"
+        ],
+        "Documents": [
+          "view",
+          "create",
+          "edit",
+          "delete",
+          "approve",
+          "export"
+        ],
+        "Reports": [
+          "view",
+          "create",
+          "edit",
+          "delete",
+          "export"
+        ]
+      }
+    },
+    "psychologist": {
+      "label": "Psychologist",
+      "fullAccess": false,
+      "description": "Clinical assessment and verification. Holds Dashboard, Child Records (Personal Info / Phase Timeline / Medical / Behavioral), Violations (through Manage Violations & Interventions), Assessments and Documents. Reads incident forms and tracks interventions, but never creates or edits an incident and never deletes an intervention. Files the documents the role itself produces, but holds no document delete and no global document approval: a document request is decided only when it is addressed to the Psychologist role.",
+      "modules": [
+        "Dashboard",
+        "Child Records",
+        "Violations",
+        "Assessments",
+        "Documents"
+      ],
+      "subModules": {
+        "Child Records": [
+          "Personal Info",
+          "Phase Timeline",
+          "Medical",
+          "Behavioral"
+        ],
+        "Violations": [
+          "Violation List",
+          "Intervention Tracker",
+          "For Verification",
+          "Manage Violations & Interventions"
+        ],
+        "Documents": [
+          "Folders by Child",
+          "All Documents",
+          "Access Requests"
+        ]
+      },
+      "permissions": {
+        "*": [
+          "view"
+        ],
+        "Child Records": [
+          "view",
+          "edit",
+          "export"
+        ],
+        "Violations": [
+          "view",
+          "edit",
+          "verify",
+          "export"
+        ],
+        "Assessments": [
+          "view",
+          "create",
+          "edit",
+          "delete",
+          "export"
+        ],
+        "Documents": [
+          "view",
+          "create",
+          "edit",
+          "export"
+        ]
+      }
+    },
+    "nurse": {
+      "label": "Nurse",
+      "fullAccess": false,
+      "description": "Health and medical records. Holds Dashboard, Child Records (Personal Info / Phase Timeline / Medical), Health and Documents. Creates and manages medical records and medical documents — including the Medical Notes on the Medical tab — and every medical document is filed in the Documents module's Medical Records folder. Reads incident forms but never creates, edits or deletes one. Holds no document delete and no global document approval: a document request is decided only by a role that holds the Documents approve capability. The Behavioral tab and the Violations module are not held by default; they may be granted per account, which is the \"can view if authorized\" case.",
+      "modules": [
+        "Dashboard",
+        "Child Records",
+        "Health",
+        "Documents"
+      ],
+      "subModules": {
+        "Child Records": [
+          "Personal Info",
+          "Phase Timeline",
+          "Medical"
+        ],
+        "Documents": [
+          "Folders by Child",
+          "All Documents",
+          "Access Requests"
+        ]
+      },
+      "permissions": {
+        "*": [
+          "view"
+        ],
+        "Child Records": [
+          "view",
+          "edit",
+          "export"
+        ],
+        "Health": [
+          "view",
+          "create",
+          "edit",
+          "delete",
+          "export"
+        ],
+        "Documents": [
+          "view",
+          "create",
+          "edit",
+          "export"
+        ]
+      }
+    },
+    "educator": {
+      "label": "Educator",
+      "fullAccess": false,
+      "description": "Education records and school-related documentation for residents. Holds Dashboard, Child Records (Personal Info and the Education tab, read-only), the Education module and Documents. The dashboard is education-only. Never reaches Medical records, the Health module, Violations, Incidents, Admissions or any administrative module, and holds no document create, delete or global approval: a document outside the Education categories is readable only through an approved document access request.",
+      "modules": [
+        "Dashboard",
+        "Child Records",
+        "Education",
+        "Documents"
+      ],
+      "subModules": {
+        "Child Records": [
+          "Personal Info",
+          "Education"
+        ],
+        "Documents": [
+          "Folders by Child",
+          "All Documents",
+          "Access Requests"
+        ]
+      },
+      "permissions": {
+        "*": [
+          "view"
+        ],
+        "Child Records": [
+          "view"
+        ],
+        "Education": [
+          "view",
+          "create",
+          "edit"
+        ],
+        "Documents": [
+          "view"
+        ]
+      }
+    },
+    "houseparent": {
+      "label": "Houseparent",
+      "fullAccess": false,
+      "description": "Day-to-day resident care for the assigned caseload: TRI records, anecdotal reports, activities and assessments. No medical, health, court or administrative access.",
+      "modules": [
+        "Dashboard",
+        "Activities",
+        "Assessments",
+        "Houseparent",
+        "Violations"
+      ],
+      "subModules": {
+        "Violations": [
+          "Violation List",
+          "Intervention Tracker"
+        ],
+        "Houseparent": [
+          "Case Load",
+          "TRI Records",
+          "Anecdotal Reports"
+        ]
+      },
+      "permissions": {
+        "*": [
+          "view"
+        ],
+        "Violations": [
+          "view"
+        ],
+        "Activities": [
+          "view",
+          "create",
+          "edit",
+          "export"
+        ],
+        "Assessments": [
+          "view",
+          "export"
+        ],
+        "Houseparent": [
+          "view",
+          "create",
+          "edit",
+          "export"
+        ]
+      }
+    }
+  },
+  "childRecordTabsModule": "Child Records"
+}

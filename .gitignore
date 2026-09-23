@@ -1,0 +1,38 @@
+# ── Dependencies ──────────────────────────────────────────────────────────
+node_modules/
+.pnpm-store/
+
+# ── Build output ──────────────────────────────────────────────────────────
+# `dist` is rebuilt by Vercel on every deploy, so it is never committed.
+dist/
+build/
+
+# ── Stale build/verification artifacts ────────────────────────────────────
+# These were produced by earlier local build checks. They are byte-for-byte
+# copies of `public/` plus old hashed bundles, so they carry no source that
+# is not already in the tree — untracked so a fresh clone stays small.
+.buildcheck-*/
+.vb-verify-*/
+.verify-build*/
+dist-verify*/
+
+# ── Environment ───────────────────────────────────────────────────────────
+# Only the *example* templates are committed; real values are set in the
+# Vercel / Render dashboards and never enter the repository.
+.env
+.env.local
+.env.*.local
+
+# Legacy JSON fallback store. Nothing in backend/src reads it — the system is
+# MySQL-only — and it holds a plaintext `centerhead` credential, so it must not
+# be committed. Left on disk rather than deleted; see the note in the handoff.
+backend/data/store.json
+
+# ── Editor / OS noise ─────────────────────────────────────────────────────
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini

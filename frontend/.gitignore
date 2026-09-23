@@ -1,0 +1,37 @@
+# Dependencies
+node_modules
+
+# Vite build output — rebuilt on every Vercel deploy, never committed
+dist
+dist-ssr
+build
+
+# Stale local build-check artifacts (copies of public/ plus old hashed bundles).
+# The root .gitignore covers these too, but this keeps them ignored if the
+# frontend folder is ever the repository root.
+.buildcheck-*/
+.vb-verify-*/
+.verify-build*/
+dist-verify*/
+
+# Local env files — the committed template is .env.example
+.env
+.env.local
+.env.*.local
+
+# Editor / OS noise
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.local
+.DS_Store
+Thumbs.db
+*.swp
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*

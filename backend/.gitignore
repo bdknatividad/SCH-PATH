@@ -1,0 +1,25 @@
+# Dependencies
+node_modules
+
+# Local environment — real values live in the Render dashboard, not the repo.
+# The committed template is .env.example.
+.env
+.env.local
+.env.*.local
+
+# Runtime data (the JSON fallback store)
+data/*.json
+!data/.gitkeep
+
+# Logs
+logs
+*.log
+npm-debug.log*
+
+# Editor / OS noise
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+Thumbs.db
+*.swp
