@@ -402,21 +402,129 @@ function formatMysqlDateTime(date) {
 const DATETIME_COLUMN_PATTERN = /(At|DateTime|Timestamp)$/;
 
 /**
- * Normalizes every `*At` / `*DateTime` / `*Timestamp` field in a request body
- * so no controller can bind an unparseable datetime.
+ * Columns that hold a DATE, not a DATETIME.
+ *
+ * MySQL accepts a full `YYYY-MM-DD HH:MM:SS` string into a DATE column and
+ * silently truncates it, but it rejects an ISO 8601 string for either type
+ * with `ERROR 1292`. So a DATE column still needs normalising — just to the
+ * date half — and the naming is not a reliable guide: several DATE columns
+ * end in `At` (`startedAt`, `completedAt`, `enteredAt`), which is why the
+ * `...At` rule above cannot simply be assumed to mean "datetime".
+ *
+ * The explicit list mirrors the schema. `toMysqlDate` is idempotent, so a
+ * column that is later widened to DATETIME still behaves correctly if it is
+ * left here by mistake — only the time component would be dropped.
+ */
+const DATE_ONLY_COLUMNS = new Set([
+  'date',
+  'admissionDate',
+  'birthDate',
+  'closedDate',
+  'expectedDischargeDate',
+  'reportDate',
+  'lastCheckup',
+  'readmissionDate',
+  'hearingDate',
+  'nextHearingDate',
+  'newDischargeDate',
+  'previousDischargeDate',
+  'enrollmentDate',
+  'visitDate',
+  'followUpDate',
+  'interventionScheduleDate',
+  'dueDate',
+  'startedAt',
+  'completionDate',
+  'endDate',
+  'startDate',
+  'completedAt',
+  'enteredAt',
+  'periodEnd',
+  'periodStart',
+  'joinDate',
+  'effectiveDate',
+  'submissionDeadline',
+  'createdDate',
+  'interventionStartDate',
+]);
+
+/**
+ * Coerce a value to `YYYY-MM-DD` for a MySQL DATE column.
+ *
+ * Same contract as `toMysqlDateTime` — a `Date`, an ISO 8601 string or an
+ * already-correct `YYYY-MM-DD` all come out as a bare date; null, undefined
+ * and anything unparseable are passed through untouched so MySQL reports the
+ * genuine problem.
+ *
+ * @param {*} value - The value about to be bound to a DATE parameter
+ * @returns {*} A `YYYY-MM-DD` string, or the original value
+ */
+function toMysqlDate(value) {
+  if (value === null || value === undefined) return value;
+
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return value;
+    return formatMysqlDate(value);
+  }
+
+  if (typeof value !== 'string') return value;
+
+  const trimmed = value.trim();
+  if (!trimmed) return trimmed;
+
+  // Already a bare date — the common case, and the cheapest to recognise.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+
+  // A datetime without a timezone is unambiguous; take the date half rather
+  // than reparsing, which would re-interpret it in the server's timezone.
+  const naiveDateTime = trimmed.match(/^(\d{4}-\d{2}-\d{2})[ T]\d{2}:\d{2}/);
+  if (naiveDateTime) return naiveDateTime[1];
+
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return formatMysqlDate(parsed);
+}
+
+function formatMysqlDate(date) {
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
+
+/**
+ * Normalizes every date- or datetime-looking field in a request body so no
+ * controller can bind an unparseable value.
+ *
+ * Two classes are handled, because MySQL rejects an ISO 8601 string for both
+ * DATE and DATETIME columns with `ERROR 1292`, and the browser sends
+ * `new Date().toISOString()` for whatever field it is filling in:
+ *
+ *   - DATE columns  (DATE_ONLY_COLUMNS)          -> `YYYY-MM-DD`
+ *   - DATETIME columns (`*At`/`*DateTime`/`*Timestamp`, minus the DATE list)
+ *                                                -> `YYYY-MM-DD HH:MM:SS`
+ *
+ * The DATE list is consulted first so that a DATE column whose name ends in
+ * `At` (`startedAt`, `completedAt`, `enteredAt`) is not given a time it
+ * cannot hold correctly.
  *
  * Returns a shallow copy; the caller's object is not mutated, because these
  * bodies are logged on error and a mutated one would not show what arrived.
  *
  * @param {Object} data - A request body
- * @returns {Object} A copy with datetime-looking fields coerced
+ * @returns {Object} A copy with date-looking fields coerced
  */
 function normalizeDatetimes(data) {
   if (!data || typeof data !== 'object' || Array.isArray(data)) return data;
 
   const out = {};
   for (const [key, value] of Object.entries(data)) {
-    out[key] = DATETIME_COLUMN_PATTERN.test(key) ? toMysqlDateTime(value) : value;
+    if (DATE_ONLY_COLUMNS.has(key)) {
+      out[key] = toMysqlDate(value);
+    } else if (DATETIME_COLUMN_PATTERN.test(key)) {
+      out[key] = toMysqlDateTime(value);
+    } else {
+      out[key] = value;
+    }
   }
   return out;
 }
@@ -427,7 +535,9 @@ module.exports = {
   runInTransactionWithIdRetry,
   normalizeAge,
   toMysqlDateTime,
+  toMysqlDate,
   normalizeDatetimes,
+  DATE_ONLY_COLUMNS,
   mapRow,
   buildWhereClause,
   getCurrentTimestamp,

@@ -14,6 +14,7 @@ require('dotenv').config();
 const { pool, testConnection } = require('./config/database');
 const routes = require('./routes');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
+const { normalizeRequestDates } = require('./middleware/normalizeDates');
 const { seedDatabase } = require('./scripts/seedDatabase');
 const {
   defaultsForRole,
@@ -75,6 +76,22 @@ app.use(
 // two in step, and note that the documents table stores the encoded form in a
 // LONGTEXT column, so the body limit is the only ceiling that matters here.
 app.use(express.json({ limit: '16mb' }));
+
+// Coerce every date/datetime field in the body before any route sees it.
+//
+// This lives here rather than in each controller because it has to be
+// impossible to forget. The browser sends `new Date().toISOString()`
+// (`2026-09-23T07:04:36.462Z`) for whichever date field it is filling in, and
+// MySQL rejects that format for *both* DATE and DATETIME columns:
+//
+//   ERROR 1292 (22007): Incorrect datetime value: '2026-09-23T07:04:36.462Z'
+//
+// The local development database (XAMPP MariaDB) is not in strict mode and
+// accepts it, so the failure only ever appears in production — which is
+// exactly the kind of bug that should not be left to a per-controller fix.
+// Normalising centrally means a new controller, or a new field on an existing
+// one, is covered the moment it exists.
+app.use(normalizeRequestDates);
 
 // API Routes
 app.use('/api', routes);

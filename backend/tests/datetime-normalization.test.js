@@ -304,3 +304,136 @@ test('every variable destructured from a transaction is declared there', () => {
 
   assert.deepEqual(problems, [], problems.join('\n'));
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DATE columns — the second half of the same bug
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// The first fix handled `*At` / `*DateTime` / `*Timestamp` fields, which are
+// the DATETIME columns. That left the DATE columns unguarded, and they fail
+// the same way: MySQL refuses an ISO 8601 string for a DATE column too.
+//
+//   ERROR 1292 (22007): Incorrect date value: '2026-09-23T07:04:36.462Z'
+//   for column `sch_audit`.`activities`.`date` at row 1
+//
+// Found by driving POST /api/activities with a browser-shaped payload against
+// a strict-mode database. The naming is what makes this easy to miss: several
+// DATE columns end in `At` (`startedAt`, `completedAt`, `enteredAt`), so the
+// `...At` rule above would have handed them a time they cannot hold.
+
+const { toMysqlDate, DATE_ONLY_COLUMNS } = require('../src/utils/helpers');
+
+test('a DATETIME string is reduced to just its date for a DATE column', () => {
+  assert.equal(toMysqlDate('2026-09-23 15:04:36'), '2026-09-23');
+});
+
+test('an ISO 8601 string becomes a bare date', () => {
+  assert.equal(toMysqlDate('2026-09-23T07:04:36.462Z'), '2026-09-23');
+});
+
+test('a bare date is returned unchanged', () => {
+  assert.equal(toMysqlDate('2026-09-23'), '2026-09-23');
+});
+
+test('a DATE column ending in At is given a date, not a datetime', () => {
+  // The regression this whole section exists to prevent: `startedAt` is a
+  // DATE column, but the `...At` datetime rule would match it.
+  const out = normalizeDatetimes({ startedAt: '2026-09-23T07:04:36.462Z' });
+  assert.equal(out.startedAt, '2026-09-23');
+  assert.ok(!out.startedAt.includes(':'), 'must not carry a time into a DATE column');
+});
+
+test('a midnight instant does not slip to the previous day', () => {
+  // Slicing an ISO string would be wrong for a local-midnight instant east of
+  // UTC, because the Z form is UTC and that is the previous day there.
+  assert.equal(toMysqlDate('2026-09-23T00:00:00.000+08:00'), '2026-09-23');
+});
+
+test('null and undefined survive a DATE conversion', () => {
+  assert.equal(toMysqlDate(null), null);
+  assert.equal(toMysqlDate(undefined), undefined);
+});
+
+test('unparseable date input is passed through so MySQL reports it', () => {
+  assert.equal(toMysqlDate('not a date'), 'not a date');
+});
+
+test('the middleware normalises a body before the route sees it', () => {
+  const { normalizeRequestDates } = require('../src/middleware/normalizeDates');
+  const req = {
+    body: {
+      uploadedAt: '2026-09-23T07:04:36.462Z',
+      startedAt: '2026-09-23T07:04:36.462Z',
+      date: '2026-09-23T07:04:36.462Z',
+      title: 'untouched',
+      count: 3,
+    },
+  };
+  let called = false;
+  normalizeRequestDates(req, {}, () => { called = true; });
+
+  assert.ok(called, 'must always call next()');
+  assert.equal(req.body.uploadedAt, '2026-09-23 15:04:36');
+  assert.equal(req.body.startedAt, '2026-09-23');
+  assert.equal(req.body.date, '2026-09-23');
+  assert.equal(req.body.title, 'untouched');
+  assert.equal(req.body.count, 3);
+});
+
+test('the middleware is actually mounted on the app', () => {
+  // Without the mount, every controller is back to looking after itself — and
+  // the seventeen that never called the helper would fail again.
+  //
+  // Anchored to the start of a line and stripped of comments first: a
+  // commented-out mount (`// app.use(normalizeRequestDates);`) is exactly how
+  // this would be disabled in a hurry, and a naive substring search accepts
+  // it as mounted.
+  const source = read('server.js')
+    .split('\n')
+    .filter((line) => !line.trim().startsWith('//') && !line.trim().startsWith('*'))
+    .join('\n');
+
+  assert.ok(
+    /^\s*app\.use\(\s*normalizeRequestDates\s*\)\s*;/m.test(source),
+    'normalizeRequestDates must be mounted as live code in server.js'
+  );
+});
+
+test('the middleware tolerates a missing or array body', () => {
+  const { normalizeRequestDates } = require('../src/middleware/normalizeDates');
+  for (const body of [undefined, null, [], 'string']) {
+    const req = { body };
+    let called = false;
+    normalizeRequestDates(req, {}, () => { called = true; });
+    assert.ok(called, 'must not throw for body=' + JSON.stringify(body));
+  }
+});
+
+test('every DATE column declared in the schema is recognised', () => {
+  // A new DATE column added to the boot migrations would otherwise fall
+  // through to the datetime branch and be given a time it cannot hold.
+  //
+  // Only column *definitions* are matched. The migrations carry long
+  // explanatory comments that mention DATE, and a definition is recognisable
+  // by its shape: optional backticks, an identifier, the type, then a
+  // constraint keyword or the comma that ends the column. Comments and prose
+  // do not look like that.
+  //
+  // `clearedAt DATETIME` is present in the schema on purpose: it shows why the
+  // `...At` suffix alone is not a safe guide to the column type.
+  const declared = new Set();
+  const re = /^\s*`?([A-Za-z_][A-Za-z0-9_]*)`?\s+DATE\b(?:\s*\([^)]*\))?\s*(?=NOT\s+NULL|NULL|DEFAULT|,|\))/gim;
+  let m;
+  while ((m = re.exec(read('server.js'))) !== null) declared.add(m[1]);
+
+  // The migrations must have produced a list; an empty one would make the
+  // assertion below vacuous and hide a broken regex.
+  assert.ok(declared.size > 0, 'found no DATE columns in the schema at all');
+
+  const missing = [...declared].filter((c) => !DATE_ONLY_COLUMNS.has(c));
+  assert.deepEqual(
+    missing,
+    [],
+    'these DATE columns are not in DATE_ONLY_COLUMNS: ' + missing.join(', ')
+  );
+});
