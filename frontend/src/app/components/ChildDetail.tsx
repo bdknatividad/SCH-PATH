@@ -1318,7 +1318,17 @@ export function ChildDetail({ id: idProp, onBack }: ChildDetailProps = {}) {
       </Dialog>
 
       <Dialog open={isAdmissionPdfOpen} onOpenChange={(open) => { if (!open) closeAdmissionPdf(); }}>
-        <DialogContent className="w-[98vw] !max-w-[1250px] h-[95vh] p-0 overflow-hidden">
+        {/*
+          `w-[98vw]` with a bare `max-w` override is not safe on a phone: dialog.tsx
+          sets `max-w-[calc(100%-2rem)]` as the guard that keeps a dialog inside the
+          viewport, and this line's max-width was applied unconditionally (no `sm:`),
+          so on a narrow screen the width was capped by `98vw` (352px on a 360px
+          phone) instead — under the 2rem margin the base rule reserves and tight
+          enough that the PDF viewer and its toolbar had no room.
+          The `min(...)` form keeps the desktop width at 1250px while never
+          exceeding the viewport minus a 1rem margin on each side.
+        */}
+        <DialogContent className="h-[95vh] w-[min(1250px,calc(100vw-2rem))] !max-w-none p-0 overflow-hidden">
           <DialogHeader className="px-4 py-3 border-b bg-white">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <DialogTitle className="text-sm font-semibold">{admissionPdfTitle}</DialogTitle>
