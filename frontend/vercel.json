@@ -6,7 +6,6 @@
   "outputDirectory": "dist",
   "rewrites": [
     {
-      "$comment": "SPA fallback for client-side routes only.",
       "source": "/((?!assets/|forms/|cmaps/|fonts/|pdf.worker|tri-form\\.pdf|vite\\.svg|favicon\\.ico).*)",
       "destination": "/index.html"
     }
