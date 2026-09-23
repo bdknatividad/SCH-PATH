@@ -15,6 +15,7 @@ const { pool, testConnection } = require('./config/database');
 const routes = require('./routes');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 const { normalizeRequestDates } = require('./middleware/normalizeDates');
+const { securityHeaders } = require('./middleware/securityHeaders');
 const { seedDatabase } = require('./scripts/seedDatabase');
 const {
   defaultsForRole,
@@ -23,9 +24,47 @@ const {
   CHILD_RECORD_TAB_ORDER,
 } = require('./utils/accessDefaults');
 const { asStringArray } = require('./config/rbac');
+const { resolveTrustProxy } = require('./config/trustProxy');
 
 const app = express();
 const PORT = Number(process.env.PORT || 5000);
+
+/**
+ * Trust the proxy chain in front of the app.
+ *
+ * Railway terminates TLS at its edge and forwards inward, so the socket peer is
+ * always a Railway node — never the visitor. `req.ip` is therefore a *different*
+ * Railway edge instance on almost every request.
+ *
+ * That is not a cosmetic problem. `createRateLimiter` keys its buckets on
+ * `req.ip|username`; with an unstable `req.ip` the key never repeats, no bucket
+ * ever fills, and login throttling silently stops working. Measured against the
+ * deployed API: fourteen consecutive failed logins, fourteen 401s, no 429, and
+ * `X-RateLimit-Remaining` reset to 9 on every attempt. On localhost there is no
+ * proxy, `req.ip` is stable, and the same code throttles correctly — the classic
+ * works-locally, breaks-in-production shape.
+ *
+ * `trust proxy` must name the *number* of hops, not `true`. Trusting everything
+ * lets a client prepend `X-Forwarded-For: <anything>` and choose its own bucket
+ * key, which is a bypass rather than a fix. With the hop count exact, a
+ * prepended entry lands to the left of the real client and Express still returns
+ * the rightmost untrusted address.
+ *
+ * The count is a deployment fact, so it is read from the environment and only
+ * defaulted. Railway's trace header names two hops (`sin1.*,hnd1.*`), hence 2.
+ * Set TRUST_PROXY=1 if the API ever sits behind a single proxy; set
+ * TRUST_PROXY=false when it is exposed directly.
+ */
+const trustProxy = resolveTrustProxy(process.env);
+app.set('trust proxy', trustProxy);
+
+// Do not advertise the framework. `X-Powered-By: Express` is a free hint for
+// anyone matching the deployment against known Express advisories, and nothing
+// here depends on it.
+app.disable('x-powered-by');
+
+// Hardening headers, before any route can send a response.
+app.use(securityHeaders);
 
 /**
  * CORS.
