@@ -397,6 +397,63 @@ async function runMigrations() {
   `);
   console.log('Migration: admissions table ensured.');
 
+  // ── violations ────────────────────────────────────────────────────────────
+  //
+  // Same omission as `admissions`, and the last one in this family: the only
+  // definition lives in `src/database/schema.sql`, which nothing executes. On a
+  // freshly provisioned database the table was therefore absent, and the cost is
+  // larger than it looks — `violations` is the parent of three tables
+  // (`intervention_tracker`, `intervention_requirements`, `incidentReports`),
+  // so every one of them failed to create with "Failed to open the referenced
+  // table 'violations'". The Violations module, the intervention tracker, the
+  // incident-report workflow, the resident-detail violation list and the daily
+  // report counters all query it directly, and `assessmentController` and
+  // `dischargeController` write to it.
+  //
+  // Created here, immediately after `admissions`, because both depend only on
+  // `children` (already created above) and several later migrations ALTER this
+  // table or declare foreign keys into it.
+  //
+  // The `ALTER`-style columns added by the migration below (offenseNumber,
+  // interventionStartDate, interventionMonth, clearedBy, clearedAt,
+  // incidentGroupId, guideId) are declared here too, so a fresh database is
+  // complete from the start rather than depending on the ALTERs running.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS violations (
+      id VARCHAR(40) PRIMARY KEY,
+      residentId VARCHAR(40) NOT NULL,
+      date DATE NOT NULL,
+      type VARCHAR(100) NOT NULL,
+      description TEXT NULL,
+      severity ENUM('Minor', 'Major', 'Critical') NOT NULL DEFAULT 'Minor',
+      points INT NOT NULL DEFAULT 1,
+      location VARCHAR(150) NULL,
+      witnesses VARCHAR(255) NULL,
+      reportedBy VARCHAR(100) NULL,
+      reviewedBy VARCHAR(100) NULL,
+      actionTaken TEXT NULL,
+      status ENUM('Pending Review', 'Under Investigation', 'Reviewed', 'Resolved', 'Escalated', 'Rejected') NOT NULL DEFAULT 'Pending Review',
+      requiresAssessment BOOLEAN NOT NULL DEFAULT TRUE,
+      assessmentTriggered BOOLEAN NOT NULL DEFAULT FALSE,
+      offenseNumber VARCHAR(20) NULL,
+      interventionStartDate DATE NULL,
+      interventionMonth VARCHAR(7) NULL,
+      clearedBy VARCHAR(100) NULL,
+      clearedAt DATETIME NULL,
+      incidentGroupId VARCHAR(60) NULL,
+      guideId VARCHAR(40) NULL,
+      createdBy VARCHAR(100) NULL,
+      modifiedBy VARCHAR(100) NULL,
+      createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_residentId (residentId),
+      INDEX idx_status (status),
+      INDEX idx_date (date),
+      INDEX idx_violations_guideId (guideId)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+  console.log('Migration: violations table ensured.');
+
   await pool.query(`CREATE TABLE IF NOT EXISTS staff (
       id VARCHAR(40) PRIMARY KEY,
       name VARCHAR(150) NOT NULL,

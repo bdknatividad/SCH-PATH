@@ -236,3 +236,34 @@ test('ensureIndex skips a missing table instead of throwing', () => {
     'ensureIndex must return early when the table is absent',
   );
 });
+
+test('runMigrations creates the violations table itself', () => {
+  // The last table whose only definition was the never-executed schema.sql.
+  // `violations` is the parent of three tables, so its absence did not just
+  // disable the Violations module — intervention_tracker,
+  // intervention_requirements and incidentReports all failed to create with
+  // "Failed to open the referenced table 'violations'".
+  const migrations = functionBody(source, 'runMigrations');
+  assert.match(
+    migrations,
+    /CREATE TABLE IF NOT EXISTS violations/i,
+    'violations must be created by a migration, before anything references it',
+  );
+});
+
+test('violations is created before the tables that reference it', () => {
+  const migrations = functionBody(source, 'runMigrations');
+  const violationsAt = migrations.search(/CREATE TABLE IF NOT EXISTS violations/i);
+  assert.ok(violationsAt !== -1, 'expected violations to be created');
+
+  for (const dependent of ['intervention_tracker', 'incidentReports']) {
+    const at = migrations.search(
+      new RegExp(`CREATE TABLE IF NOT EXISTS ${dependent}`, 'i'),
+    );
+    assert.ok(at !== -1, `expected ${dependent} to be created`);
+    assert.ok(
+      violationsAt < at,
+      `${dependent} has a foreign key to violations and must be created after it`,
+    );
+  }
+});
