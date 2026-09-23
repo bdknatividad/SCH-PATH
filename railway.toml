@@ -1,0 +1,52 @@
+# ── Railway service definition ────────────────────────────────────────────
+#
+# Deploys the Express API. The MySQL database this service talks to lives in
+# the SAME Railway project, so the two reach each other over Railway's private
+# network and no public proxy, no TLS handshake and no port forwarding is
+# involved. That is the whole reason for running the backend here rather than
+# on a separate host: `MYSQL_URL` is supplied by Railway at runtime and the
+# private hostname resolves.
+#
+# To use it: Railway → New Project → Deploy from GitHub repo → pick the
+# repository. Railway reads this file automatically; no dashboard settings
+# need to be typed.
+#
+# IMPORTANT: `dockerfilePath` is `backend/Dockerfile` but the build context is
+# the REPOSITORY ROOT. Railway always builds with the repository root as the
+# context, which is exactly what this Dockerfile requires — it copies PDF
+# templates and the logo out of `frontend/` because the backend reads them at
+# runtime when it publishes Anecdotal Reports, TRI records and Incident
+# Reports. Pointing the context at `backend/` alone would not break the build;
+# it would break those documents later, at request time.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "backend/Dockerfile"
+
+[deploy]
+# The API's own liveness endpoint. It does not touch the database, so a slow
+# database does not cause Railway to consider the container unhealthy.
+healthcheckPath = "/api/health"
+healthcheckTimeout = 300
+# Restart the container if it exits. `ON_FAILURE` with a bounded retry count
+# avoids the infinite crash-loop that `ALWAYS` produces when a boot-time
+# migration fails: the log fills with identical failures and the real error
+# scrolls away.
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5
+
+[deploy.envVars]
+NODE_ENV = "production"
+DB_POOL_LIMIT = "20"
+JWT_EXPIRE = "24h"
+# The private hostname. Railway's MySQL is reachable from another service in
+# the same project at this address on the standard port. This is NOT the
+# public proxy (`shuttle.proxy.rlwy.net:22738`) — that endpoint exists only for
+# clients outside Railway, and using it from inside would add a round trip
+# through the public internet for no benefit.
+DB_HOST = "mysql.railway.internal"
+DB_PORT = "3306"
+# No TLS on the private network: the connection never leaves Railway's
+# network, and the managed server's certificate is not valid for the internal
+# hostname, so requesting TLS here fails the handshake.
+DB_SSL = "false"
