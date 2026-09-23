@@ -232,6 +232,12 @@ async function runMigrations() {
        WHERE TABLE_SCHEMA = DATABASE() AND LOWER(TABLE_NAME) = LOWER(?)`,
       [table]
     );
+    // An empty result means the TABLE is missing, not that the column is. The
+    // `existing.has(...)` test below would still pass and the ALTER would throw
+    // ER_NO_SUCH_TABLE, which the caller's try/catch swallows — abandoning every
+    // statement after it in that block. Skipping here keeps a missing table from
+    // silently taking four unrelated migrations down with it.
+    if (rows.length === 0) return false;
     const existing = new Set(rows.map((row) => row.COLUMN_NAME.toLowerCase()));
     if (existing.has(column.toLowerCase())) return false;
     const anchor = after && existing.has(after.toLowerCase()) ? ` AFTER \`${after}\`` : '';
@@ -282,12 +288,115 @@ async function runMigrations() {
       [table, indexName]
     );
     if (existing.length) return false;
+    // Same guard as ensureColumn: an empty result cannot distinguish "the index
+    // is absent" from "the table is absent", and ALTER TABLE on a missing table
+    // throws ER_NO_SUCH_TABLE. Uncaught, that aborts the caller and — as
+    // happened with `phaseProgress` — takes the entire boot down with it.
+    const [tableRows] = await pool.query(
+      `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND LOWER(TABLE_NAME) = LOWER(?)`,
+      [table]
+    );
+    if (tableRows.length === 0) return false;
     await pool.query(`ALTER TABLE \`${table}\` ADD INDEX \`${indexName}\` (\`${column}\`)`);
     console.log(`Migration: index ${indexName} on ${table}.${column} added.`);
     return true;
   }
 
   // ── Ensure foundational entity tables exist (schema.sql definitions) ──
+  //
+  // Order matters here. `children` is created first because `admissions`
+  // declares a foreign key to `children(id)`, and InnoDB refuses to create a
+  // table whose parent does not exist yet (errno 150, "Foreign key constraint
+  // is incorrectly formed"). A later block re-runs the same CREATE with the full
+  // column set; this one only has to guarantee the row exists and the parent
+  // does, so nothing downstream fails on a freshly provisioned database.
+  await pool.query(`CREATE TABLE IF NOT EXISTS children (
+      id VARCHAR(40) PRIMARY KEY,
+      name VARCHAR(150) NOT NULL,
+      age INT NOT NULL DEFAULT 0,
+      gender ENUM('Male', 'Female') NOT NULL DEFAULT 'Male',
+      status ENUM('Active', 'Discharged') NOT NULL DEFAULT 'Active',
+      createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+
+  // ── admissions ────────────────────────────────────────────────────────────
+  //
+  // Until now this table existed only in `src/database/schema.sql`, which
+  // nothing ever executes (it is a reference document, and it opens with DROP
+  // TABLE statements that must never run against a live database). Every other
+  // foundational table was progressively added inline to `runMigrations()`;
+  // `admissions` was the one that was missed.
+  //
+  // The consequence was not a clean error. On a freshly provisioned database
+  // the "discharge planning" migration calls `ensureColumn('admissions', …)`,
+  // which runs `ALTER TABLE admissions ADD COLUMN …` against a table that does
+  // not exist. That throws ER_NO_SUCH_TABLE, the surrounding try/catch logs one
+  // warning, and the rest of that block is abandoned — so `dischargeExtensions`
+  // and `dischargeRecommendations` were never created either, and
+  // `backfillPhaseProgressAdmissions()` failed its JOIN. Admission records,
+  // discharge planning and phase-to-admission linkage were all silently dead.
+  //
+  // Column order and constraints mirror schema.sql exactly so an existing
+  // (hand-provisioned) database is unchanged: this is a no-op wherever the
+  // table already exists.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS admissions (
+      id VARCHAR(40) PRIMARY KEY,
+      residentId VARCHAR(40) NOT NULL,
+
+      admissionNumber INT NOT NULL,
+
+      admissionDate DATE NOT NULL,
+
+      name VARCHAR(150) NOT NULL,
+      age INT NOT NULL,
+      sex ENUM('Male', 'Female') NOT NULL,
+      birthDate DATE NOT NULL,
+      religion VARCHAR(100) NOT NULL,
+      address TEXT NOT NULL,
+
+      residentSignature LONGTEXT NULL,
+      residentImage LONGTEXT NULL,
+
+      guardianName VARCHAR(150) NOT NULL,
+      guardianContact VARCHAR(100) NOT NULL,
+      guardianAddress TEXT NOT NULL,
+      guardianSignature LONGTEXT NULL,
+
+      referringParty VARCHAR(150) NOT NULL,
+      referringPartyContact VARCHAR(100) NOT NULL,
+      referringPartySignature LONGTEXT NULL,
+
+      houseparentOnDuty VARCHAR(150) NOT NULL,
+      houseparentSignature LONGTEXT NULL,
+
+      legalCategory VARCHAR(150) NOT NULL,
+      specificOffense TEXT NOT NULL,
+      caseHistory TEXT NOT NULL,
+
+      expectedDischargeDate DATE NULL,
+      status ENUM('Active', 'Closed') NOT NULL DEFAULT 'Active',
+      closedDate DATE NULL,
+
+      createdBy VARCHAR(100) NULL,
+      modifiedBy VARCHAR(100) NULL,
+
+      createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP,
+
+      FOREIGN KEY (residentId) REFERENCES children(id) ON DELETE CASCADE,
+
+      UNIQUE KEY uq_resident_admission_number (residentId, admissionNumber),
+      INDEX idx_admissions_residentId (residentId),
+      INDEX idx_admissions_status (status),
+      INDEX idx_admissions_admissionDate (admissionDate)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  `);
+  console.log('Migration: admissions table ensured.');
+
   await pool.query(`CREATE TABLE IF NOT EXISTS staff (
       id VARCHAR(40) PRIMARY KEY,
       name VARCHAR(150) NOT NULL,
@@ -763,7 +872,16 @@ async function runMigrations() {
     // Discharge planning: keep the current expected discharge date on the active
     // admission, and preserve every extension decision in a separate immutable
     // history table. Existing deployments are upgraded in place.
-    await ensureColumn('admissions', 'expectedDischargeDate', 'DATE NULL', 'status');
+    //
+    // Wrapped on its own rather than inline: an `admissions` table that is
+    // somehow still absent must not prevent dischargeExtensions /
+    // dischargeRecommendations from being created. Previously all three shared
+    // one try block, so the first failure silently skipped the other two.
+    try {
+      await ensureColumn('admissions', 'expectedDischargeDate', 'DATE NULL', 'status');
+    } catch (err) {
+      console.warn('Migration warning (admissions.expectedDischargeDate):', err.message);
+    }
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS dischargeExtensions (
@@ -1067,6 +1185,7 @@ async function runMigrations() {
   } catch (err) {
     console.warn('Migration warning (childRecordTabs):', err.message);
   }
+
 
   // Auto-migrate violations table: add offense/intervention columns
   try {

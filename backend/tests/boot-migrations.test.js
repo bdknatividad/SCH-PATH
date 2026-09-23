@@ -38,6 +38,13 @@ const path = require('node:path');
 const SERVER = path.resolve(__dirname, '..', 'src', 'server.js');
 const source = fs.readFileSync(SERVER, 'utf8');
 
+/** Strip comments so prose about a hazard is never mistaken for the hazard. */
+function withoutComments(code) {
+  return code
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/(^|[^:])\/\/.*$/gm, '$1');
+}
+
 /** The body of a top-level `async function name()`, by brace balancing. */
 function functionBody(code, name) {
   const start = code.indexOf(`async function ${name}(`);
@@ -135,5 +142,97 @@ test('the migrations that add the admission column run before the backfill', () 
   assert.ok(
     columnAt < backfillAt,
     'the admissionId column must be added before the backfill writes to it',
+  );
+});
+
+// ── the admissions table ───────────────────────────────────────────────────
+//
+// `admissions` existed only in `src/database/schema.sql`, which nothing ever
+// executes — it opens with DROP TABLE statements and is a reference document,
+// not a boot step. Every other foundational table was progressively added
+// inline to `runMigrations()`; this one was missed.
+//
+// The failure was silent and cascading. `ensureColumn('admissions', …)` ran
+// `ALTER TABLE admissions ADD COLUMN` against a table that did not exist; the
+// surrounding catch turned ER_NO_SUCH_TABLE into one warning and abandoned the
+// rest of its block, so `dischargeExtensions` and `dischargeRecommendations`
+// were never created either and the phase backfill's JOIN failed. On a newly
+// provisioned Render database, admission records, discharge planning and
+// phase-to-admission linkage were all dead while the deploy reported success.
+
+test('runMigrations creates the admissions table itself', () => {
+  const migrations = functionBody(source, 'runMigrations');
+  assert.ok(migrations, 'expected runMigrations');
+
+  assert.match(
+    migrations,
+    /CREATE TABLE IF NOT EXISTS admissions/i,
+    'admissions must be created by a migration — schema.sql is never executed',
+  );
+});
+
+test('admissions is created after children, so the foreign key can resolve', () => {
+  // `admissions.residentId` REFERENCES children(id). InnoDB refuses to create a
+  // child table before its parent exists, failing with errno 150 "Foreign key
+  // constraint is incorrectly formed" — which reads like a type mismatch and
+  // sends you looking in the wrong place.
+  const migrations = functionBody(source, 'runMigrations');
+  const childrenAt = migrations.search(/CREATE TABLE IF NOT EXISTS children/i);
+  const admissionsAt = migrations.search(/CREATE TABLE IF NOT EXISTS admissions/i);
+
+  assert.ok(childrenAt !== -1, 'expected children to be created by a migration');
+  assert.ok(admissionsAt !== -1, 'expected admissions to be created by a migration');
+  assert.ok(
+    childrenAt < admissionsAt,
+    'children must be created before admissions, or the foreign key cannot form',
+  );
+});
+
+test('nothing alters admissions before the table is created', () => {
+  // The ordering that actually broke: the discharge-planning block runs early
+  // and called ensureColumn('admissions', …) long before the table existed.
+  //
+  // Comments are stripped first. The prose explaining this bug necessarily
+  // names the very call it is warning about, and a naive search finds that
+  // sentence before it finds any code — the test then fails on its own
+  // documentation, which is a false alarm.
+  const migrations = withoutComments(functionBody(source, 'runMigrations'));
+
+  const createAt = migrations.search(/CREATE TABLE IF NOT EXISTS admissions/i);
+  const alterAt = migrations.search(/ensure(?:Column|Index)\(\s*'admissions'/);
+
+  assert.ok(alterAt !== -1, 'expected the expectedDischargeDate migration to still exist');
+  assert.ok(
+    createAt < alterAt,
+    'admissions must exist before any ALTER TABLE touches it',
+  );
+});
+
+test('ensureColumn skips a missing table instead of throwing', () => {
+  // The single defensive change that stops one absent table from taking four
+  // unrelated migrations down with it. An empty INFORMATION_SCHEMA result means
+  // the TABLE is missing, not that the column is missing — the old code could
+  // not tell the two apart.
+  const body = functionBody(source, 'ensureColumn');
+  assert.ok(body, 'expected ensureColumn');
+
+  assert.match(
+    body,
+    /if\s*\(\s*\w+\.length\s*===\s*0\s*\)\s*return\s+false/,
+    'ensureColumn must return early when the table has no columns (i.e. is absent)',
+  );
+});
+
+test('ensureIndex skips a missing table instead of throwing', () => {
+  // Same hazard, and this one was fatal rather than merely skipped: it crashed
+  // the whole boot with "Table 'phaseprogress' doesn't exist" because the
+  // CREATE for phaseProgress lives in a block that had already been abandoned.
+  const body = functionBody(source, 'ensureIndex');
+  assert.ok(body, 'expected ensureIndex');
+
+  assert.match(
+    body,
+    /if\s*\(\s*\w+\.length\s*===\s*0\s*\)\s*return\s+false/,
+    'ensureIndex must return early when the table is absent',
   );
 });
