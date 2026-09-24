@@ -23,7 +23,7 @@ const {
   canonicalizeSubModules,
   CHILD_RECORD_TAB_ORDER,
 } = require('./utils/accessDefaults');
-const { asStringArray } = require('./config/rbac');
+const { asStringArray, getRoleDefinition } = require('./config/rbac');
 const { resolveTrustProxy } = require('./config/trustProxy');
 
 const app = express();
@@ -1828,11 +1828,22 @@ async function runMigrations() {
     // Nurse, Educator, or Houseparent permissions here: Account Management is
     // allowed to customize those rows, and overwriting them on every backend
     // restart would make saved module selections disappear.
-    const roleModuleDefaults = {
-      nurse: ['Dashboard', 'Activities', 'Documents', 'Health', 'Reports'],
-      educator: ['Dashboard', 'Documents', 'Activities', 'Education'],
-      houseparent: ['Dashboard', 'Violations', 'Activities', 'Assessments', 'Houseparent'],
-    };
+    //
+    // The modules to restore are read from `rbac.definition.json`, not repeated
+    // here. This was a third hand-written copy of the matrix and it drifted the
+    // same way the others did: it gave Nurse `Activities` and `Reports`, which
+    // the definition does not grant, and omitted `Child Records`, which it does
+    // — so a Nurse could not open a resident's record at all. Because this runs
+    // on every boot and repairs empty rows, it also kept re-injecting that
+    // drift after anything cleared it. Deriving the value means the two cannot
+    // disagree again.
+    const roleModuleDefaults = {};
+    for (const role of ['nurse', 'educator', 'houseparent']) {
+      const roleDefinition = getRoleDefinition(role);
+      if (roleDefinition?.modules?.length) roleModuleDefaults[role] = roleDefinition.modules;
+    }
+    // Child-record tabs are not declared in the definition, so they stay
+    // explicit here. They are a UI concern, not part of the module matrix.
     const roleTabDefaults = {
       nurse: ['Personal Info', 'Phase Timeline', 'Medical', 'Behavioral'],
       educator: ['Personal Info', 'Education'],
@@ -1844,10 +1855,10 @@ async function runMigrations() {
          SET accessibleModules = ?, childRecordTabs = ?
          WHERE LOWER(role) = ? AND status = 'Active'
            AND (accessibleModules IS NULL OR JSON_LENGTH(accessibleModules) = 0)`,
-        [JSON.stringify(modules), JSON.stringify(roleTabDefaults[role]), role]
+        [JSON.stringify(modules), JSON.stringify(roleTabDefaults[role] || []), role]
       );
     }
-    console.log('Migration: empty nurse, educator, and houseparent access rows repaired without overwriting custom permissions.');
+    console.log('Migration: empty nurse, educator, and houseparent access rows repaired from the role definition.');
 
     // Student identification for the Education module — LRN for registered
     // students, Trainee Number for CMDC trainees.
