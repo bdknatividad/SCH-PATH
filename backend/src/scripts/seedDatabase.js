@@ -1150,6 +1150,67 @@ async function seedResidentAssignments() {
   }
 }
 
+/**
+ * Reconcile the seeded accounts' stored module grants.
+ *
+ * These accounts were originally seeded with a hand-written `accessibleModules`
+ * array — a second copy of `config/rbac.definition.json`. The definition then
+ * changed and the copy did not, and because `buildAccessSnapshot()` prefers a
+ * non-empty stored grant over the role matrix, the stale copy won. Measured
+ * against production on 2026-09-24:
+ *
+ *   nurse     stored Dashboard, Activities, Documents, Health, Reports
+ *             matrix Dashboard, Child Records, Health, Documents
+ *             -> had Activities and Reports it should not, and could not
+ *                reach Child Records at all
+ *   educator  stored Dashboard, Documents, Activities, Education
+ *             matrix Dashboard, Child Records, Education, Documents
+ *             -> same shape: gained Activities, lost Child Records
+ *
+ * The seed already writes `[]` for accounts it creates, so the matrix decides
+ * for them — but that only helps a *new* database. The rows already in
+ * production kept the old grants, which is why the drift was still live.
+ *
+ * This clears the stored array on the seeded accounts so the matrix is
+ * authoritative, which is exactly what the `DEFAULT_USERS` comment above says
+ * these entries are supposed to do. It is idempotent (it only writes when an
+ * array is non-empty) and it touches **only** the seed's own accounts: an
+ * account an administrator created or customised is not in `DEFAULT_USERS` and
+ * keeps whatever grant it was given.
+ */
+async function reconcileSeededAccessGrants() {
+  const usernames = DEFAULT_USERS.map((u) => u.username);
+  const placeholders = usernames.map(() => '?').join(', ');
+  try {
+    const [rows] = await pool.query(
+      `SELECT username, accessibleModules FROM users WHERE username IN (${placeholders})`,
+      usernames
+    );
+    const stale = rows.filter((row) => {
+      const value = row.accessibleModules;
+      if (value === null || value === undefined) return false;
+      if (Array.isArray(value)) return value.length > 0;
+      // A legacy TEXT column can still hold the JSON as a string.
+      const text = String(value).trim();
+      return text !== '' && text !== '[]' && text !== 'null';
+    });
+    if (stale.length === 0) return;
+
+    await pool.query(
+      `UPDATE users SET accessibleModules = JSON_ARRAY() WHERE username IN (${placeholders})`,
+      usernames
+    );
+    console.log(
+      `Cleared a stale module grant on ${stale.length} seeded account(s) so the role matrix decides: ` +
+        stale.map((row) => row.username).join(', ')
+    );
+  } catch (error) {
+    // Never fatal: a failure here leaves the previous grants in place, which is
+    // the behaviour the deployment already had.
+    console.error('Reconciling seeded account grants failed:', error.message);
+  }
+}
+
 async function seedDatabase() {
   try {
     console.log('Checking default users...');
@@ -1187,6 +1248,7 @@ async function seedDatabase() {
     // Houseparent AND it is Active, and both are set from Account Management.
 
     await seedResidentAssignments();
+    await reconcileSeededAccessGrants();
     await seedOfficialViolationGuide();
     console.log('Database seeding complete!');
   } catch (error) {
@@ -1194,5 +1256,5 @@ async function seedDatabase() {
   }
 }
 
-module.exports = { seedDatabase, DEFAULT_USERS };
+module.exports = { seedDatabase, reconcileSeededAccessGrants, DEFAULT_USERS };
 
