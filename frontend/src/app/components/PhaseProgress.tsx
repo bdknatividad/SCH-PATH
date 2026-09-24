@@ -203,6 +203,17 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
   const { user } = useAuth();
   const { addDocument, deleteDocument, documents: allDocuments, updateChild, children, generateReport, refreshData } = useData();
   const isCenterHead = user?.role === 'centerhead';
+  /**
+   * Who may force a phase advance past requirements that are still outstanding.
+   *
+   * The Center Head has always had the override. The Social Worker's Phase
+   * Timeline is expected to offer it too — it is their case to move — and the
+   * API accepts the same two roles, so the button and the endpoint agree. The
+   * override is recorded against whoever took it, so this does not hide who
+   * advanced a phase early.
+   */
+  const isSocialWorker = (user?.role || '').toLowerCase() === 'socialworker';
+  const canForceAdvance = isCenterHead || isSocialWorker;
   // Houseparents can view the complete phase timeline. The only write
   // affordance is checking/unchecking the Orientation Phase checklist; uploads,
   // phase transitions, demotion and discharge remain unavailable.
@@ -606,7 +617,7 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
       if (!currentRecord) throw new Error('Current phase record is unavailable');
       await request(`/phases/${currentRecord.id}/complete`, {
         method: 'POST',
-        body: JSON.stringify({ notes: advanceNotes, force: isCenterHead && !validationResult?.canAdvance }),
+        body: JSON.stringify({ notes: advanceNotes, force: canForceAdvance && !validationResult?.canAdvance }),
       });
 
       // Backend completion updates both the phase history and child.casePhase.
@@ -1767,9 +1778,9 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
                     ))}
                   </div>
                 )}
-                {isCenterHead && (
+                {canForceAdvance && (
                   <div className="p-2 bg-yellow-50 border border-yellow-200 rounded text-xs text-yellow-800">
-                    <strong>Center Head Override:</strong> You can force-advance despite incomplete requirements.
+                    <strong>{isCenterHead ? 'Center Head' : 'Social Worker'} Override:</strong> You can force-advance despite incomplete requirements.
                   </div>
                 )}
               </div>
@@ -1789,7 +1800,7 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
 
           <DialogFooter className="flex flex-wrap gap-2 justify-end">
             <Button variant="outline" onClick={() => setIsAdvanceDialogOpen(false)}>Cancel</Button>
-            {(validationResult?.canAdvance || isCenterHead) && !showAdvanceConfirm && (
+            {(validationResult?.canAdvance || canForceAdvance) && !showAdvanceConfirm && (
               <Button
                 onClick={() => setShowAdvanceConfirm(true)}
                 className={validationResult?.canAdvance ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-orange-500 hover:bg-orange-600 text-white'}

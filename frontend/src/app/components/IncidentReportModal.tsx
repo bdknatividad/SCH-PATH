@@ -41,9 +41,19 @@ const SIGNATURE_LABELS: Record<keyof typeof SIGNATURE_BOXES, string> = {
   notedBy: 'Noted by',
 };
 
+/**
+ * The two right-hand sign-off lines are pre-printed, not typed: the same two
+ * people endorse and note every Form 08, so leaving them to be filled in meant
+ * they could differ — or be left blank — from one report to the next. These
+ * mirror the constants the PDF builder stamps, so the preview and the printed
+ * form cannot disagree.
+ *
+ * "Reported by" stays typed: whoever witnessed the incident files the report.
+ */
+const FIXED_ENDORSED_TO_NAME = "Ma'am Joyce";
 const FIXED_CHECKED_BY_NAME = 'Francis C. Patricio, RSW';
 const FIXED_CHECKED_BY_ROLE = 'SWO I - Case Manager';
-const FIXED_NOTED_BY_NAME = 'Maricor C. Navarro, RSW';
+const FIXED_NOTED_BY_NAME = 'Sir Francis';
 const FIXED_NOTED_BY_ROLE = 'SWO II - Center Head';
 
 const REPORT_TYPES = [
@@ -276,7 +286,9 @@ function Form08Editor({
           />
 
           <input aria-label="Reported by" value={form.reportedBy} onChange={e => onChange('reportedBy', e.target.value)} disabled={!editable} className={inputClass} style={{ ...fieldStyle(98, 687.6, 153, 15, scale), lineHeight: `${15 * scale}px`, paddingTop: `${0 * scale}px` }} />
-          <input aria-label="Endorsed to" value={form.endorsedTo} onChange={e => onChange('endorsedTo', e.target.value)} disabled={!editable} className={inputClass} style={{ ...fieldStyle(387, 687.6, 159, 15, scale), lineHeight: `${15 * scale}px`, paddingTop: `${0 * scale}px` }} />
+          <div aria-label="Endorsed to printed name" className="absolute z-20 pointer-events-none" style={fieldStyle(387, 687.6, 159, 15, scale)}>
+            <div className="font-bold text-black" style={{ fontSize: `${8.5 * scale}px`, lineHeight: `${15 * scale}px` }}>{FIXED_ENDORSED_TO_NAME}</div>
+          </div>
           <div aria-label="Checked by printed name" className="absolute z-20 pointer-events-none" style={fieldStyle(36, 776.2, 220, 34, scale)}>
             <div className="font-bold text-black" style={{ fontSize: `${8.5 * scale}px`, lineHeight: `${10 * scale}px` }}>{FIXED_CHECKED_BY_NAME}</div>
             <div className="text-black" style={{ fontSize: `${8.5 * scale}px`, lineHeight: `${10 * scale}px` }}>{FIXED_CHECKED_BY_ROLE}</div>

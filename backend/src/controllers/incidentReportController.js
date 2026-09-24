@@ -96,9 +96,24 @@ const FORM08_SIGNATURE_BOXES = {
   notedBy: { x: 360, top: 722, width: 167, height: 32 },
 };
 
+/**
+ * The four sign-off lines' printed names.
+ *
+ * The two right-hand lines are pre-printed rather than typed: the report is
+ * endorsed to the Social Worker and noted by the Case Manager, and those are the
+ * same two people on every Form 08, so leaving them to be typed meant they could
+ * be filled in differently — or left blank — on every report.
+ *
+ * "Reported by" stays typed, because it is the one line that genuinely changes:
+ * whoever witnessed the incident files it.
+ *
+ * The `endorsedTo` column is still stored (see the INSERT/UPDATE below) so no
+ * existing record loses what it held; it is simply no longer what gets printed.
+ */
+const FORM08_ENDORSED_TO_NAME = "Ma'am Joyce";
 const FORM08_CHECKED_BY_NAME = 'Francis C. Patricio, RSW';
 const FORM08_CHECKED_BY_ROLE = 'SWO I - Case Manager';
-const FORM08_NOTED_BY_NAME = 'Maricor C. Navarro, RSW';
+const FORM08_NOTED_BY_NAME = 'Sir Francis';
 const FORM08_NOTED_BY_ROLE = 'SWO II - Center Head';
 
 /**
@@ -198,7 +213,9 @@ async function buildForm08Pdf({
   drawMultilineTop(result, 38, 573.2, 8.5, 537, 16.8, 5);
 
   drawTextTop(reportedBy, 99, 687.6, 8.5, false, { maxWidth: 150 });
-  drawTextTop(endorsedTo, 388, 687.6, 8.5, false, { maxWidth: 155 });
+  // The endorsement line is pre-printed, so the typed `endorsedTo` is not what
+  // lands on the form — the same person endorses every Form 08.
+  drawTextTop(FORM08_ENDORSED_TO_NAME, 388, 687.6, 8.5, true, { maxWidth: 155 });
   drawTextTop(FORM08_CHECKED_BY_NAME, 37, 776.4, 8.5, true, { maxWidth: 180 });
   drawTextTop(FORM08_CHECKED_BY_ROLE, 37, 789.0, 8.5, false, { maxWidth: 180 });
   drawTextTop(FORM08_NOTED_BY_NAME, 361, 776.4, 8.5, true, { maxWidth: 180 });
@@ -322,7 +339,7 @@ async function create(req, res, next) {
         [
           incidentId, violationId, residentId, completedInterventionId, JSON.stringify(reportTypes || []), othersSpecify || null,
           incidentDateTime, summary || null, actionTaken || null, result || null,
-          reportedBy || null, endorsedTo || null, FORM08_CHECKED_BY_NAME, FORM08_NOTED_BY_NAME,
+          reportedBy || null, endorsedTo || FORM08_ENDORSED_TO_NAME, FORM08_CHECKED_BY_NAME, FORM08_NOTED_BY_NAME,
           reportedBySignature || null, endorsedToSignature || null, checkedBySignature || null, notedBySignature || null,
           docId,
         ]
@@ -414,7 +431,7 @@ async function resubmit(req, res, next) {
            verifiedBy = NULL, verifiedAt = NULL, updatedAt = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [JSON.stringify(reportTypes), othersSpecify || null, String(incidentDateTime).replace('T', ' '), summary || null,
-       actionTaken || null, result || null, reportedBy || null, endorsedTo || null,
+       actionTaken || null, result || null, reportedBy || null, endorsedTo || FORM08_ENDORSED_TO_NAME,
        checkedBy || FORM08_CHECKED_BY_NAME, notedBy || FORM08_NOTED_BY_NAME,
        reportedBySignature || null, endorsedToSignature || null, checkedBySignature || null, notedBySignature || null, id]
     );

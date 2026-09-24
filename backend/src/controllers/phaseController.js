@@ -332,7 +332,7 @@ async function complete(req, res, next) {
 
     const { valid, missing } = await checkPhaseRequirements(phase.residentId, phase.phaseName, id);
     const normalizedRole = String(req.user?.role || '').toLowerCase().replace(/[\s_-]+/g, '');
-    const canForceAdvance = Boolean(force) && normalizedRole === 'centerhead';
+    const canForceAdvance = Boolean(force) && PHASE_OVERRIDE_ROLES.has(normalizedRole);
     if (!valid && !canForceAdvance) {
       return res.status(422).json({
         success: false,
@@ -732,6 +732,22 @@ async function toggleTask(req, res, next) {
   }
 }
 
+/**
+ * Who may push a phase through with requirements still outstanding.
+ *
+ * The Center Head has always held this override. The Social Worker's Phase
+ * Timeline is expected to offer it too — it is their case to move — so both are
+ * listed here and the interface reads the same pair.
+ *
+ * A named set rather than an inline comparison, because this is the rule the
+ * interface has to mirror: when the two disagreed, the SPA either offered a
+ * button the API refused or hid one it would have accepted.
+ *
+ * The override is recorded against whoever took it (`completedBy`), so widening
+ * this does not hide who advanced a phase early.
+ */
+const PHASE_OVERRIDE_ROLES = new Set(['centerhead', 'socialworker']);
+
 module.exports = {
   getAll: baseController.getAll,
   getById,
@@ -742,6 +758,7 @@ module.exports = {
   getByResident,
   getCurrent,
   complete,
+  PHASE_OVERRIDE_ROLES,
   demote,
   returnToPhase,
   validate,
