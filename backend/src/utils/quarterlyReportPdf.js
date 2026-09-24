@@ -728,6 +728,15 @@ async function drawReportSignatures(pdfDoc, page, y, report, fonts) {
     const x = MARGIN_X + index * slotWidth;
     const width = slotWidth - 20;
 
+    // "Prepared by:" names the signatory and sits *above* the signature; the
+    // conventional "Signature over Printed Name" sits under the printed name.
+    // The caption used to be drawn below the name, where it labelled the rule
+    // rather than the person, and the report carried no printed-name label at
+    // all — so a signature on the page had nothing saying whose it was.
+    page.drawText(text(slot.caption), {
+      x, y, size: SMALL_SIZE, font: fonts.regular, color: MUTED,
+    });
+
     await drawSignatureImage(pdfDoc, page, slot.signature, {
       x, y: ruleY + 2, width, height: signatureHeight,
     });
@@ -742,8 +751,15 @@ async function drawReportSignatures(pdfDoc, page, y, report, fonts) {
       font: fonts.bold,
       color: INK,
     });
-    page.drawText(text(slot.caption), {
-      x, y: ruleY - 24, size: SMALL_SIZE, font: fonts.regular, color: MUTED,
+
+    const printedNameLabel = 'Signature over Printed Name';
+    const printedNameWidth = fonts.regular.widthOfTextAtSize(printedNameLabel, SMALL_SIZE);
+    page.drawText(printedNameLabel, {
+      x: x + Math.max(0, (width - printedNameWidth) / 2),
+      y: ruleY - 24,
+      size: SMALL_SIZE,
+      font: fonts.regular,
+      color: MUTED,
     });
   }
 

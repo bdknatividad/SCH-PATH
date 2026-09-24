@@ -62,18 +62,38 @@ test('the pad offers Clear and Redo', () => {
   assert.match(source, /redoRef/, 'Clear does not remember the signature it erased');
 });
 
-test('the pad emits a PNG data URL and offers no way to upload one', () => {
+test('the pad emits a PNG data URL, and an upload is normalised into one', () => {
   const source = read(SIGNATURE_PAD);
 
   assert.match(source, /toDataURL\('image\/png'\)/, 'the pad must emit a PNG data URL');
-  assert.ok(
-    !/type="file"/.test(source),
-    'the pad must not offer a file input — signatures are drawn, never uploaded'
+
+  // Uploading sits next to drawing. What matters is that the two paths converge:
+  // an uploaded file has to come out as the same PNG data URL, or the PDF stamp
+  // and the on-screen preview would each need a second code path.
+  assert.match(source, /type="file"/, 'the pad offers no way to upload a signature image');
+  assert.match(
+    source,
+    /accept="image\/png,image\/jpeg,image\/webp"/,
+    'the upload control accepts formats the normaliser is not written for'
   );
-  assert.ok(
-    !/readAsDataURL/.test(source),
-    'the pad must not read an image file — signatures are drawn, never uploaded'
+  assert.match(source, /readAsDataURL/, 'the upload path never reads the chosen file');
+
+  // The uploaded image is redrawn at the pad's own size. That is what keeps a
+  // phone photo out of the signature column and drops its EXIF.
+  assert.match(
+    source,
+    /async function imageFileToSignaturePng/,
+    'no normaliser: an uploaded photo would be stored at whatever size it arrived'
   );
+  assert.match(source, /context\.drawImage\(/, 'the normaliser never redraws the image');
+  assert.match(
+    source,
+    /file\.size\s*>\s*MAX_UPLOAD_BYTES/,
+    'the size ceiling is declared but never applied to the chosen file'
+  );
+
+  // SVG is the one image format that can carry script, so it stays refused.
+  assert.match(source, /image\/svg\+xml/, 'the upload no longer refuses SVG');
 });
 
 test('a saved signature is restored without wiping strokes just drawn', () => {

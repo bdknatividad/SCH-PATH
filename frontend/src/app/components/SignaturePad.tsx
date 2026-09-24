@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Eraser, PenLine, Redo2, Trash2 } from 'lucide-react';
+import { Eraser, PenLine, Redo2, Trash2, Upload } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -15,7 +15,7 @@ import { Button } from '@/app/components/ui/button';
  *
  * The signer draws freehand inside the box with a mouse, finger or pen. The pad
  * emits a PNG data URL through `onChange`, which the caller stores on the record
- * it belongs to. There is deliberately no way to upload a signature image.
+ * it belongs to.
  *
  * Pointer Events are used rather than mouse events so a mouse, a stylus and a
  * touch screen all work through one code path; `touch-none` stops the browser
@@ -53,6 +53,74 @@ type Point = { x: number; y: number };
 
 const STROKE_WIDTH = 2;
 const STROKE_COLOUR = '#1f2937';
+
+/** Largest upload accepted, before it is normalised. */
+const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
+
+/**
+ * Turns an uploaded image into the same PNG data URL the pad draws.
+ *
+ * Uploading is offered alongside drawing so a signer who already has a scan or a
+ * photo of their signature on file does not have to re-draw it with a mouse.
+ *
+ * The image is redrawn into a canvas of the pad's own proportions rather than
+ * stored as it arrived. Three things depend on that:
+ *
+ *   - the stored value stays a PNG data URL, so the PDF stamp and the on-screen
+ *     preview need no second code path;
+ *   - every signature is base64 inside a LONGTEXT column, and base64 is about a
+ *     third larger than the file it encodes. A phone photo of a signature is
+ *     megabytes, and the database is the free tier's binding constraint, so an
+ *     un-resized original would sit there for the life of the record;
+ *   - EXIF and anything else embedded in the original is dropped on the way
+ *     through, because the pixels are redrawn rather than copied.
+ *
+ * SVG is refused outright: it is the one image format that can carry script, and
+ * nothing here needs it.
+ */
+async function imageFileToSignaturePng(file: File, width: number, height: number): Promise<string> {
+  if (!file.type.startsWith('image/') || file.type === 'image/svg+xml') {
+    throw new Error('Choose a PNG or JPEG image of the signature.');
+  }
+  if (file.size > MAX_UPLOAD_BYTES) {
+    throw new Error('That image is larger than 8 MB. Choose a smaller one.');
+  }
+
+  const dataUrl = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('That file could not be read.'));
+    reader.readAsDataURL(file);
+  });
+
+  const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+    const loaded = new Image();
+    loaded.onload = () => resolve(loaded);
+    loaded.onerror = () => reject(new Error('That file is not an image this browser can read.'));
+    loaded.src = dataUrl;
+  });
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('This browser cannot process the image.');
+
+  // Contain rather than stretch: a signature that arrived portrait must not be
+  // squashed into the pad's landscape box.
+  const scale = Math.min(width / image.width, height / image.height);
+  const drawWidth = image.width * scale;
+  const drawHeight = image.height * scale;
+  context.drawImage(
+    image,
+    (width - drawWidth) / 2,
+    (height - drawHeight) / 2,
+    drawWidth,
+    drawHeight,
+  );
+
+  return canvas.toDataURL('image/png');
+}
 
 export function SignaturePad({
   value,
@@ -367,6 +435,8 @@ export function SignaturePadModal({
    * instead of silently overwriting a signature that was already on the record.
    */
   const [draft, setDraft] = useState<string>(value || '');
+  /** Why the last uploaded file was refused, if it was. */
+  const [uploadError, setUploadError] = useState('');
 
   // A record loaded underneath an open dialog (or a save elsewhere on the page)
   // must not leave the draft pointing at a different signer.
@@ -379,7 +449,26 @@ export function SignaturePadModal({
   const openDialog = () => {
     if (disabled) return;
     setDraft(value || '');
+    setUploadError('');
     setOpen(true);
+  };
+
+  /**
+   * Takes an uploaded image as the draft. Normalised to the pad's own size and
+   * re-encoded as PNG, so what the caller receives is byte-for-byte the same
+   * shape as a drawn signature.
+   */
+  const upload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    // Cleared first, so choosing the same file twice still raises a change event.
+    event.target.value = '';
+    if (!file) return;
+    setUploadError('');
+    try {
+      setDraft(await imageFileToSignaturePng(file, width, height));
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : 'That image could not be used.');
+    }
   };
 
   const save = () => {
@@ -429,7 +518,8 @@ export function SignaturePadModal({
           <DialogHeader>
             <DialogTitle className="text-[#2F3E46]">{label}</DialogTitle>
             <DialogDescription>
-              Draw your signature in the box below, then choose Save signature.
+              Draw your signature in the box below, or upload a picture of it, then choose Save
+              signature.
             </DialogDescription>
           </DialogHeader>
 
@@ -447,21 +537,40 @@ export function SignaturePadModal({
 
             <p className="text-[11px] text-gray-500">
               Use a mouse, trackpad, stylus or finger. Clear removes everything; Redo restores it.
+              You can also upload a photo or scan of your signature instead of drawing it.
             </p>
 
-            {hasSignature && (
-              <button
-                type="button"
-                onClick={() => {
-                  setDraft('');
-                  onChange('');
-                  setOpen(false);
-                }}
-                className="inline-flex items-center gap-1.5 text-xs font-semibold text-red-600 hover:text-red-700"
-              >
-                <Trash2 className="h-3.5 w-3.5" /> Remove signature
-              </button>
+            {uploadError && (
+              <p className="rounded-lg border border-red-100 bg-red-50 px-2 py-1.5 text-[11px] text-red-700">
+                {uploadError}
+              </p>
             )}
+
+            <div className="flex flex-wrap items-center gap-4">
+              <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs font-semibold text-[#2F3E46] hover:text-[#263440]">
+                <Upload className="h-3.5 w-3.5" /> Upload a signature image
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  className="hidden"
+                  onChange={upload}
+                />
+              </label>
+
+              {hasSignature && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDraft('');
+                    onChange('');
+                    setOpen(false);
+                  }}
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-red-600 hover:text-red-700"
+                >
+                  <Trash2 className="h-3.5 w-3.5" /> Remove signature
+                </button>
+              )}
+            </div>
           </div>
 
           <DialogFooter className="gap-2 sm:gap-2">
