@@ -184,5 +184,12 @@ it. Fixed in `reportRoutes.js`; guarded generally by
 assumed): ~147 read probes across the whole API, zero 5xx. Railway holds both the
 backend and the MySQL; Vercel serves the SPA. The seeded `centerhead` login in
 `scripts/seedDatabase.js` works against it, which is enough to reach every module.
-**`/api/health` still does not query MySQL**, so Railway's healthcheck would
-report the service healthy with a dead database — an unfixed blind spot.
+
+**Checking the deployment's database without logging in:** `GET /api/health/db`
+→ `200 {database:'connected', latencyMs}` or `503 {database:'unreachable'}`. It
+is the *readiness* check; `/api/health` stays a dependency-free *liveness* check
+and must stay that way — pointing it at the database would let a DB blip
+restart-loop the service, and `tests/health-readiness.test.js` pins the
+separation. `railway.toml`'s `healthcheckPath` is still `/api/health`; changing it
+to `/api/health/db` is a deliberate choice (restart-on-DB-loss) that has not been
+made.
