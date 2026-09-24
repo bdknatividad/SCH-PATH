@@ -32,6 +32,31 @@ Edit one, then copy it over the other.
 in scope in that file and throws at require time, breaking unrelated tests with
 HTTP 500s.
 
+### A plain `Error` from a service is a 500, not a 400
+`middleware/errorHandler.js` maps only `ApiError`, `ER_*`, `ValidationError` and
+the JWT errors to a specific status; anything else falls through to
+`err.statusCode || 500`, and in production the message is masked to "Internal
+server error". So a service that validates by throwing a bare `Error` reports the
+caller's mistake as a server fault with nothing to act on. Validate in the
+**controller** and throw `ApiError(400, …)`; leave the service's throw as a
+programmer-error guard for callers that bypass the controller. Measured before
+the fix: `POST /alerts {}` → 500 (now 400). When auditing an endpoint's error
+contract, grep `throw new Error(` under `services/`.
+
+### Verifying a guard: mutate, then restore from your own copy
+The dominant test style here is source-text scanning, so a guard can pass
+vacuously. Neuter the code and confirm the test actually *fails* before trusting
+it. Restore from a copy you made — **not `git checkout --`** — because the fix is
+normally still uncommitted, so HEAD does not contain it and the checkout reverts
+the fix along with the mutation.
+
+### A controller test needs no database when validation precedes I/O
+If the code under test rejects bad input before its first query, drive the
+controller with fake `req`/`res` and a `next` that captures the error, and assert
+the **real status code**. Stronger than a text assertion, and it needs no pool
+stub: `config/database` builds a pool at import, but `createPool` does not
+connect. Pattern in `tests/notifications.test.js`.
+
 ## Frontend build / bundling
 
 - Route-level lazy loading lives in `App.tsx` via
@@ -77,3 +102,23 @@ array as "fall back to the role's full matrix". Code that decides redaction must
 read the **role definition** (`getRoleDefinition(role)`), never the stored grant,
 or an account seeded with `[]` gains everything. `childController.js` has the
 correct pattern in `roleCanReachMedicalTab` / `roleCanReachHealth`.
+
+**`/alerts` has no module guard.** It is mounted as
+`router.use('/alerts', authenticate, alertRoutes)` — no `requireModule` — so every
+authenticated account reaches the whole alert surface. That makes
+`DELETE /api/alerts/:id` cross-user destructive: `notificationService.remove()`
+deletes the row itself plus its `alertReads`, and the only check is `findVisible`
+("can I see it"), so any one recipient can delete a role-addressed alert for
+everyone sharing it. This contradicts the per-user read state the module was
+built around. `DataContext.tsx` → `deleteResource('alerts', id)` reaches it from
+the UI for every role. Unresolved: fixing it needs an `alertDismissals` table
+(per-user, consistent with `alertReads`) or a manager-only delete, and both
+change UX. `/violations` and `/phaseProgress` are likewise mounted without a
+module guard.
+
+**Caseload scope:** only `houseparent` is scoped (`utils/residentScope.js`), and
+the scope readers accept `assignmentType = 'houseparent'` while the seed writes
+`'household'` — see the header of `backend/tests/caseload-scope.test.js` before
+touching either side. Widening the reader to accept `'household'` is the one
+option that is wrong under both readings, because the seed creates the full
+houseparent × child cross product.
