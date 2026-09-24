@@ -6,9 +6,11 @@
  * `users.childRecordTabs` are written in, so existing rows and browser storage
  * keep working untouched.
  *
- * `MODULE_ORDER` is the storage order of the flat list. It must contain every
- * canonical module plus the legacy aliases; `tests/rbac.test.js` asserts that,
- * so a module added to the definition cannot be silently dropped here.
+ * `MODULE_ORDER` is the storage order of the flat list. It names canonical
+ * modules only: legacy spellings are resolved *before* it is consulted, so a
+ * legacy name must never appear in it. `tests/rbac.test.js` asserts it covers
+ * every module in the definition, so a module added there cannot be silently
+ * dropped here.
  */
 const rbac = require('../config/rbac');
 
@@ -16,7 +18,6 @@ const MODULE_ORDER = [
   'Dashboard',
   'Child Records',
   'Violations',
-  'Intervention Tracker',
   'Documents',
   'Activities',
   'Assessments',
@@ -41,7 +42,10 @@ const DEFAULT_MODULE_ACCESS = Object.freeze({
   nurse: ['Dashboard', 'Child Records', 'Health', 'Documents'],
   psychologist: ['Dashboard', 'Child Records', 'Violations', 'Assessments', 'Documents'],
   educator: ['Dashboard', 'Child Records', 'Education', 'Documents'],
-  socialworker: ['Dashboard', 'Child Records', 'Violations', 'Intervention Tracker', 'Activities', 'Assessments', 'Houseparent', 'Documents', 'Court Records', 'Reports'],
+  // `Violations` already carries the Intervention Tracker *submenu*, so listing
+  // the legacy top-level spelling here as well only wrote a name that is not a
+  // module key into `accessibleModules`.
+  socialworker: ['Dashboard', 'Child Records', 'Violations', 'Activities', 'Assessments', 'Houseparent', 'Documents', 'Court Records', 'Reports'],
   houseparent: ['Dashboard', 'Violations', 'Activities', 'Assessments', 'Houseparent'],
 });
 
@@ -65,22 +69,43 @@ const DEFAULT_SUBMODULE_ACCESS = Object.freeze(
   }, {}),
 );
 
-const MODULE_ALIASES = Object.freeze({
-  TRI: 'Houseparent',
-  Intervention: 'Intervention Tracker',
-});
+/**
+ * Legacy module names, each resolved to its canonical key.
+ *
+ * This used to be a hand-written pair (`TRI`, `Intervention`) that had drifted
+ * from `rbac.normalizeModuleKey` three ways: it sent `Intervention` to the
+ * legacy spelling `Intervention Tracker` rather than to `Violations`, it left a
+ * stored `Intervention Tracker` untouched, and it had no entry at all for
+ * `Case Progress` / `Education Progress` — so a stored grant naming one of
+ * those was dropped outright, a silent revocation of Education on the next
+ * save. Deriving the table from the rbac layer is what stops the two from
+ * disagreeing again.
+ */
+const MODULE_ALIASES = Object.freeze(
+  Object.keys({ ...rbac.LEGACY_MODULE_ALIASES, ...rbac.EXTRA_MODULE_ALIASES })
+    .reduce((accumulator, legacy) => {
+      const canonical = rbac.normalizeModuleKey(legacy);
+      if (canonical && canonical !== legacy) accumulator[legacy] = canonical;
+      return accumulator;
+    }, {}),
+);
 
 const TAB_ALIASES = Object.freeze({
   'Case Progress': 'Education',
   'Education Progress': 'Education',
 });
 
+/**
+ * Canonicalize a stored module grant.
+ *
+ * Resolution is delegated to `rbac.normalizeModuleKey` — the single place that
+ * knows every legacy spelling — so this cannot fall out of step with how
+ * `buildAccessSnapshot` reads the same value back. `MODULE_ORDER` then supplies
+ * the storage order and drops anything that is not a module.
+ */
 function canonicalizeModules(value, fallback = []) {
   const raw = Array.isArray(value) ? value : fallback;
-  const mapped = raw
-    .map(item => MODULE_ALIASES[String(item || '').trim()] || String(item || '').trim())
-    .filter(Boolean);
-  const unique = new Set(mapped);
+  const unique = new Set(raw.map(item => rbac.normalizeModuleKey(item)).filter(Boolean));
   return MODULE_ORDER.filter(module => unique.has(module));
 }
 

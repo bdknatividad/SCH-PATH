@@ -300,6 +300,61 @@ test('the storage defaults never grant a module its role does not declare', () =
   }
 });
 
+test('every legacy module spelling resolves through the one normalizer', () => {
+  // `canonicalizeModules` used to carry its own two-entry alias table, which had
+  // drifted from `rbac.normalizeModuleKey`: it sent `Intervention` to the legacy
+  // spelling `Intervention Tracker` rather than to `Violations`, it left a stored
+  // `Intervention Tracker` untouched, and it had no entry at all for
+  // `Case Progress` / `Education Progress` — so a stored grant naming one of
+  // those was dropped, silently revoking Education on the next save. The two
+  // must now agree exactly, for every alias either layer knows.
+  const aliases = { ...rbac.LEGACY_MODULE_ALIASES, ...rbac.EXTRA_MODULE_ALIASES };
+  assert.ok(Object.keys(aliases).length >= 5, 'expected the alias tables to be populated');
+
+  for (const legacy of Object.keys(aliases)) {
+    const expected = rbac.normalizeModuleKey(legacy);
+    assert.deepEqual(
+      accessDefaults.canonicalizeModules([legacy]),
+      [expected],
+      `a stored grant of "${legacy}" canonicalizes to something other than "${expected}"`,
+    );
+  }
+});
+
+test('MODULE_ORDER names only canonical modules, without duplicates', () => {
+  // A legacy spelling in the storage order is what let `Intervention Tracker` be
+  // persisted as though it were a module: the order doubles as the allow-list
+  // `canonicalizeModules` filters through.
+  assert.equal(
+    new Set(accessDefaults.MODULE_ORDER).size,
+    accessDefaults.MODULE_ORDER.length,
+    'MODULE_ORDER contains a duplicate entry',
+  );
+  for (const moduleName of accessDefaults.MODULE_ORDER) {
+    assert.equal(
+      rbac.normalizeModuleKey(moduleName),
+      moduleName,
+      `MODULE_ORDER names the legacy spelling "${moduleName}" rather than a canonical module`,
+    );
+  }
+});
+
+test('the storage defaults are written in canonical form', () => {
+  // The sibling test above checks the *set* after normalization, which a legacy
+  // spelling satisfies by accident (`Intervention Tracker` normalizes to
+  // `Violations`, which is declared). What lands in `users.accessibleModules`
+  // must already be canonical, because it is read back by name.
+  for (const [role, modules] of Object.entries(accessDefaults.DEFAULT_MODULE_ACCESS)) {
+    for (const moduleName of modules) {
+      assert.equal(
+        rbac.normalizeModuleKey(moduleName),
+        moduleName,
+        `${role}'s storage defaults write the legacy spelling "${moduleName}"`,
+      );
+    }
+  }
+});
+
 test('the frontend DEFAULT_MODULE_ACCESS agrees with the role matrix', () => {
   const source = read('frontend/src/app/config/moduleAccess.ts');
   const block = /export const DEFAULT_MODULE_ACCESS[^{]*\{([\s\S]*?)\n\};/.exec(source);

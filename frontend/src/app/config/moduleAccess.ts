@@ -173,8 +173,9 @@ export const DEFAULT_MODULE_ACCESS: Record<string, string[]> = {
   socialworker: [
     'Dashboard',
     'Child Records',
+    // `Violations` already carries the Intervention Tracker submenu; listing the
+    // legacy top-level spelling as well wrote a non-canonical name into storage.
     'Violations',
-    'Intervention Tracker',
     'Activities',
     'Assessments',
     'Houseparent',
