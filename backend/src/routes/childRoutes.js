@@ -62,19 +62,38 @@ router.get('/:id', asyncHandler(childController.getById));
 /**
  * POST /api/children
  * Create new child record
+ *
+ * Gated at the route, like the other writes on this router. The controller
+ * re-checks the same thing (`isManager`) — that is defence in depth rather than
+ * duplication: a route-level guard cannot be forgotten by a controller that
+ * later grows another entry point, and the controller check still holds if this
+ * router is ever remounted without one.
+ *
+ * `Child Records.create` is held by Center Head, Admin and Social Worker, which
+ * is exactly the set `isManager` admits, so this denies nobody who could write
+ * before.
  */
-router.post('/', asyncHandler(childController.create));
+router.post('/', requirePermission('Child Records', 'create'), asyncHandler(childController.create));
 
 /**
  * PUT /api/children/:id
  * Update child record
+ *
+ * `edit` is held more widely than the controller's `canModifyResident` — the
+ * Nurse and the Psychological Staff hold it too — so this narrows nothing by
+ * itself. The per-resident check inside the controller is what actually decides
+ * an update; this guard is here so the module boundary is enforced at the edge
+ * as well.
  */
-router.put('/:id', asyncHandler(childController.update));
+router.put('/:id', requirePermission('Child Records', 'edit'), asyncHandler(childController.update));
 
 /**
  * DELETE /api/children/:id
  * Delete child record
+ *
+ * `delete` is held by Center Head, Admin and Social Worker — again the same set
+ * the controller's `isManager` admits.
  */
-router.delete('/:id', asyncHandler(childController.delete));
+router.delete('/:id', requirePermission('Child Records', 'delete'), asyncHandler(childController.delete));
 
 module.exports = router;

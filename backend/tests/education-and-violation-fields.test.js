@@ -188,3 +188,76 @@ test('the Case Load screen warns about residents a month without a manager', () 
   assert.match(CASELOAD_UI, /const admitted = c\.admissionDate \|\| c\.createdAt;/);
   assert.match(CASELOAD_UI, /return Number\.isFinite\(at\) && at <= cutoff;/);
 });
+
+// ── The resident writes are gated at the route ───────────────────────────────
+//
+// `/children` is mounted with `authenticate` and nothing else, so POST / PUT /
+// DELETE relied entirely on the checks inside `childController`. That works
+// until a controller grows a second entry point, or the router is remounted
+// somewhere without the controller — the module boundary belongs at the edge as
+// well. The guards chosen are the ones that admit exactly the roles that could
+// already write, so nothing that worked before is refused now.
+
+const { requirePermission } = require('../src/middleware/rbac');
+const { ApiError } = require('../src/middleware/errorHandler');
+
+const CHILD_ROUTES = read('backend/src/routes/childRoutes.js');
+
+function runMiddleware(middleware, user) {
+  let outcome = { nexted: false, error: null };
+  middleware({ user }, {}, (error) => {
+    outcome = { nexted: !error, error: error || null };
+  });
+  return outcome;
+}
+
+test('the resident writes carry a route-level capability gate', () => {
+  assert.match(
+    CHILD_ROUTES,
+    /router\.post\('\/', requirePermission\('Child Records', 'create'\)/,
+    'POST /children must be gated at the route'
+  );
+  assert.match(
+    CHILD_ROUTES,
+    /router\.put\('\/:id', requirePermission\('Child Records', 'edit'\)/,
+    'PUT /children/:id must be gated at the route'
+  );
+  assert.match(
+    CHILD_ROUTES,
+    /router\.delete\('\/:id', requirePermission\('Child Records', 'delete'\)/,
+    'DELETE /children/:id must be gated at the route'
+  );
+});
+
+test('the resident write gates admit exactly the roles that could write before', () => {
+  const user = (role) => ({ id: 'U1', username: role, role });
+
+  // Center Head holds full access, Admin is a wildcard, Social Worker holds
+  // create/delete explicitly. These are the roles `isManager` admits.
+  for (const role of ['centerhead', 'admin', 'socialworker']) {
+    assert.equal(
+      runMiddleware(requirePermission('Child Records', 'create'), user(role)).nexted,
+      true,
+      `${role} must still be able to create a resident`
+    );
+    assert.equal(
+      runMiddleware(requirePermission('Child Records', 'delete'), user(role)).nexted,
+      true,
+      `${role} must still be able to delete a resident`
+    );
+  }
+
+  // Everyone else is refused, and refused as a 403 rather than a 500.
+  for (const role of ['psychologist', 'nurse', 'educator', 'houseparent']) {
+    const created = runMiddleware(requirePermission('Child Records', 'create'), user(role));
+    assert.equal(created.nexted, false, `${role} must not create a resident`);
+    assert.ok(created.error instanceof ApiError, `${role} must be refused with an ApiError`);
+    assert.equal(created.error.statusCode, 403);
+
+    assert.equal(
+      runMiddleware(requirePermission('Child Records', 'delete'), user(role)).nexted,
+      false,
+      `${role} must not delete a resident`
+    );
+  }
+});
