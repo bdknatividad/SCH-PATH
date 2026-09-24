@@ -33,6 +33,15 @@ CREATE TABLE IF NOT EXISTS incidentReports (
   verifiedBy VARCHAR(100) NULL,
   verifiedAt DATETIME NULL,
 
+  -- Form 08 takes two verifications: the Psychological Staff signs the clinical
+  -- side and the Social Worker counter-signs. `status` only reaches 'Verified'
+  -- when both pairs are present; `verifiedBy`/`verifiedAt` then record whichever
+  -- signature completed the pair.
+  psychVerifiedBy VARCHAR(100) NULL,
+  psychVerifiedAt DATETIME NULL,
+  swVerifiedBy VARCHAR(100) NULL,
+  swVerifiedAt DATETIME NULL,
+
   createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 
@@ -48,3 +57,10 @@ ALTER TABLE incidentReports ADD COLUMN interventionTrackerId VARCHAR(40) NULL AF
 ALTER TABLE incidentReports MODIFY COLUMN status ENUM('Submitted', 'Pending Review', 'Verified', 'Failed', 'Reassessment') NOT NULL DEFAULT 'Submitted';
 
 ALTER TABLE incidentReports ADD COLUMN pdfDocumentId VARCHAR(40) NULL AFTER interventionTrackerId;
+
+-- Dual verification. An existing database gains the four columns here; the boot
+-- migration in server.js does the same, so this file stays runnable on its own.
+ALTER TABLE incidentReports ADD COLUMN psychVerifiedBy VARCHAR(100) NULL AFTER verifiedAt;
+ALTER TABLE incidentReports ADD COLUMN psychVerifiedAt DATETIME NULL AFTER psychVerifiedBy;
+ALTER TABLE incidentReports ADD COLUMN swVerifiedBy VARCHAR(100) NULL AFTER psychVerifiedAt;
+ALTER TABLE incidentReports ADD COLUMN swVerifiedAt DATETIME NULL AFTER swVerifiedBy;

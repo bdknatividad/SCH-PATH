@@ -363,8 +363,16 @@ CREATE TABLE incidentReports (
   status ENUM('Submitted', 'Pending Review', 'Verified', 'Failed', 'Reassessment') NOT NULL DEFAULT 'Submitted',
   interventionType VARCHAR(100) NULL,
   interventionScheduleDate DATETIME NULL,
+  -- Form 08 needs two verifications, not one: the Psychological Staff signs the
+  -- clinical side and the Social Worker counter-signs. `status` only becomes
+  -- 'Verified' when both are present, and `verifiedBy`/`verifiedAt` then record
+  -- whichever signature completed the pair.
   verifiedBy VARCHAR(100) NULL,
   verifiedAt DATETIME NULL,
+  psychVerifiedBy VARCHAR(100) NULL,
+  psychVerifiedAt DATETIME NULL,
+  swVerifiedBy VARCHAR(100) NULL,
+  swVerifiedAt DATETIME NULL,
   createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (violationId) REFERENCES violations(id) ON DELETE CASCADE,

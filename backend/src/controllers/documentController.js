@@ -1356,6 +1356,8 @@ async function update(req, res, next) {
         await pool.query(
           `UPDATE incidentReports
               SET status = 'Submitted', verifiedBy = NULL, verifiedAt = NULL,
+                  psychVerifiedBy = NULL, psychVerifiedAt = NULL,
+                  swVerifiedBy = NULL, swVerifiedAt = NULL,
                   interventionType = NULL, interventionScheduleDate = NULL, updatedAt = CURRENT_TIMESTAMP
             WHERE pdfDocumentId = ?`,
           [document.id]

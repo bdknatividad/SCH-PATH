@@ -43,16 +43,22 @@ router.get('/resident/:residentId', canReadIncidentForms, asyncHandler(incidentR
 
 /**
  * POST /api/incident-reports/:id/verify
- * Psychological Staff verifies the report and selects the intervention.
+ * Verify the report. Form 08 takes TWO verifications — the Psychological Staff
+ * signs the clinical side and the Social Worker counter-signs — so both roles
+ * reach this endpoint and each signature fills its own slot. `status` only
+ * becomes 'Verified' once both are present.
  *
- * This is the Psychological Staff's only write on an incident form, and it is the
- * "review within the assigned workflow" the specification allows. The
- * capability, not the role name, is the gate — so a future role granted
- * `verify` on Violations inherits the endpoint with no route change.
+ * The capability, not the role name, is the gate — so a future role granted
+ * `verify` on Violations inherits the endpoint with no route change. The
+ * Houseparent holds `view` alone, which is what keeps them out of verification
+ * on the API as well as in the menu.
+ *
+ * `centerhead`/`admin` are full-access and may sign either side, but they must
+ * say which (`verificationSide`), so one account cannot complete the form alone.
  */
 router.post(
   '/:id/verify',
-  authorize('psychologist', 'centerhead'),
+  authorize('psychologist', 'socialworker', 'centerhead'),
   requirePermission('Violations', 'verify'),
   asyncHandler(incidentReportController.verify),
 );

@@ -14,6 +14,8 @@ const { generateId, runInTransactionWithIdRetry } = require('../utils/helpers');
 const notifications = require('../services/notificationService');
 const { canAccessResident } = require('./assignmentController');
 const { ApiError } = require('../middleware/errorHandler');
+const { normalizeRole } = require('../utils/authorization');
+const { isFullAccessRole } = require('../config/rbac');
 // An Incident Report is a violation record, so it is filed in the Violation
 // Records folder. Resolved from the routing rules rather than written as a
 // literal so renaming a folder in the JSON cannot strand these documents.
@@ -428,7 +430,10 @@ async function resubmit(req, res, next) {
            reportedBy = ?, endorsedTo = ?, checkedBy = ?, notedBy = ?,
            reportedBySignature = ?, endorsedToSignature = ?, checkedBySignature = ?, notedBySignature = ?,
            status = 'Submitted', interventionType = NULL, interventionScheduleDate = NULL,
-           verifiedBy = NULL, verifiedAt = NULL, updatedAt = CURRENT_TIMESTAMP
+           verifiedBy = NULL, verifiedAt = NULL,
+           psychVerifiedBy = NULL, psychVerifiedAt = NULL,
+           swVerifiedBy = NULL, swVerifiedAt = NULL,
+           updatedAt = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [JSON.stringify(reportTypes), othersSpecify || null, String(incidentDateTime).replace('T', ' '), summary || null,
        actionTaken || null, result || null, reportedBy || null, endorsedTo || FORM08_ENDORSED_TO_NAME,
@@ -528,69 +533,186 @@ async function getByResidentId(req, res, next) {
  * Psychological Staff verifies the report and (optionally) selects the intervention.
  * Body: { interventionType, interventionScheduleDate, verifiedBy }
  */
+/**
+ * The two signatures a Form 08 needs, and the columns each one writes.
+ *
+ * Form 08 is filed by a Social Worker and reviewed by the Psychological Staff,
+ * and the specification requires *both* to sign it off: the Psychological Staff
+ * signs the clinical side — and with it the intervention and its schedule — and
+ * the Social Worker counter-signs. Until now a single call from either role set
+ * `status = 'Verified'`, so one signature completed the form and the second
+ * signatory was never asked.
+ *
+ * `status` therefore only reaches 'Verified' when *both* stamp pairs are
+ * present. `verifiedBy`/`verifiedAt` keep their existing meaning for the rest of
+ * the system — "who signed this off" — and record whichever signature completed
+ * the pair.
+ */
+const VERIFICATION_SIDES = {
+  psych: { by: 'psychVerifiedBy', at: 'psychVerifiedAt', label: 'Psychological Staff' },
+  sw: { by: 'swVerifiedBy', at: 'swVerifiedAt', label: 'Social Worker' },
+};
+
+/**
+ * Which side is this caller signing?
+ *
+ * A role that owns one side signs that side, and may not sign the other — a
+ * Social Worker cannot counter-sign on the Psychological Staff's behalf, or the
+ * two signatures would be one person's. A full-access role holds every
+ * capability but still signs one side at a time, so they must say which; that
+ * keeps "both signatures" true for them too rather than letting one account
+ * complete the form alone.
+ *
+ * @param {Object} user - The authenticated user.
+ * @param {string} [requested] - `psych` or `sw`, required of a full-access role.
+ * @returns {'psych'|'sw'}
+ */
+function resolveVerificationSide(user, requested) {
+  const role = normalizeRole(user?.role);
+  const wanted = String(requested || '').trim().toLowerCase();
+
+  const ownSide = role === 'psychologist' ? 'psych' : role === 'socialworker' ? 'sw' : null;
+  if (ownSide) {
+    if (wanted && wanted !== ownSide) {
+      throw new ApiError(403, `Your role signs the ${VERIFICATION_SIDES[ownSide].label} verification, not the ${VERIFICATION_SIDES[wanted]?.label || wanted} one.`);
+    }
+    return ownSide;
+  }
+
+  if (isFullAccessRole(role)) {
+    if (!VERIFICATION_SIDES[wanted]) {
+      throw new ApiError(400, 'An Incident Report needs two verifications, so a full-access account signs one side at a time: send verificationSide as "psych" or "sw".');
+    }
+    return wanted;
+  }
+
+  throw new ApiError(403, `Your role (${role || 'unknown'}) is not permitted to verify an Incident Report.`);
+}
+
 async function verify(req, res, next) {
   try {
     const { id } = req.params;
-    const { interventionType, interventionScheduleDate, verifiedBy } = req.body || {};
+    const { interventionType, interventionScheduleDate, verifiedBy, verificationSide } = req.body || {};
+
+    const side = resolveVerificationSide(req.user, verificationSide);
+    const columns = VERIFICATION_SIDES[side];
 
     const [rows] = await pool.query('SELECT * FROM incidentReports WHERE id = ?', [id]);
     if (rows.length === 0) throw new ApiError(404, 'Incident report not found');
-    if (rows[0].status === 'Verified') {
-      return res.json({ success: true, data: mapIncidentReport(rows[0]), message: 'Incident report was already verified.' });
+    const report = rows[0];
+
+    if (report.status === 'Verified') {
+      return res.json({ success: true, data: mapIncidentReport(report), message: 'Incident report was already verified.' });
     }
-    if (!['Submitted', 'Pending Review'].includes(rows[0].status)) {
+    if (!['Submitted', 'Pending Review'].includes(report.status)) {
       throw new ApiError(409, 'This Incident Report must be corrected and resubmitted before it can be approved.');
     }
 
+    // A side signs once. Re-sending the same side would otherwise let one account
+    // satisfy both slots by calling the endpoint twice.
+    if (report[columns.by]) {
+      throw new ApiError(409, `This Incident Report already carries the ${columns.label} verification (${report[columns.by]}).`);
+    }
+
+    const signer = verifiedBy || req.user?.username || null;
+    if (!signer) throw new ApiError(400, 'A verifying user is required.');
+
+    const otherSide = side === 'psych' ? 'sw' : 'psych';
+    const bothSigned = Boolean(report[VERIFICATION_SIDES[otherSide].by]);
+
+    // The intervention and its schedule belong to the clinical decision, so only
+    // the Psychological Staff's signature carries them. The Social Worker's
+    // counter-signature must not silently overwrite what was prescribed.
+    const nextInterventionType = side === 'psych' ? (interventionType || null) : (report.interventionType || null);
+    const nextSchedule = side === 'psych'
+      ? (interventionScheduleDate ? String(interventionScheduleDate).replace('T', ' ') : null)
+      : (report.interventionScheduleDate || null);
+
     await pool.query(
       `UPDATE incidentReports
-       SET status = 'Verified', interventionType = ?, interventionScheduleDate = ?,
-           verifiedBy = ?, verifiedAt = NOW()
+       SET ${columns.by} = ?, ${columns.at} = NOW(),
+           interventionType = ?, interventionScheduleDate = ?,
+           status = ?, verifiedBy = ?, verifiedAt = ?
        WHERE id = ?`,
-      [interventionType || null, interventionScheduleDate ? String(interventionScheduleDate).replace('T', ' ') : null, verifiedBy || req.user?.username || null, id]
+      [
+        signer,
+        nextInterventionType, nextSchedule,
+        bothSigned ? 'Verified' : report.status,
+        // `verifiedBy`/`verifiedAt` mean "who signed this off", so they are
+        // stamped by whichever signature completes the pair.
+        bothSigned ? signer : report.verifiedBy || null,
+        bothSigned ? new Date().toISOString().slice(0, 19).replace('T', ' ') : (report.verifiedAt || null),
+        id,
+      ]
     );
 
     const [updated] = await pool.query('SELECT * FROM incidentReports WHERE id = ?', [id]);
 
-    // Verification schedules the intervention, so the people who carry it out
-    // (the case owner and the resident's Houseparents) need to be told.
+    // The verification that completes the pair schedules the intervention, so the
+    // people who carry it out (the case owner and the resident's Houseparents)
+    // need to be told. A first signature is recorded quietly: the form is not
+    // approved yet and telling anyone to act on it would be premature.
     try {
-      const verifier = verifiedBy || req.user?.username || 'Psychological Staff';
-      const childName = (await notifications.residentName(rows[0].residentId)) || rows[0].residentId;
-      const schedule = interventionScheduleDate
-        ? ` Scheduled for ${String(interventionScheduleDate).replace('T', ' ')}.`
-        : '';
-      const base = {
-        type: 'Incident Report',
-        residentId: rows[0].residentId,
-        title: `Incident Report Verified - ${childName}`,
-        message: `${verifier} verified the Form 08 Incident Report for ${childName}.${interventionType ? ` Intervention: ${interventionType}.` : ''}${schedule}`,
-        priority: 'Medium',
-        actionRequired: 'Carry out the scheduled intervention.',
-        relatedRecordType: 'incidentReports',
-        relatedRecordId: id,
-        actorUsername: verifier,
-      };
+      const childName = (await notifications.residentName(report.residentId)) || report.residentId;
+      const schedule = nextSchedule ? ` Scheduled for ${nextSchedule}.` : '';
 
-      await notifications.notify({
-        ...base,
-        targetRole: 'socialworker',
-        dedupeKey: `incident-report:${id}:verified`,
-      });
+      if (!bothSigned) {
+        // The one person who has to act is the other signatory. A Social Worker
+        // filing the form has already had their turn; it is the Psychological
+        // Staff who must now sign, and the reverse.
+        const waitingOn = side === 'psych' ? 'socialworker' : 'psychologist';
+        await notifications.notify({
+          type: 'Incident Report',
+          residentId: report.residentId,
+          title: `Incident Report (Form 08) needs your verification - ${childName}`,
+          message: `${signer} signed the ${columns.label} verification for ${childName}. It still needs the ${VERIFICATION_SIDES[otherSide].label} verification before it is approved.`,
+          priority: 'High',
+          actionRequired: `Sign the ${VERIFICATION_SIDES[otherSide].label} verification.`,
+          relatedRecordType: 'incidentReports',
+          relatedRecordId: id,
+          targetRole: waitingOn,
+          actorUsername: signer,
+          dedupeKey: `incident-report:${id}:awaiting-${otherSide}`,
+        });
+      } else {
+        const base = {
+          type: 'Incident Report',
+          residentId: report.residentId,
+          title: `Incident Report Verified - ${childName}`,
+          message: `${signer} completed the verification of the Form 08 Incident Report for ${childName}.${nextInterventionType ? ` Intervention: ${nextInterventionType}.` : ''}${schedule}`,
+          priority: 'Medium',
+          actionRequired: 'Carry out the scheduled intervention.',
+          relatedRecordType: 'incidentReports',
+          relatedRecordId: id,
+          actorUsername: signer,
+        };
 
-      const houseparents = await notifications.houseparentsOf(rows[0].residentId);
-      await notifications.notifyUsers(
-        houseparents.map((hp) => hp.id),
-        { ...base, dedupeKey: `incident-report:${id}:verified-houseparent` }
-      );
+        await notifications.notify({
+          ...base,
+          targetRole: 'socialworker',
+          dedupeKey: `incident-report:${id}:verified`,
+        });
 
-      // The alert asking the verifier to verify this report is now finished.
-      await notifications.markRelatedRead(req.user, 'incidentReports', id);
+        const houseparents = await notifications.houseparentsOf(report.residentId);
+        await notifications.notifyUsers(
+          houseparents.map((hp) => hp.id),
+          { ...base, dedupeKey: `incident-report:${id}:verified-houseparent` }
+        );
+
+        // The alert asking this person to verify the report is now finished.
+        await notifications.markRelatedRead(req.user, 'incidentReports', id);
+      }
     } catch (notifyErr) {
       console.error('[IncidentReportController] Verification notification failed (non-fatal):', notifyErr.message);
     }
 
-    res.json({ success: true, data: mapIncidentReport(updated[0]), message: 'Incident report verified.' });
+    res.json({
+      success: true,
+      data: mapIncidentReport(updated[0]),
+      message: bothSigned
+        ? 'Incident report verified.'
+        : `Your ${columns.label} verification was recorded. The report is verified once the ${VERIFICATION_SIDES[otherSide].label} also signs it.`,
+    });
   } catch (error) {
     next(error);
   }
@@ -604,4 +726,7 @@ module.exports = {
   create, getByViolationId, getByResidentId, verify, resubmit, buildForm08Pdf,
   FORM08_ENDORSED_TO_NAME, FORM08_CHECKED_BY_NAME, FORM08_CHECKED_BY_ROLE,
   FORM08_NOTED_BY_NAME, FORM08_NOTED_BY_ROLE,
+  // Exported so the dual-verification rule can be asserted directly: which side a
+  // caller signs, and which columns each side writes.
+  VERIFICATION_SIDES, resolveVerificationSide,
 };

@@ -3,10 +3,11 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Button } from '@/app/components/ui/button';
 import { Badge } from '@/app/components/ui/badge';
 import { Alert, AlertDescription } from '@/app/components/ui/alert';
-import { Save, Download, Loader2 } from 'lucide-react';
+import { Save, Download, Loader2, ShieldCheck, Clock } from 'lucide-react';
 import { Document as PdfDocument, Page as PdfPage, pdfjs } from 'react-pdf';
 import { request } from '@/services/api';
 import { useAuth } from '../state/AuthContext';
+import { usePermissions } from '@/app/hooks/usePermissions';
 import { SignaturePadModal } from '@/app/components/SignaturePad';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
@@ -89,6 +90,10 @@ export interface IncidentReportData {
   interventionScheduleDate?: string | null;
   verifiedBy?: string | null;
   verifiedAt?: string | null;
+  psychVerifiedBy?: string | null;
+  psychVerifiedAt?: string | null;
+  swVerifiedBy?: string | null;
+  swVerifiedAt?: string | null;
 }
 
 interface Props {
@@ -326,11 +331,124 @@ function Form08Editor({
   );
 }
 
+/**
+ * The two verifications Form 08 needs.
+ *
+ * The report is signed off twice: the Psychological Staff signs the clinical
+ * side — and with it the intervention and its schedule — and the Social Worker
+ * counter-signs. `POST /incident-reports/:id/verify` records one side per call,
+ * refuses a second signature from the same side, and only moves the report to
+ * 'Verified' once both are present. So this panel shows each slot and offers the
+ * action only for the caller's own unsigned side.
+ *
+ * The panel is gated on `Violations:verify` — the same capability the route
+ * checks — so a Houseparent, who holds `view` alone, neither sees it nor could
+ * use it. A full-access account holds every capability but still signs one side
+ * at a time, so it is offered both; that is what keeps one account from
+ * completing the form alone.
+ */
+const VERIFICATION_SLOTS = [
+  { side: 'psych' as const, label: 'Psychological Staff', by: 'psychVerifiedBy', at: 'psychVerifiedAt' },
+  { side: 'sw' as const, label: 'Social Worker', by: 'swVerifiedBy', at: 'swVerifiedAt' },
+];
+
+/** The side a role owns. A full-access role owns neither and chooses. */
+function sideOwnedByRole(role: string): 'psych' | 'sw' | null {
+  const normalized = String(role || '').toLowerCase().replace(/[\s_]/g, '');
+  if (normalized === 'psychologist') return 'psych';
+  if (normalized === 'socialworker') return 'sw';
+  return null;
+}
+
+function formatVerifiedAt(value?: string | null): string {
+  if (!value) return '';
+  const parsed = new Date(String(value).replace(' ', 'T'));
+  return Number.isNaN(parsed.getTime()) ? '' : parsed.toLocaleString();
+}
+
+function VerificationPanel({
+  report, canVerify, role, onVerified,
+}: {
+  report: IncidentReportData;
+  canVerify: boolean;
+  role: string;
+  onVerified: (updated: IncidentReportData) => void;
+}) {
+  const [signingSide, setSigningSide] = useState<'psych' | 'sw' | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!canVerify) return null;
+
+  const openForSignature = ['Submitted', 'Pending Review'].includes(report.status);
+  const ownSide = sideOwnedByRole(role);
+  const sidesToOffer: Array<'psych' | 'sw'> = ownSide ? [ownSide] : ['psych', 'sw'];
+
+  async function sign(side: 'psych' | 'sw') {
+    setSigningSide(side);
+    setError(null);
+    try {
+      const res: any = await request(`/incident-reports/${report.id}/verify`, {
+        method: 'POST',
+        body: JSON.stringify({ verificationSide: side }),
+      });
+      if (res?.data) onVerified(res.data as IncidentReportData);
+    } catch (err: any) {
+      setError(err?.message || 'Your verification could not be recorded.');
+    } finally {
+      setSigningSide(null);
+    }
+  }
+
+  return (
+    <div className="shrink-0 border-b bg-slate-50 px-4 py-2">
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-slate-500">
+          <ShieldCheck className="h-4 w-4 text-[#2F3E46]" /> Verification
+        </span>
+        {VERIFICATION_SLOTS.map((slot) => {
+          const signer = report[slot.by as keyof IncidentReportData] as string | null | undefined;
+          const at = report[slot.at as keyof IncidentReportData] as string | null | undefined;
+          const canSignThis = openForSignature && !signer && sidesToOffer.includes(slot.side);
+          return (
+            <div key={slot.side} className="flex items-center gap-2 rounded-full border bg-white px-3 py-1">
+              {signer
+                ? <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-green-600" />
+                : <Clock className="h-3.5 w-3.5 shrink-0 text-amber-500" />}
+              <span className="text-[11px] font-semibold text-slate-700">{slot.label}</span>
+              <span className="text-[11px] text-slate-500">
+                {signer ? `${signer}${at ? ` · ${formatVerifiedAt(at)}` : ''}` : 'Awaiting'}
+              </span>
+              {canSignThis && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-6 border-green-300 text-[10px] text-green-800 hover:bg-green-50"
+                  disabled={signingSide !== null}
+                  onClick={() => sign(slot.side)}
+                >
+                  {signingSide === slot.side ? 'Signing…' : `Sign as ${slot.label}`}
+                </Button>
+              )}
+            </div>
+          );
+        })}
+        <span className="text-[11px] text-slate-500">
+          {report.status === 'Verified'
+            ? 'Both verifications are in — the report is approved.'
+            : 'The report is approved once both verifications are signed.'}
+        </span>
+      </div>
+      {error && <p className="mt-1 text-[11px] font-medium text-red-600">{error}</p>}
+    </div>
+  );
+}
+
 export default function IncidentReportModal({
   open, onOpenChange, mode, violationId, residentId, residentIds, residentName,
   currentUsername, violationIds, onSaved, initialIncidentDateTime,
 }: Props) {
   const { user } = useAuth();
+  const { can } = usePermissions();
   const [form, setForm] = useState({ ...emptyForm });
   const [report, setReport] = useState<IncidentReportData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -339,6 +457,10 @@ export default function IncidentReportModal({
 
   const role = String(user?.role || '').toLowerCase();
   const isReadOnly = mode === 'view' || !['socialworker', 'social_worker', 'social worker', 'centerhead', 'center_head', 'center head', 'houseparent', 'admin'].includes(role);
+  // The same capability the verify route checks. A Houseparent holds
+  // `Violations:view` alone, so this is false for them and no verification
+  // surface renders — the UI and the API agree by construction.
+  const canVerifyIncidentReport = can('Violations', 'verify');
 
   useEffect(() => {
     if (!open) return;
@@ -501,6 +623,15 @@ export default function IncidentReportModal({
         </DialogHeader>
 
         {saveError && <div className="mx-4 mt-3 shrink-0"><Alert variant="destructive"><AlertDescription>{saveError}</AlertDescription></Alert></div>}
+
+        {report && !loading && (
+          <VerificationPanel
+            report={report}
+            canVerify={canVerifyIncidentReport}
+            role={role}
+            onVerified={setReport}
+          />
+        )}
 
         {loading ? (
           <div className="flex min-h-0 flex-1 items-center justify-center bg-slate-100 text-sm text-gray-500"><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading Incident Report…</div>

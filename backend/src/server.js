@@ -1968,6 +1968,10 @@ async function runMigrations() {
         interventionScheduleDate DATE NULL,
         verifiedBy VARCHAR(100) NULL,
         verifiedAt DATETIME NULL,
+        psychVerifiedBy VARCHAR(100) NULL,
+        psychVerifiedAt DATETIME NULL,
+        swVerifiedBy VARCHAR(100) NULL,
+        swVerifiedAt DATETIME NULL,
         createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         FOREIGN KEY (violationId) REFERENCES violations(id) ON DELETE CASCADE,
@@ -2010,6 +2014,15 @@ async function runMigrations() {
       console.warn(`Migration warning (incidentReports.${column}):`, err.message);
     }
   }
+  // Form 08 takes two verifications — the Psychological Staff signs the clinical
+  // side, the Social Worker counter-signs — and `status` only reaches 'Verified'
+  // when both are recorded. A deployed database therefore needs both stamp
+  // pairs; without them every verification would write a column that is not
+  // there and the form could never be completed.
+  await ensureColumn('incidentReports', 'psychVerifiedBy', 'VARCHAR(100) NULL', 'verifiedAt');
+  await ensureColumn('incidentReports', 'psychVerifiedAt', 'DATETIME NULL', 'psychVerifiedBy');
+  await ensureColumn('incidentReports', 'swVerifiedBy', 'VARCHAR(100) NULL', 'psychVerifiedAt');
+  await ensureColumn('incidentReports', 'swVerifiedAt', 'DATETIME NULL', 'swVerifiedBy');
 
 
   try {
