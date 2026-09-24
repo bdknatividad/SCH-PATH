@@ -881,6 +881,7 @@ CREATE TABLE IF NOT EXISTS quarterlyProgressReports (
   periodEnd DATE NOT NULL,
   periodLabel VARCHAR(60) NULL,
   identifyingInformation JSON NULL,
+  narrative TEXT NULL,
   status ENUM('Draft','Submitted','Under Review','Returned','Finalized') NOT NULL DEFAULT 'Draft',
   preparedByName VARCHAR(150) NULL,
   preparedBySignature LONGTEXT NULL,

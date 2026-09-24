@@ -1,5 +1,5 @@
 {
-  "$comment": "Fill-in geometry for the Quarterly Progress Report. Shared by the frontend overlay (frontend/src/app/components/QuarterlyProgressReport.tsx) and the backend PDF writer (backend/src/utils/quarterlyReportPdf.js) so the coordinates exist once — the same arrangement as triLayout.json. All values are PDF points; y is measured from the bottom of the page, as pdf-lib draws it. A backend test fails if the writer's own derived geometry stops agreeing with this file.",
+  "$comment": "Fill-in geometry for the Quarterly Progress Report. Shared by the frontend overlay (frontend/src/app/components/QuarterlyProgressReport.tsx) and the backend PDF writer (backend/src/utils/quarterlyReportPdf.js) so the coordinates exist once — the same arrangement as triLayout.json. All values are PDF points; y is measured from the bottom of the page, as pdf-lib draws it. A backend test fails if the writer's own derived geometry stops agreeing with this file. `signature` is derived from the bottom of `narrative`, not from the last aspect row, so the two bands cannot overlap.",
   "page": {
     "width": 595.28,
     "height": 841.89,
@@ -17,9 +17,15 @@
       { "key": "interventions", "x": 405, "width": 145.28 }
     ]
   },
-  "signature": {
+  "narrative": {
     "x": 45,
     "top": 335.89,
+    "width": 505.28,
+    "height": 150
+  },
+  "signature": {
+    "x": 45,
+    "top": 145.89,
     "width": 232.64,
     "height": 36
   }

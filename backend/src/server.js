@@ -2222,6 +2222,7 @@ async function runMigrations() {
         periodEnd DATE NOT NULL,
         periodLabel VARCHAR(60) NULL,
         identifyingInformation JSON NULL,
+        narrative TEXT NULL,
         status ENUM('Draft','Submitted','Under Review','Returned','Finalized') NOT NULL DEFAULT 'Draft',
         preparedByName VARCHAR(150) NULL,
         preparedBySignature LONGTEXT NULL,
@@ -2250,6 +2251,15 @@ async function runMigrations() {
     console.log('Migration: quarterlyProgressReports table ensured.');
   } catch (err) {
     console.warn('Migration warning (quarterlyProgressReports):', err.message);
+  }
+
+  // The closing narrative was added after the table was already in service, so
+  // `CREATE TABLE IF NOT EXISTS` above cannot deliver it to a provisioned
+  // database. Guarded and anchored like every other column migration here.
+  try {
+    await ensureColumn('quarterlyProgressReports', 'narrative', 'TEXT NULL', 'identifyingInformation');
+  } catch (err) {
+    console.warn('Migration warning (quarterlyProgressReports.narrative):', err.message);
   }
 
   try {

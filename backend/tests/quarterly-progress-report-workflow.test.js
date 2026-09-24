@@ -112,6 +112,30 @@ function seed() {
 const JSON_COLUMNS = new Set(['identifyingInformation', 'content', 'details', 'reportTypes', 'selectedResidentIds', 'responses']);
 
 /**
+ * The columns the store's tables have, for the `INFORMATION_SCHEMA` probe the
+ * controller runs before it alters a table.
+ *
+ * The list models a database created *after* the closing narrative was added, so
+ * the probe finds the column and no `ALTER` is issued. That is the state these
+ * workflow tests run in; the migration itself — a table that predates the column
+ * — is covered directly in `quarterly-progress-report.test.js`, where a stub
+ * pool can be told to answer either way.
+ *
+ * A table missing from this map answers with no columns, which the controller
+ * reads as "the table does not exist" and skips the alteration.
+ */
+const SCHEMA_COLUMNS = {
+  quarterlyprogressreports: [
+    'id', 'residentId', 'periodStart', 'periodEnd', 'periodLabel',
+    'identifyingInformation', 'narrative', 'status', 'preparedByName',
+    'preparedBySignature', 'attestedByName', 'attestedBySignature',
+    'notedByName', 'notedBySignature', 'createdBy', 'createdAt', 'updatedBy',
+    'updatedAt', 'submittedBy', 'submittedAt', 'reviewedBy', 'reviewedAt',
+    'finalizedBy', 'finalizedAt', 'reviewNotes',
+  ],
+};
+
+/**
  * A tiny in-memory stand-in for MySQL, covering only the statements this feature
  * issues. Anything unrecognised throws with the SQL attached, so a new query in
  * the controller fails loudly here instead of silently returning `[]`.
@@ -231,6 +255,14 @@ function makeStore(seedTables = seed()) {
 
     // -- schema / migrations
     if (/^CREATE TABLE IF NOT EXISTS/i.test(text)) return [{}, []];
+    // The controller probes for the closing-narrative column before altering.
+    // Answered from the declared schema rather than from the seeded rows: the
+    // seeded tables start empty, and an empty table is not a missing one.
+    if (/^SELECT COLUMN_NAME FROM INFORMATION_SCHEMA\.COLUMNS/i.test(text)) {
+      const table = (text.match(/LOWER\(TABLE_NAME\) = '([^']+)'/i)?.[1] || '').toLowerCase();
+      const columns = SCHEMA_COLUMNS[table] || [];
+      return [columns.map((column) => ({ COLUMN_NAME: column })), []];
+    }
 
     // -- auth
     if (/^SELECT id, username, role, status FROM users WHERE id = \?/i.test(text)) {

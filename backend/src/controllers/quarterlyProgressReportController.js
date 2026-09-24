@@ -42,6 +42,13 @@
  * evidence queries exist and are tested, but the facility asked for the Social
  * Worker to write the six aspects rather than curate a machine draft.
  *
+ * ── THE CLOSING NARRATIVE ───────────────────────────────────────────────────
+ * The six aspects are tabular — a rating and two short columns each. The report
+ * also carries one free-text `narrative` at the foot, the preparer's own account
+ * of the period, because what the six rows add up to is not a seventh row. It is
+ * stored on the report rather than per aspect and printed between the table and
+ * the signature.
+ *
  * ── SNAPSHOT, NOT LIVE ───────────────────────────────────────────────────────
  * The assembled text is stored in the section's `assembled*` columns at the
  * moment the report is opened, and never recomputed. If it were recomputed, a
@@ -141,6 +148,7 @@ async function ensureTables() {
       periodEnd DATE NOT NULL,
       periodLabel VARCHAR(60) NULL,
       identifyingInformation JSON NULL,
+      narrative TEXT NULL,
       status ENUM('Draft','Submitted','Under Review','Returned','Finalized') NOT NULL DEFAULT 'Draft',
       preparedByName VARCHAR(150) NULL,
       preparedBySignature LONGTEXT NULL,
@@ -198,7 +206,36 @@ async function ensureTables() {
       CONSTRAINT fk_quarterly_progress_section_report FOREIGN KEY (reportId) REFERENCES quarterlyProgressReports(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
+  await ensureNarrativeColumn();
   tablesEnsured = true;
+}
+
+/**
+ * Adds the closing-narrative column to a report table that predates it.
+ *
+ * `CREATE TABLE IF NOT EXISTS` above cannot do this: on an already-provisioned
+ * database it is a no-op, so the column would be missing and the first save
+ * would fail with "Unknown column 'narrative' in 'field list'" — a 500 on a
+ * button that worked in development. `server.js` runs the same migration at
+ * boot; this is here for the same reason `ensureTables` is, so a database that
+ * never took that path still works.
+ *
+ * An empty result means the TABLE is missing rather than the column, and the
+ * ALTER is skipped: a missing table must not take the request down here when
+ * `CREATE TABLE` above is the thing that should have created it.
+ */
+async function ensureNarrativeColumn() {
+  const [columns] = await pool.query(
+    `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND LOWER(TABLE_NAME) = 'quarterlyprogressreports'`
+  );
+  if (columns.length === 0) return false;
+  if (columns.some((row) => String(row.COLUMN_NAME).toLowerCase() === 'narrative')) return false;
+  await pool.query(
+    'ALTER TABLE quarterlyProgressReports ADD COLUMN narrative TEXT NULL AFTER identifyingInformation'
+  );
+  console.log('Migration: quarterlyProgressReports.narrative added.');
+  return true;
 }
 
 // ── SMALL HELPERS ───────────────────────────────────────────────────────────
@@ -1126,15 +1163,22 @@ async function update(req, res, next) {
     if (!isReviewer(req)) throw new ApiError(403, 'Only a reviewer can edit the report header.');
     if (report.status === 'Finalized') throw new ApiError(409, 'A finalized report cannot be edited.');
 
-    const { periodLabel, identifyingInformation } = req.body || {};
+    const { periodLabel, identifyingInformation, narrative } = req.body || {};
     if (identifyingInformation !== undefined && !isPlainObject(identifyingInformation)) {
       throw new ApiError(400, 'identifyingInformation must be an object.');
     }
+    // Checked in the controller rather than left to the driver: a bare Error out
+    // of the service is a 500, so a caller who sent an object where text belongs
+    // would be told the server broke instead of what to fix.
+    if (narrative !== undefined && typeof narrative !== 'string') {
+      throw new ApiError(400, 'narrative must be text.');
+    }
     await pool.query(
-      'UPDATE quarterlyProgressReports SET periodLabel = ?, identifyingInformation = ?, updatedBy = ? WHERE id = ?',
+      'UPDATE quarterlyProgressReports SET periodLabel = ?, identifyingInformation = ?, narrative = ?, updatedBy = ? WHERE id = ?',
       [
         periodLabel === undefined ? report.periodLabel : text(periodLabel),
         identifyingInformation === undefined ? JSON.stringify(asObject(report.identifyingInformation)) : JSON.stringify(identifyingInformation),
+        narrative === undefined ? (report.narrative ?? null) : (text(narrative) || null),
         actor(req),
         report.id,
       ]
@@ -1408,6 +1452,7 @@ module.exports = {
   incompleteSections,
   decorateSection,
   mapReport,
+  ensureNarrativeColumn,
   ageAt,
   isoDate,
 };

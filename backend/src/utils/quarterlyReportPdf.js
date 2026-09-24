@@ -3,8 +3,8 @@
  * @module utils/quarterlyReportPdf
  * @description Builds the resident's Quarterly Progress Report — a branded,
  * print-ready A4 document assembled from the report header, the auto-filled
- * identifying information, the six Developmental Aspect sections and the
- * signature block.
+ * identifying information, the six Developmental Aspect sections, the closing
+ * narrative and the signature block.
  *
  * Unlike the Anecdotal Report, this document has no official pre-printed
  * template to overlay: the reference form is a plain Word file, so the layout
@@ -46,6 +46,11 @@ const TABLE_HEADER_HEIGHT = 26;
 const SIGNATURE_LIFT = 12;
 const SIGNATURE_HEIGHT = 34;
 const SIGNATURE_TAIL = 36;
+// The closing narrative. `NARRATIVE_LIFT` is the gap between the last aspect row
+// and the narrative's heading; `NARRATIVE_TAIL` the gap between the box and the
+// signature heading below it.
+const NARRATIVE_LIFT = 10;
+const NARRATIVE_TAIL = 14;
 
 // ── Fill-in template metrics ──
 //
@@ -60,6 +65,10 @@ const SIGNATURE_TAIL = 36;
 // signature slot.
 const TEMPLATE_ROW_HEIGHT = 130;
 const TEMPLATE_ROWS_PER_PAGE = 3;
+// The blank narrative box the client overlays its textarea on. Fixed for the
+// same reason the rows are: the box may not grow to fit what is typed into it,
+// or the textarea would slide out from under the cursor mid-sentence.
+const TEMPLATE_NARRATIVE_HEIGHT = 150;
 
 // ── Type scale ──
 const BODY_SIZE = 9;
@@ -131,6 +140,9 @@ const TABLE_COLUMNS = [
 ];
 
 const MIN_ROW_HEIGHT = 54;
+// The finished report sizes its narrative box to the text; this is the floor, so
+// an empty or one-line narrative still prints as a field rather than a hairline.
+const MIN_NARRATIVE_HEIGHT = 72;
 
 /**
  * Where the fill-in template puts everything, in PDF points from the bottom-left.
@@ -169,10 +181,16 @@ const TEMPLATE_GEOMETRY = (() => {
     x += column.width;
   }
 
-  // The signature slot sits below the last row of page 2. The band the client
-  // overlays runs from the printed rule up to the top of the signature box.
+  // The closing narrative sits between the last row of page 2 and the signature
+  // block: the report reads as evidence, then prose, then a signature. The
+  // signature band therefore has to be derived from the narrative's bottom edge
+  // rather than from the last row — moving the box without moving the band would
+  // print the signature over the narrative.
   const rowsOnPageTwo = Math.max(0, ASPECTS.length - TEMPLATE_ROWS_PER_PAGE);
-  const signatureStart = tableTops[1] - rowsOnPageTwo * TEMPLATE_ROW_HEIGHT;
+  const narrativeStart = tableTops[1] - rowsOnPageTwo * TEMPLATE_ROW_HEIGHT;
+  const narrativeTop = round(narrativeStart - SECTION_HEADING_HEIGHT - NARRATIVE_LIFT);
+  const narrativeBottom = narrativeTop - TEMPLATE_NARRATIVE_HEIGHT;
+  const signatureStart = narrativeBottom - NARRATIVE_TAIL;
   const signatureRuleY = signatureStart - SECTION_HEADING_HEIGHT - SIGNATURE_LIFT - SIGNATURE_HEIGHT;
 
   return {
@@ -183,6 +201,12 @@ const TEMPLATE_GEOMETRY = (() => {
       rowsPerPage: TEMPLATE_ROWS_PER_PAGE,
       tableTops,
       columns,
+    },
+    narrative: {
+      x: MARGIN_X,
+      top: narrativeTop,
+      width: round(CONTENT_WIDTH),
+      height: TEMPLATE_NARRATIVE_HEIGHT,
     },
     signature: {
       x: MARGIN_X,
@@ -380,6 +404,33 @@ function wrapToWidth(value, font, size, maxWidth) {
     }
     if (current) lines.push(current);
   }
+  return lines;
+}
+
+/**
+ * Wraps the report's narrative, keeping the blank line between paragraphs.
+ *
+ * `wrapToWidth` drops an empty paragraph, which is right for the bullet list in
+ * an aspect cell and wrong here: a narrative is read as paragraphs, and running
+ * two of them together silently changes what it says.
+ *
+ * @returns {string[]} the lines to draw, never empty; '' marks a paragraph break.
+ */
+function wrapNarrative(value, font, size, maxWidth) {
+  const source = String(value ?? '');
+  if (!source.trim()) return [];
+
+  const lines = [];
+  for (const paragraph of source.split(/\r?\n/)) {
+    if (!paragraph.trim()) {
+      lines.push('');
+      continue;
+    }
+    lines.push(...wrapToWidth(paragraph, font, size, maxWidth));
+  }
+  // A trailing newline leaves an empty final line, which would print as an
+  // unexplained gap at the foot of the box.
+  while (lines.length && lines[lines.length - 1] === '') lines.pop();
   return lines;
 }
 
@@ -698,6 +749,57 @@ function drawTemplateAspectRow(page, y, aspect, fonts, zebra, height) {
 }
 
 /**
+ * The report's closing narrative: one free-text account of the period, in the
+ * preparer's own words.
+ *
+ * It is drawn as a ruled box rather than as more table cells because the aspects
+ * table is tabular evidence — a rating and two short columns per aspect — while
+ * this is prose that does not belong to any one aspect. It is where the Social
+ * Worker says what the six rows add up to.
+ *
+ * `height` is a parameter because the two callers need different things from it.
+ * The fill-in template lays the box out at a fixed size, since the client
+ * overlays a textarea on it and a box that grew would move the textarea. The
+ * finished report sizes it to the text it actually carries, capped to the box.
+ *
+ * @param {string} narrative the report's `narrative` column.
+ * @param {number} height    the box's height in points.
+ * @returns {number} the y below the box.
+ */
+function drawNarrativeSection(page, y, narrative, fonts, height) {
+  const headingBottom = drawSectionHeading(page, y, 'NARRATIVE REPORT', fonts.bold);
+  const boxTop = headingBottom - NARRATIVE_LIFT;
+  const boxBottom = boxTop - height;
+
+  page.drawRectangle({
+    x: MARGIN_X,
+    y: boxBottom,
+    width: CONTENT_WIDTH,
+    height,
+    borderColor: RULE,
+    borderWidth: 0.7,
+    color: WHITE,
+  });
+
+  // `wrapNarrative` already sanitised, so the lines are drawable as they are.
+  const lines = wrapNarrative(narrative, fonts.regular, BODY_SIZE, CONTENT_WIDTH - CELL_PAD * 2);
+  let textY = boxTop - CELL_PAD - BODY_SIZE;
+  for (const line of lines) {
+    if (textY < boxBottom + CELL_PAD) break;
+    // An empty line is a paragraph break: it advances the cursor but draws
+    // nothing, and pdf-lib has no use for a zero-length string.
+    if (line) {
+      page.drawText(line, {
+        x: MARGIN_X + CELL_PAD, y: textY, size: BODY_SIZE, font: fonts.regular, color: INK,
+      });
+    }
+    textY -= LINE_STEP;
+  }
+
+  return boxBottom - NARRATIVE_TAIL;
+}
+
+/**
  * The one sign-off block at the foot of the report: Prepared by.
  *
  * There used to be a SECTION SIGN-OFFS table above this (one row per
@@ -872,6 +974,21 @@ async function buildQuarterlyReportPdf(report = {}, sections = [], childName) {
     y = drawAspectRow(page, y, section, fonts, index % 2 === 1);
   }
 
+  // The closing narrative, when there is one.
+  //
+  // A report with no narrative prints no section at all rather than an empty
+  // ruled box: on a finalized document an empty box at the foot of the page
+  // reads as a field somebody forgot to fill in, not as an optional one.
+  const narrativeLines = wrapNarrative(report.narrative, fonts.regular, BODY_SIZE, CONTENT_WIDTH - CELL_PAD * 2);
+  if (narrativeLines.length) {
+    const narrativeHeight = Math.max(
+      MIN_NARRATIVE_HEIGHT,
+      narrativeLines.length * LINE_STEP + CELL_PAD * 2 + 6
+    );
+    ensureSpace(SECTION_HEADING_HEIGHT + NARRATIVE_LIFT + narrativeHeight + NARRATIVE_TAIL);
+    y = drawNarrativeSection(page, y, report.narrative, fonts, narrativeHeight);
+  }
+
   ensureSpace(120);
   await drawReportSignatures(pdfDoc, page, y, report, fonts);
 
@@ -937,9 +1054,16 @@ async function buildQuarterlyReportTemplatePdf(report = {}, childName) {
     drawTemplateAspectRow(page, tableTops[1] - row * rowHeight, ASPECTS[index], fonts, index % 2 === 1, rowHeight);
   }
 
+  // The closing narrative, then the signature slot below it. The box is drawn
+  // blank and at a fixed height — the client overlays its textarea on it — and
+  // the signature block is placed from the box's bottom edge, not from the last
+  // aspect row, so the two cannot overlap.
+  const narrativeStart = tableTops[1] - rowsPageTwo * rowHeight;
+  const signatureStart = drawNarrativeSection(page, narrativeStart, '', fonts, TEMPLATE_NARRATIVE_HEIGHT);
+
   // The slot prints the preparer's name under the rule; the drawing itself is
   // overlaid by the client and stamped into the finished report on finalize.
-  await drawReportSignatures(pdfDoc, page, tableTops[1] - rowsPageTwo * rowHeight, report, fonts);
+  await drawReportSignatures(pdfDoc, page, signatureStart, report, fonts);
 
   drawFooters(pdfDoc, fonts, report, childName);
 
@@ -970,6 +1094,8 @@ module.exports = {
   periodHeaderLabel,
   resolvePeriod,
   wrapToWidth,
+  wrapNarrative,
+  drawNarrativeSection,
   clearLogoCache,
   ASPECTS,
   IDENTIFYING_FIELDS,
@@ -977,5 +1103,6 @@ module.exports = {
   TEMPLATE_GEOMETRY,
   PAGE_WIDTH,
   PAGE_HEIGHT,
+  LINE_STEP,
   MONTH_NAMES,
 };

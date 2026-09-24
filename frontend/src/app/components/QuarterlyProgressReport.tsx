@@ -45,11 +45,12 @@ pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.mjs';
  * account. None of it is typed here.
  *
  * ── WHAT ONLY A PERSON CAN SUPPLY ────────────────────────────────────────────
- * The three narrative columns of each aspect, and the signature. "Present level of
- * Functioning" in particular is a professional assessment: a system that guessed
- * at it would be inventing a clinical opinion. The reference form's own sample
- * values (Moderate, Normal) are offered as suggestions, and nothing is inserted on
- * the Social Worker's behalf.
+ * The three narrative columns of each aspect, the closing narrative at the foot,
+ * and the signature. "Present level of Functioning" in particular is a
+ * professional assessment: a system that guessed at it would be inventing a
+ * clinical opinion. The reference form's own sample values (Moderate, Normal)
+ * are offered as suggestions, and nothing is inserted on the Social Worker's
+ * behalf.
  *
  * The inputs are transparent and borderless because the PDF underneath already
  * draws the cell, the column rules and the row shading. Their positions come from
@@ -80,6 +81,8 @@ export interface QprReport {
   periodEnd: string;
   periodLabel?: string | null;
   identifyingInformation?: Record<string, string> | null;
+  /** The closing narrative at the foot of the report — the preparer's own words. */
+  narrative?: string | null;
   status: string;
   /** The single signature at the foot of the report — whoever prepared it. */
   preparedByName?: string | null;
@@ -178,6 +181,7 @@ interface TemplateLayout {
     tableTops: number[];
     columns: Array<{ key: string; x: number; width: number }>;
   };
+  narrative: { x: number; top: number; width: number; height: number };
   signature: { x: number; top: number; width: number; height: number };
 }
 
@@ -276,6 +280,60 @@ function AspectCells({
         style={cellBox(pageIndex, rowIndex, 'interventions')}
       />
     </>
+  );
+}
+
+/**
+ * The box the closing narrative occupies on the rendered page.
+ *
+ * Inset by the same cell padding the PDF draws the narrative's own text with, so
+ * what is typed here lands where the finished report will print it — the same
+ * relationship `cellBox` has with the aspect cells.
+ */
+function narrativeBox() {
+  const pad = LAYOUT.table.cellPad;
+  return {
+    left: pctX(LAYOUT.narrative.x + pad),
+    top: pctTop(LAYOUT.narrative.top - pad),
+    width: pctX(LAYOUT.narrative.width - pad * 2),
+    height: pctH(LAYOUT.narrative.height - pad * 2),
+  };
+}
+
+/**
+ * The report's closing narrative, laid over the blank box the template printed
+ * between the last aspect row and the signature block.
+ *
+ * It is report-level rather than per-aspect, which is why it is not one of
+ * `AspectCells`: it says what the six rows add up to, and it is the one part of
+ * the form written as prose. Transparent and borderless for the same reason the
+ * cells are — the PDF underneath already draws the box and its rule.
+ */
+function NarrativeCell({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  disabled: boolean;
+}) {
+  return (
+    <textarea
+      aria-label="Narrative report"
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      readOnly={disabled}
+      placeholder={disabled ? '' : 'Write the report\u2019s closing narrative \u2014 what the six aspects add up to\u2026'}
+      className={[
+        'absolute z-10 h-full w-full resize-none border-0 bg-transparent p-0 leading-snug text-black',
+        'text-[clamp(7px,1.05vw,12px)] outline-none',
+        disabled
+          ? 'pointer-events-none'
+          : 'focus:bg-yellow-100/70 focus:ring-1 focus:ring-yellow-500/70',
+      ].join(' ')}
+      style={narrativeBox()}
+    />
   );
 }
 
@@ -567,6 +625,16 @@ export function QuarterlyProgressReportEditor({
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, Partial<QprSection>>>({});
+  /**
+   * The closing narrative being typed, or null while the report's own value is
+   * shown.
+   *
+   * Kept apart from `drafts` because the narrative belongs to the report rather
+   * than to any one aspect. `null` means "not touched", which is why an empty
+   * string is a real edit: clearing a narrative somebody wrote is a change to
+   * save, not the absence of one.
+   */
+  const [narrativeDraft, setNarrativeDraft] = useState<string | null>(null);
   const [templateUrl, setTemplateUrl] = useState<string | null>(null);
   const [templateError, setTemplateError] = useState<string | null>(null);
   const [renderWidth, setRenderWidth] = useState(900);
@@ -659,20 +727,26 @@ export function QuarterlyProgressReportEditor({
   };
 
   const dirtySectionIds = Object.keys(drafts);
-  const dirty = dirtySectionIds.length > 0;
+  /** What the narrative field shows: the draft if it was touched, else the report's. */
+  const narrativeValue = narrativeDraft ?? report?.narrative ?? '';
+  const narrativeDirty = narrativeDraft !== null && narrativeDraft !== (report?.narrative ?? '');
+  const dirty = dirtySectionIds.length > 0 || narrativeDirty;
 
   const discardDrafts = () => {
     setDrafts({});
+    setNarrativeDraft(null);
     setMessage(null);
   };
 
   /**
-   * Saves every aspect that was touched, in one action.
+   * Saves every aspect that was touched, and the narrative if it was, in one
+   * action.
    *
-   * Only the aspects travel from here: the identifying information is not typed
-   * on this form, so there is nothing on it to save. The report was seeded from
-   * the resident's records when it was opened and the server is the only thing
-   * that writes that block.
+   * The aspects travel as per-section writes and the narrative as one
+   * report-level write, because that is how they are stored — the narrative
+   * belongs to the report, not to any aspect. The identifying information does
+   * not travel at all: it is not typed on this form, so there is nothing on it
+   * to save and the server is its only writer.
    */
   const saveForm = async () => {
     if (!dirty) {
@@ -697,6 +771,15 @@ export function QuarterlyProgressReportEditor({
           }
         );
       }
+      // Only when it actually changed: rewriting it on every aspect save would
+      // bump the report's `updatedAt` for a field nobody edited.
+      if (narrativeDirty) {
+        await request(`/quarterly-progress-reports/${encodeURIComponent(reportId)}`, {
+          method: 'PUT',
+          body: JSON.stringify({ narrative: narrativeDraft ?? '' }),
+        });
+      }
+      setNarrativeDraft(null);
       await load(true);
       setMessage('Form saved.');
       onChanged?.();
@@ -803,13 +886,14 @@ export function QuarterlyProgressReportEditor({
           The report is shown as it prints, with the resident's details already on
           it. The only things this layer adds are the fields a person has to
           supply: the three narrative columns of each Developmental Aspect, laid
-          over the blank rows the template left for them, and the signature.
+          over the blank rows the template left for them, the closing narrative
+          at the foot of the last page, and the signature.
         */}
         <div className="relative min-h-0 flex-1 overflow-y-auto bg-neutral-200 px-2 py-4 sm:px-6">
           <div ref={hostRef} className="mx-auto w-full max-w-[900px]">
             <div className="mb-3 rounded border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
               The resident&rsquo;s details are already filled in from their records. Write the six Developmental
-              Aspects, then sign at the foot of the last page.
+              Aspects and the closing narrative, then sign at the foot of the last page.
             </div>
 
             {loading && (
@@ -857,10 +941,18 @@ export function QuarterlyProgressReportEditor({
                       ))}
 
                     {/*
-                      The signature slot the template printed at the foot of the
-                      last page. It opens a full-size canvas rather than drawing
-                      into this strip, which was unusable on a phone.
+                      The closing narrative, and the signature slot the template
+                      printed below it. The pad opens a full-size canvas rather
+                      than drawing into that strip, which was unusable on a phone.
                     */}
+                    {pageIndex === pageCount - 1 && (
+                      <NarrativeCell
+                        value={narrativeValue}
+                        onChange={setNarrativeDraft}
+                        disabled={busy || !canEdit}
+                      />
+                    )}
+
                     {pageIndex === pageCount - 1 && (
                       <div
                         className="absolute z-10"

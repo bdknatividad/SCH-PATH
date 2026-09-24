@@ -649,6 +649,7 @@ test('the file name names the period, not a quarter', () => {
 
 const DB_MODULE_PATH = require.resolve('../src/config/database');
 const ROUTES_MODULE_PATH = require.resolve('../src/routes');
+const CONTROLLER_MODULE_PATH = require.resolve('../src/controllers/quarterlyProgressReportController');
 
 function purgeSrcModules() {
   for (const key of Object.keys(require.cache)) {
@@ -693,6 +694,28 @@ function loadApp(poolStub) {
   app.use(notFoundHandler);
   app.use(errorHandler);
   return app;
+}
+
+/**
+ * Loads a fresh controller bound to `poolStub`, so a test can drive the queries
+ * it makes without a database.
+ *
+ * Why a fresh instance rather than patching the pool the controller at the top of
+ * this file closed over: `loadApp` above purges every `src` module from
+ * `require.cache`, so a `require('../src/config/database')` issued from inside a
+ * test resolves to a *new* module — a different pool object from the one the
+ * cached controller is holding. Patching that one leaves the real pool in place
+ * and the test opens an actual connection.
+ */
+function loadController(poolStub) {
+  purgeSrcModules();
+  require.cache[DB_MODULE_PATH] = {
+    id: DB_MODULE_PATH,
+    filename: DB_MODULE_PATH,
+    loaded: true,
+    exports: { pool: poolStub, dbConfig: {}, testConnection: async () => true },
+  };
+  return require(CONTROLLER_MODULE_PATH);
 }
 
 async function withServer(app, fn) {
@@ -1184,6 +1207,7 @@ test('the geometry the client positions inputs from is the one the writer draws 
   assert.equal(derived.table.rowsPerPage, TEMPLATE_LAYOUT.table.rowsPerPage, 'the rows per page must match');
   assert.equal(derived.table.cellPad, TEMPLATE_LAYOUT.table.cellPad, 'the cell padding must match');
   assert.deepEqual(derived.table.tableTops, TEMPLATE_LAYOUT.table.tableTops, 'the row tops must match');
+  assert.deepEqual(derived.narrative, TEMPLATE_LAYOUT.narrative, 'the narrative box must match');
   assert.deepEqual(derived.signature, TEMPLATE_LAYOUT.signature, 'the signature band must match');
 
   // Only the three writable columns are listed: the first column is the aspect's
@@ -1382,4 +1406,320 @@ test('the reference never copies content into the report', () => {
   // The only two actions it offers are reading a report and downloading it.
   assert.match(component, /downloadAnecdotalPdf\(selected\)/, 'the PDF action is gone');
   assert.doesNotMatch(component, /Insert|Use this|Apply to report/i, 'the panel offers to write into the report');
+});
+
+// ── THE CLOSING NARRATIVE ───────────────────────────────────────────────────
+//
+// The report's last section, added after the table: one free-text account of the
+// period, stored on the report rather than on any aspect, printed between the
+// table and the signature.
+//
+// Three things have to hold, and each can break while the build stays green: the
+// box has to be where the overlay puts the textarea, the finished report has to
+// print what was typed, and a database that predates the column has to be able
+// to save one.
+
+test('the template prints a blank narrative box above the signature block', async () => {
+  const buffer = await pdf.buildQuarterlyReportTemplatePdf({
+    id: 'QPR1',
+    residentId: 'CH001',
+    periodStart: '2024-04-01',
+    periodEnd: '2024-06-30',
+    preparedByName: 'Social Worker',
+    identifyingInformation: { childName: 'Juan Dela Cruz' },
+  }, 'Juan Dela Cruz');
+
+  const text = pdfDrawnText(buffer).join('\n');
+
+  assert.ok(text.includes('NARRATIVE REPORT'), 'the template must label the narrative box');
+  // Order matters: the narrative is the last thing before the signature, so a
+  // box drawn after SIGNATURES would print under the preparer's name.
+  assert.ok(
+    text.indexOf('NARRATIVE REPORT') < text.indexOf('SIGNATURES'),
+    'the narrative box must come before the signature block'
+  );
+  // The last aspect row must still be above it, or the box replaced a row.
+  assert.ok(
+    text.indexOf('Economic') < text.indexOf('NARRATIVE REPORT'),
+    'the narrative must follow the aspect table'
+  );
+});
+
+test('the finished report prints the narrative between the table and the signature', async () => {
+  const buffer = await pdf.buildQuarterlyReportPdf({
+    id: 'QPR1', residentId: 'CH001',
+    periodStart: '2024-04-01', periodEnd: '2024-06-30',
+    narrative: 'Juan settled into the house routine.\n\nHe asked to rejoin the tutorial group.',
+    identifyingInformation: { childName: 'Juan Dela Cruz' },
+  }, pdf.ASPECTS.map((aspect, index) => ({
+    aspectKey: aspect.key, aspectLabel: aspect.label, sortOrder: index,
+    presentLevel: 'Moderate',
+    observations: `- OBS-${aspect.key}`,
+    interventions: `- INT-${aspect.key}`,
+  })), 'Juan Dela Cruz');
+
+  const text = pdfDrawnText(buffer).join('\n');
+
+  assert.ok(text.includes('NARRATIVE REPORT'), 'the section must be labelled');
+  assert.ok(text.includes('Juan settled into the house routine.'), 'the narrative must print');
+  assert.ok(
+    text.includes('He asked to rejoin the tutorial group.'),
+    'both paragraphs must print, not just the first'
+  );
+  assert.ok(
+    text.indexOf('INT-economicProductivity') < text.indexOf('NARRATIVE REPORT'),
+    'the narrative must follow the last aspect row'
+  );
+  assert.ok(
+    text.indexOf('NARRATIVE REPORT') < text.indexOf('SIGNATURES'),
+    'the narrative must precede the signature'
+  );
+});
+
+test('a report with no narrative prints no narrative section at all', async () => {
+  // An empty ruled box on a finalized document reads as a field somebody forgot
+  // to fill in, not as an optional one. The section prints only when it has
+  // something to say.
+  for (const narrative of [null, undefined, '', '   \n  ']) {
+    const buffer = await pdf.buildQuarterlyReportPdf({
+      id: 'QPR1', residentId: 'CH001',
+      periodStart: '2024-04-01', periodEnd: '2024-06-30',
+      narrative,
+      identifyingInformation: { childName: 'Juan Dela Cruz' },
+    }, [], 'Juan Dela Cruz');
+
+    const text = pdfDrawnText(buffer).join('\n');
+    assert.equal(
+      text.includes('NARRATIVE REPORT'),
+      false,
+      `an empty narrative (${JSON.stringify(narrative)}) must print no section`
+    );
+    // The rest of the document is unaffected.
+    assert.ok(text.includes('SIGNATURES'), 'the signature block must still print');
+  }
+});
+
+test('the narrative box cannot overlap the signature band, and both stay on the page', () => {
+  const { narrative, signature, page } = pdf.TEMPLATE_GEOMETRY;
+
+  // pdf-lib measures y upward from the bottom, so "above" is a larger y. The
+  // signature band is derived from the narrative's bottom edge for exactly this
+  // reason: deriving it from the last row instead would print it over the box.
+  const narrativeBottom = narrative.top - narrative.height;
+  assert.ok(
+    narrativeBottom > signature.top,
+    `the narrative box (bottom ${narrativeBottom}) must clear the signature band (top ${signature.top})`
+  );
+
+  // The band's own lowest drawn element is the "Signature over Printed Name"
+  // label, 24pt under the rule at the bottom of the signature image area.
+  const ruleY = signature.top - 2 - 34;
+  assert.ok(
+    ruleY - 24 > page.marginBottom,
+    'the printed-name label must sit above the bottom margin, not in the footer'
+  );
+});
+
+test('the narrative keeps the blank line between paragraphs', () => {
+  // A stand-in font, so the test is about the split and not about Helvetica.
+  const font = { widthOfTextAtSize: (value) => value.length * 5 };
+
+  assert.deepEqual(
+    pdf.wrapNarrative('One.\n\nTwo.', font, 9, 1000),
+    ['One.', '', 'Two.'],
+    'the blank line between paragraphs must survive'
+  );
+  // `wrapToWidth` drops it, which is right for a bullet list and wrong here.
+  assert.deepEqual(pdf.wrapToWidth('One.\n\nTwo.', font, 9, 1000), ['One.', 'Two.']);
+
+  // A trailing newline must not leave an unexplained gap at the foot of the box.
+  assert.deepEqual(pdf.wrapNarrative('One.\n', font, 9, 1000), ['One.']);
+  // Nothing to say is no lines, not one empty one.
+  for (const empty of ['', null, undefined, '  \n ']) {
+    assert.deepEqual(pdf.wrapNarrative(empty, font, 9, 1000), [], `"${empty}" must produce no lines`);
+  }
+});
+
+test('a paragraph break in the narrative is drawn as a gap, not run together', () => {
+  // The break is a vertical gap, and `pdfDrawnText` flattens the page into a
+  // list of strings with no positions — so a `wrapToWidth` that silently dropped
+  // the blank line would still pass every assertion above. A stand-in page
+  // records where each line lands instead.
+  const drawn = [];
+  const page = {
+    drawRectangle: () => {},
+    drawText: (line, options) => drawn.push({ text: line, y: options.y }),
+  };
+  const fonts = {
+    regular: { widthOfTextAtSize: (value, size) => value.length * size * 0.5 },
+    bold: { widthOfTextAtSize: (value, size) => value.length * size * 0.5 },
+  };
+
+  pdf.drawNarrativeSection(page, 400, 'One.\n\nTwo.', fonts, 100);
+
+  const first = drawn.find((entry) => entry.text === 'One.');
+  const second = drawn.find((entry) => entry.text === 'Two.');
+  assert.ok(first, `the first paragraph must be drawn, got ${JSON.stringify(drawn)}`);
+  assert.ok(second, `the second paragraph must be drawn, got ${JSON.stringify(drawn)}`);
+  assert.equal(
+    Math.round(first.y - second.y),
+    Math.round(pdf.LINE_STEP * 2),
+    'the second paragraph must start two line steps down — one line plus the blank one'
+  );
+  // And the blank line itself must not be drawn: pdf-lib has no use for an
+  // empty string, and a drawn one would be an invisible no-op either way.
+  assert.equal(drawn.filter((entry) => entry.text === '').length, 0, 'the blank line must not be drawn');
+});
+
+test('a report table that predates the narrative column is given it', async () => {
+  // `CREATE TABLE IF NOT EXISTS` is a no-op on an already-provisioned database,
+  // so the column needs its own migration. Without it the first save in
+  // production fails with "Unknown column 'narrative' in 'field list'" — a 500
+  // on a button that worked locally.
+  //
+  // Driven through a controller loaded against a stub pool: the HTTP harness
+  // above purges `src` from `require.cache`, so the pool a test can reach is not
+  // the one the cached controller holds.
+  const runWithColumns = async (columns) => {
+    const issued = [];
+    const stub = {
+      async query(sql) {
+        const text = String(sql).replace(/\s+/g, ' ').trim();
+        issued.push(text);
+        if (/INFORMATION_SCHEMA\.COLUMNS/i.test(text)) {
+          return [columns.map((column) => ({ COLUMN_NAME: column })), []];
+        }
+        return [{}, []];
+      },
+    };
+    const fresh = loadController(stub);
+    return { added: await fresh.ensureNarrativeColumn(), issued };
+  };
+
+  const older = await runWithColumns(['id', 'residentId', 'identifyingInformation']);
+  assert.equal(older.added, true, 'the column must be added to a table that lacks it');
+  assert.ok(
+    older.issued.some((sql) => /^ALTER TABLE quarterlyProgressReports ADD COLUMN narrative TEXT NULL/i.test(sql)),
+    `the migration must issue the ALTER, issued: ${JSON.stringify(older.issued)}`
+  );
+
+  const current = await runWithColumns(['id', 'residentId', 'identifyingInformation', 'narrative']);
+  assert.equal(current.added, false, 'an existing column must not be added a second time');
+  assert.equal(current.issued.length, 1, 'nothing beyond the probe may be issued');
+
+  // An empty column list means the TABLE is missing. The ALTER must be skipped:
+  // a missing table here is `CREATE TABLE`'s problem, and altering a table that
+  // does not exist would throw ER_NO_SUCH_TABLE and take the request down.
+  const missing = await runWithColumns([]);
+  assert.equal(missing.added, false, 'a missing table must not be altered');
+  assert.equal(missing.issued.length, 1, 'nothing beyond the probe may be issued');
+});
+
+test('the editor overlays a narrative field and saves it with the form', () => {  // Positioned from the shared layout like the cells and the signature, so it
+  // lands on the box the template printed rather than beside it. Each edge is
+  // pinned separately: matching `LAYOUT.narrative` alone would still pass if one
+  // edge were taken from the signature band.
+  for (const edge of ['x', 'top', 'width', 'height']) {
+    assert.match(
+      EDITOR_CODE,
+      new RegExp(`LAYOUT\\.narrative\\.${edge}`),
+      `the narrative box's ${edge} must come from the shared layout`
+    );
+  }
+  assert.match(EDITOR_CODE, /function narrativeBox\(/, 'the overlay box must be derived, not hard-coded');
+  assert.match(EDITOR_CODE, /NarrativeCell/, 'the narrative must be an overlaid field');
+  assert.match(EDITOR_CODE, /aria-label="Narrative report"/, 'the field must be labelled');
+  // A blank form must not look like a filled one.
+  assert.match(EDITOR_CODE, /placeholder=\{disabled \? '' :/, 'a read-only form must show no placeholder');
+
+  // Report-level, so it is a report-level write — and only when it changed, or
+  // saving six aspects would bump the report's updatedAt for nothing. Pinned at
+  // the call site: a declaration of `narrativeDirty` that nothing branches on
+  // would satisfy a bare presence check.
+  assert.match(EDITOR_CODE, /if \(narrativeDirty\) \{/, 'the narrative write must be gated on the change');
+  assert.match(
+    EDITOR_CODE,
+    /body: JSON\.stringify\(\{ narrative: narrativeDraft \?\? '' \}\)/,
+    'the narrative must be sent to the report endpoint'
+  );
+  assert.match(EDITOR_CODE, /method: 'PUT'/, 'the report header write must be a PUT');
+  // It is one form with one save: the narrative must not get its own button.
+  assert.doesNotMatch(EDITOR_CODE, /Save narrative/i, 'the narrative must save with the form');
+});
+
+test('the narrative is written to the report, and only ever as text', async () => {
+  // The narrative is report-level, so it travels through the report's own PUT
+  // rather than through an aspect. Driven through a controller loaded against a
+  // stub pool, so the assertions are on the real status codes and the real bound
+  // parameters rather than on the source text.
+  const reports = [{
+    id: 'QPR1', residentId: 'CH001',
+    periodStart: '2024-04-01', periodEnd: '2024-06-30',
+    periodLabel: 'Q2 2024', identifyingInformation: {},
+    narrative: 'Old text', status: 'Draft',
+  }];
+  const writes = [];
+  const stub = {
+    async query(sql, params) {
+      const text = String(sql).replace(/\s+/g, ' ').trim();
+      if (/^SELECT COLUMN_NAME FROM INFORMATION_SCHEMA/i.test(text)) {
+        // The column exists: this is not the migration under test.
+        return [[{ COLUMN_NAME: 'narrative' }], []];
+      }
+      if (/^SELECT \* FROM quarterlyProgressReports WHERE id = \?/i.test(text)) {
+        return [reports.filter((row) => row.id === params[0]).map((row) => ({ ...row })), []];
+      }
+      if (/^UPDATE quarterlyProgressReports SET/i.test(text)) {
+        writes.push({ sql: text, params });
+        return [{}, []];
+      }
+      if (/^SELECT \* FROM quarterlyProgressReportSections/i.test(text)) return [[], []];
+      return [{}, []];
+    },
+  };
+  const fresh = loadController(stub);
+
+  /** Calls the endpoint and reports the captured error, if any. */
+  const put = async (body, { role = 'socialworker', status = 'Draft' } = {}) => {
+    reports[0].status = status;
+    let error = null;
+    const before = writes.length;
+    await fresh.update(
+      { params: { id: 'QPR1' }, body, user: { id: 'U1', username: 'sw', role } },
+      { json: () => {} },
+      (err) => { error = err; }
+    );
+    return { error, write: writes[before], writes: writes.length - before };
+  };
+
+  const saved = await put({ narrative: 'Juan settled in well.' });
+  assert.equal(saved.error, null, 'a reviewer must be able to save a narrative');
+  // Bound parameters are [periodLabel, identifyingInformation, narrative, actor, id].
+  assert.equal(saved.write.params[2], 'Juan settled in well.', 'the narrative must be the value written');
+
+  // Omitting the field leaves the stored narrative alone: the aspect save path
+  // does not touch it, and neither must a header write that did not mention it.
+  const untouched = await put({ periodLabel: 'Q2 2024' });
+  assert.equal(untouched.write.params[2], 'Old text', 'an omitted narrative must keep its value');
+
+  // Clearing it is a real edit, and stored as NULL rather than as an empty
+  // string, so "no narrative" has one representation in the database.
+  const cleared = await put({ narrative: '' });
+  assert.equal(cleared.write.params[2], null, 'clearing the narrative must store NULL');
+
+  // A non-string is the caller's mistake, and must read as one: the controller
+  // raises ApiError(400) rather than letting a bare Error out of the service,
+  // which `errorHandler` would report as a 500 with a masked message.
+  const wrongType = await put({ narrative: { text: 'nope' } });
+  assert.equal(wrongType.error?.statusCode, 400, `expected 400, got ${wrongType.error?.statusCode}`);
+  assert.match(String(wrongType.error?.message), /narrative/i, 'the message must name the field');
+  assert.equal(wrongType.writes, 0, 'nothing may be written for a rejected body');
+
+  const notReviewer = await put({ narrative: 'x' }, { role: 'nurse' });
+  assert.equal(notReviewer.error?.statusCode, 403, 'only a reviewer may write the report');
+  assert.equal(notReviewer.writes, 0, 'nothing may be written by a non-reviewer');
+
+  const finalized = await put({ narrative: 'x' }, { status: 'Finalized' });
+  assert.equal(finalized.error?.statusCode, 409, 'a finalized report refuses every write');
+  assert.equal(finalized.writes, 0, 'nothing may be written to a finalized report');
 });
