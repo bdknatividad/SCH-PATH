@@ -134,6 +134,23 @@ read the **role definition** (`getRoleDefinition(role)`), never the stored grant
 or an account seeded with `[]` gains everything. `childController.js` has the
 correct pattern in `roleCanReachMedicalTab` / `roleCanReachHealth`.
 
+**The write path for `accessibleModules` is `accessDefaults.canonicalizeModules`**
+(`userController` 209/366/544/666, `server.js:1324`). It must delegate to
+`rbac.normalizeModuleKey` — the single place that knows every legacy spelling —
+and then order by `MODULE_ORDER`. It used to carry its own alias table and
+mishandled four of the five aliases: it sent `Intervention` to the legacy
+spelling `Intervention Tracker` instead of `Violations`, and dropped
+`Case Progress` / `Education Progress` outright. Because it is the write path, a
+dropped alias is a silent revocation, and `MODULE_ORDER` doubling as the
+allow-list is what let a legacy name be persisted as a module. `MODULE_ORDER`
+must name canonical modules only. The frontend copy already delegated correctly;
+only the backend had the parallel table.
+
+**Read `[]` carefully.** The boot migration only refills `accessibleModules` for
+`nurse` / `educator` / `houseparent`, so `centerhead` / `socialworker` /
+`psychologist` hold `[]` from the original seed. A `[]` on those three is *not*
+evidence that a repair ran — check `nurse`/`educator` instead.
+
 **`/alerts` has no module guard.** It is mounted as
 `router.use('/alerts', authenticate, alertRoutes)` — no `requireModule` — so every
 authenticated account reaches the whole alert surface. That makes
