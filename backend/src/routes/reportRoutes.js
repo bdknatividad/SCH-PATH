@@ -16,6 +16,18 @@ const { asyncHandler } = require('../middleware/errorHandler');
 router.get('/', asyncHandler(reportController.getAll));
 
 /**
+ * GET /api/reports/daily-data
+ * Get daily report data (manual trigger)
+ *
+ * Declared *before* `/:id` on purpose. Express matches in declaration order, so
+ * a literal path listed after a parameterised sibling is unreachable — `/:id`
+ * swallows it and the request fails as "report not found". This endpoint sat
+ * below `/:id` and could never be called; the route file advertised an endpoint
+ * that did not exist. tests/route-shadowing.test.js now pins the ordering.
+ */
+router.get('/daily-data', asyncHandler(reportController.getDaily));
+
+/**
  * GET /api/reports/:id
  * Get report by ID
  */
@@ -32,12 +44,6 @@ router.post('/', asyncHandler(reportController.create));
  * Generate daily report
  */
 router.post('/generate-daily', asyncHandler(reportController.createDaily));
-
-/**
- * GET /api/reports/daily-data
- * Get daily report data (manual trigger)
- */
-router.get('/daily-data', asyncHandler(reportController.getDaily));
 
 /**
  * POST /api/reports/generate-quarterly
