@@ -19,8 +19,6 @@
  */
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
 
 const { pool } = require('../src/config/database');
 const {
@@ -107,14 +105,69 @@ test('a legacy string-encoded array is treated as stale, not as empty', async ()
   assert.ok(update, 'a non-empty string-encoded array is stale and must be cleared');
 });
 
-test('the seed actually calls the reconciliation', async () => {
-  const src = fs.readFileSync(
-    path.join(__dirname, '..', 'src', 'scripts', 'seedDatabase.js'),
-    'utf8',
+test('seedDatabase() actually reaches the reconciliation', async () => {
+  // The test above calls the reconciler directly, which leaves the wiring
+  // untested: if seedDatabase() never reached it, that test would still pass
+  // while production stayed stale forever. This drives the real boot chain
+  // against a stub pool that looks like production.
+  const realQuery = pool.query;
+  const realGetConnection = pool.getConnection;
+
+  const USERS = {
+    centerhead: [],
+    socialworker: [],
+    psychologist: [],
+    nurse: ['Dashboard', 'Activities', 'Documents', 'Health', 'Reports'],
+    educator: ['Dashboard', 'Documents', 'Activities', 'Education'],
+  };
+  let cleared = null;
+
+  pool.query = async (sql, params) => {
+    const s = String(sql).replace(/\s+/g, ' ').trim();
+    if (/^SELECT id FROM users WHERE username = \?/i.test(s)) return [[{ id: 'U' }], []];
+    if (/^SELECT password FROM users WHERE username = \?/i.test(s)) return [[{ password: '$2b$10$alreadyhashed' }], []];
+    if (/role = 'houseparent' AND status = 'Active'/i.test(s)) return [[], []];
+    if (/SELECT username, accessibleModules FROM users WHERE username IN/i.test(s)) {
+      return [(params || []).filter((u) => u in USERS).map((u) => ({ username: u, accessibleModules: USERS[u] })), []];
+    }
+    if (/UPDATE users SET accessibleModules = JSON_ARRAY\(\)/i.test(s)) { cleared = params; return [{ affectedRows: 1 }, []]; }
+    return [[], []];
+  };
+  pool.getConnection = async () => ({
+    query: async () => [[], []],
+    beginTransaction: async () => {},
+    commit: async () => {},
+    rollback: async () => {},
+    release: () => {},
+  });
+
+  const { seedDatabase } = require('../src/scripts/seedDatabase');
+  try {
+    await seedDatabase();
+  } finally {
+    pool.query = realQuery;
+    pool.getConnection = realGetConnection;
+  }
+
+  assert.ok(cleared, 'seedDatabase() never issued the reconciliation UPDATE');
+  assert.ok(cleared.includes('nurse'), 'the drifted nurse account must be cleared');
+  assert.ok(cleared.includes('educator'), 'the drifted educator account must be cleared');
+});
+
+test('an empty stored grant means "inherit the matrix"', () => {
+  // The premise the reconciliation rests on. If `[]` ever stopped meaning
+  // "fall back to the role matrix", clearing a stale array would strip the
+  // account of everything instead of restoring it -- and the fix would become
+  // the bug. rbac.js decides this with `requested.length > 0 ? requested : ...`.
+  const { buildAccessSnapshot } = require('../src/config/rbac');
+  const snapshot = buildAccessSnapshot({ role: 'nurse', accessibleModules: [] });
+
+  assert.ok(
+    snapshot.modules.includes('Child Records'),
+    'an empty grant must inherit the role matrix, including Child Records',
   );
-  assert.match(
-    src,
-    /await reconcileSeededAccessGrants\(\)/,
-    'seedDatabase must reconcile the seeded grants, or existing rows keep the drift forever',
+  assert.ok(
+    !snapshot.modules.includes('Activities'),
+    'an empty grant must not carry modules the matrix does not declare',
   );
 });
