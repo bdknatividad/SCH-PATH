@@ -45,6 +45,7 @@ const DOCUMENT_ROLE_PERMISSIONS: Record<string, string[]> = {
   'Diversion plan referral letter':     ['socialworker', 'centerhead'],
   'Diversion Plan Referral Letter':     ['socialworker', 'centerhead'],
   'Medical Certificate':                ['socialworker', 'nurse', 'centerhead'],
+  'Laboratory Results':                 ['nurse', 'centerhead'],
   'Medical Certificate / Birth Certificate': ['socialworker', 'centerhead'],
   'Birth/baptismal certificate':        ['socialworker', 'centerhead'],
   'Baptismal Certificate':              ['socialworker', 'centerhead'],

@@ -102,6 +102,7 @@ const DOCUMENT_ROLE_PERMISSIONS: Record<string, string[]> = {
   'Diversion plan referral letter': ['socialworker','centerhead'],
   'Diversion Plan Referral Letter': ['socialworker','centerhead'],
   'Medical Certificate': ['socialworker','nurse','centerhead'],
+  'Laboratory Results': ['nurse','centerhead'],
   'Medical Certificate / Birth Certificate': ['socialworker','centerhead'],
   'Birth/baptismal certificate': ['socialworker','centerhead'],
   'Baptismal Certificate': ['socialworker','centerhead'],
@@ -133,6 +134,19 @@ const DOCUMENT_ROLE_PERMISSIONS: Record<string, string[]> = {
   'Incident Report': ['socialworker','psychologist','centerhead','admin'],
   'Other': ['socialworker','psychologist','nurse','educator','centerhead','admin'],
 };
+
+/**
+ * Document types that belong to no phase.
+ *
+ * The picker's list is built from `PHASE_REQUIREMENTS`, which only ever offers a
+ * document while the resident is at or past the phase that requires it. A
+ * laboratory slip and a medical certificate are produced whenever a resident is
+ * seen — during Rehabilitation as much as on admission — so they are offered
+ * unconditionally and the permission map, not the phase, decides who may upload
+ * them. 'Other' is appended separately below because it carries a free-text
+ * type.
+ */
+const GENERAL_DOCUMENTS = ['Medical Certificate', 'Laboratory Results'];
 
 const getFileIcon = (fileName: string) => {
   const ext = fileName.split('.').pop()?.toLowerCase();
@@ -571,6 +585,13 @@ export function DocumentUpload() {
   const [documentToDelete, setDocumentToDelete] = useState<DocumentWithApproval | null>(null);
 
   const [filterResident, setFilterResident] = useState('all');
+  /**
+   * Which residents the list is drawn from. Closing a case does not delete its
+   * documents — the file stays for the record — so without this the working list
+   * fills up with residents who left. Defaults to Active, which is the list
+   * staff actually work from; the discharged file is one click away.
+   */
+  const [residentStatusFilter, setResidentStatusFilter] = useState<'Active' | 'Discharged' | 'all'>('Active');
   const [filterCategory, setFilterCategory] = useState('all');
   // Search-by-name for the Documents Module (Folder and All Documents views).
   const [documentSearch, setDocumentSearch] = useState('');
@@ -726,6 +747,15 @@ export function DocumentUpload() {
         }
       }
     }
+    // Documents that no phase gates, offered to whoever the permission map
+    // allows. A type the role may not upload is skipped rather than offered and
+    // then refused by the API.
+    for (const doc of GENERAL_DOCUMENTS) {
+      const allowedRoles = DOCUMENT_ROLE_PERMISSIONS[doc];
+      if ((!allowedRoles || allowedRoles.includes(userRole)) && !result.find(r => r.doc === doc)) {
+        result.push({ doc, phase: 'General' });
+      }
+    }
     // "Other" is a generic document type available to any non-houseparent
     // uploader. Its exact document type is captured in the required Specify field.
     if (uploadResidentId && !result.find(r => r.doc === 'Other')) {
@@ -800,17 +830,39 @@ export function DocumentUpload() {
     return String(doc.title || '').toLowerCase().includes(q);
   }, [documentSearch]);
 
+  /**
+   * `children.status` is 'Discharged' once a case closes and carries no other
+   * value, so everything else — including a blank on a record written before the
+   * field existed — reads as Active.
+   */
+  const matchesResidentStatus = useCallback((child: { status?: string }) => {
+    if (residentStatusFilter === 'all') return true;
+    return (child.status === 'Discharged' ? 'Discharged' : 'Active') === residentStatusFilter;
+  }, [residentStatusFilter]);
+
+  /**
+   * A document whose resident is not in the loaded child list is kept rather
+   * than hidden: the filter is meant to narrow the list, not to make a file
+   * unreachable because a second page of residents has not loaded.
+   */
+  const matchesResidentStatusForDocument = useCallback((residentId?: string) => {
+    if (residentStatusFilter === 'all') return true;
+    const owner = children.find(child => child.id === residentId);
+    return owner ? matchesResidentStatus(owner) : true;
+  }, [children, residentStatusFilter, matchesResidentStatus]);
+
   const filteredDocuments = useMemo(() => {
     let list = documentsForDisplay;
     if (filterResident && filterResident !== 'all') {
       list = list.filter(d => d.residentId === filterResident);
     }
+    list = list.filter(d => matchesResidentStatusForDocument(d.residentId));
     if (filterCategory && filterCategory !== 'all') {
       list = list.filter(d => deriveDocumentCategory(d) === filterCategory);
     }
     list = list.filter(matchesDocumentSearch);
     return list;
-  }, [documentsForDisplay, filterResident, filterCategory, matchesDocumentSearch]);
+  }, [documentsForDisplay, filterResident, filterCategory, matchesDocumentSearch, matchesResidentStatusForDocument]);
 
   /**
    * How many documents the folder view has to show for the current resident
@@ -820,9 +872,11 @@ export function DocumentUpload() {
    */
   const visibleDocumentsCount = useMemo(
     () => documentsForDisplay.filter(d =>
-      children.some(c => c.id === d.residentId && (filterResident === 'all' || c.id === filterResident))
+      children.some(c => c.id === d.residentId
+        && (filterResident === 'all' || c.id === filterResident)
+        && matchesResidentStatus(c))
     ).filter(matchesDocumentSearch).length,
-    [documentsForDisplay, children, filterResident, matchesDocumentSearch]
+    [documentsForDisplay, children, filterResident, matchesDocumentSearch, matchesResidentStatus]
   );
 
   /**
@@ -1513,14 +1567,29 @@ export function DocumentUpload() {
                 className="pl-8"
               />
             </div>
+            {/* Resident status — Active by default, so a closed case does not
+                crowd the list. Its documents are kept, not deleted. */}
+            <Select
+              value={residentStatusFilter}
+              onValueChange={value => setResidentStatusFilter(value as 'Active' | 'Discharged' | 'all')}
+            >
+              <SelectTrigger className="w-full sm:w-40" aria-label="Resident status">
+                <SelectValue placeholder="Active Residents" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Active">Active Residents</SelectItem>
+                <SelectItem value="Discharged">Discharged Residents</SelectItem>
+                <SelectItem value="all">All Residents</SelectItem>
+              </SelectContent>
+            </Select>
             {/* Resident filter (only for flat views) */}
             <Select value={filterResident} onValueChange={setFilterResident}>
               <SelectTrigger className="w-full sm:w-48">
-                <SelectValue placeholder="All Residents" />
+                <SelectValue placeholder="Every Resident" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Residents</SelectItem>
-                {children.map((child) => (
+                <SelectItem value="all">Every Resident</SelectItem>
+                {children.filter(matchesResidentStatus).map((child) => (
                   <SelectItem key={child.id} value={child.id}>{child.name}</SelectItem>
                 ))}
               </SelectContent>
@@ -1538,7 +1607,8 @@ export function DocumentUpload() {
           <div className="space-y-3">
             {(() => {
               const filteredChildren = children.filter(c =>
-                filterResident === 'all' || c.id === filterResident
+                (filterResident === 'all' || c.id === filterResident)
+                && matchesResidentStatus(c)
               );
 
               // A returning resident has one DB record per admission. They share
@@ -1875,7 +1945,10 @@ export function DocumentUpload() {
         {canApprove && (
           <TabsContent value="pending" className="mt-4">
             <DocumentList
-              docs={pendingDocs.filter(d => filterResident === 'all' || d.residentId === filterResident)}
+              docs={pendingDocs.filter(d =>
+                (filterResident === 'all' || d.residentId === filterResident)
+                && matchesResidentStatusForDocument(d.residentId)
+              )}
               children={children}
               canApprove={canApprove}
               onApprove={handleApprove}

@@ -18,7 +18,6 @@ import { Search, Plus, Eye, Edit, Trash2, Pill, Stethoscope, HeartPulse, AlertTr
 import { useData } from '../state/DataContext';
 import { useAuth } from '../state/AuthContext';
 import { usePermissions } from '@/app/hooks/usePermissions';
-import { SignaturePadModal } from './SignaturePad';
 import { useSystemDialog } from './SystemDialog';
 import { downloadDocumentFile } from '@/utils/documentFile';
 import { formatShortDate } from '@/utils/dateFormatter';
@@ -49,8 +48,14 @@ const EMPTY_FORM = {
   residentId: '', residentName: '',
   recordType: 'Medical Record',
   date: new Date().toISOString().split('T')[0],
+  // `doctorSignature` is no longer collected by either form — the medical sheet
+  // records the doctor's name and specialization per entry, and the dental sheet
+  // records the dentist and the clinic. The field is still carried through
+  // unchanged on save so that a signature already stored on an older record is
+  // not erased by editing it.
   medicalFindings: '', laboratoryProcedure: '', prescription: '', careProvider: '', doctorSignature: '',
   chiefComplaints: '', referredBy: '', dentalService: '', dentalServiceCount: '', dentalRemarks: '',
+  dentistName: '', dentalClinicName: '',
   monitoringYear: new Date().getFullYear().toString(), observations: '', firstQuarter: '', secondQuarter: '', thirdQuarter: '', fourthQuarter: '',
   // Health Assessment
   assessmentType: '', findings: '', allergies: 'None', conditions: 'None',
@@ -94,6 +99,81 @@ function dentalServiceCounts(services: DentalServices) {
     .map(([, , numberKey]) => (numberKey ? String(services[numberKey] || '').trim() : ''))
     .filter(Boolean)
     .join(', ');
+}
+
+/**
+ * One row of the medical sheet.
+ *
+ * The sheet is a running log — one row per consultation, each with its own date
+ * and its own doctor — so a factory keeps the three places that create a row
+ * (the initial state, the reset, and "Add entry") from drifting apart.
+ * `doctorSignature` is carried through untouched: it is no longer collected, but
+ * an older row that has one must survive being re-saved.
+ */
+function emptyMedicalRow(date?: string) {
+  return {
+    date: date || new Date().toISOString().split('T')[0],
+    findings: '',
+    laboratoryProcedure: '',
+    prescription: '',
+    careProvider: '',
+    doctorName: '',
+    specialization: '',
+    doctorSignature: '',
+  };
+}
+
+/** The numeric part of a free-text measurement, or NaN. */
+function measurement(value: unknown) {
+  const parsed = Number.parseFloat(String(value ?? '').replace(/[^0-9.]/g, ''));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : NaN;
+}
+
+/**
+ * Height in metres.
+ *
+ * The sheet records centimetres and the labels say so, but the fields are free
+ * text and older rows were filled in metres. A value of 3 or less is read as
+ * metres rather than producing a BMI 10,000× too large.
+ */
+function heightInMetres(height: unknown) {
+  const value = measurement(height);
+  if (Number.isNaN(value)) return NaN;
+  return value > 3 ? value / 100 : value;
+}
+
+/**
+ * BMI for one month's measurements, to one decimal place, or '' when the month
+ * has not been filled in yet.
+ */
+function bmiFor(height: unknown, weight: unknown) {
+  const metres = heightInMetres(height);
+  const kilograms = measurement(weight);
+  if (Number.isNaN(metres) || Number.isNaN(kilograms)) return '';
+  const bmi = kilograms / (metres * metres);
+  if (!Number.isFinite(bmi) || bmi <= 0) return '';
+  return bmi.toFixed(1);
+}
+
+/** The band the computed BMI falls in, for the reference column. */
+function bmiBand(bmi: string) {
+  if (!bmi) return '';
+  const value = Number.parseFloat(bmi);
+  if (value < 18.5) return 'Below healthy range';
+  if (value < 25) return 'Healthy range';
+  if (value < 30) return 'Above healthy range';
+  return 'Well above healthy range';
+}
+
+/**
+ * The healthy weight range for a height, as the 18.5–24.9 BMI band expressed in
+ * kilograms. This is the reference the sheet is read against; it is derived from
+ * the recorded height rather than typed, so it cannot disagree with it.
+ */
+function healthyWeightRange(height: unknown) {
+  const metres = heightInMetres(height);
+  if (Number.isNaN(metres)) return '';
+  return `${(18.5 * metres * metres).toFixed(1)}–${(24.9 * metres * metres).toFixed(1)} kg`;
 }
 
 // ── FORM LAYOUT PRIMITIVES ─────────────────────────────────────────────────
@@ -185,7 +265,7 @@ export function Health() {
   const [formError, setFormError] = useState('');
   const [saveMessage, setSaveMessage] = useState('');
   const [monthlyMeasurements, setMonthlyMeasurements] = useState(() => Array.from({ length: 12 }, (_, index) => ({ month: index + 1, height: '', weight: '' })));
-  const [medicalRows, setMedicalRows] = useState(() => [{ date: new Date().toISOString().split('T')[0], findings: '', laboratoryProcedure: '', prescription: '', careProvider: '', doctorSignature: '' }]);
+  const [medicalRows, setMedicalRows] = useState(() => [emptyMedicalRow()]);
   const [dentalServices, setDentalServices] = useState<DentalServices>({ ...EMPTY_DENTAL_SERVICES });
 
   // Medical records and documents are created and managed by the Nurse and the
@@ -219,7 +299,7 @@ export function Health() {
   const resetForm = () => {
     setForm({ ...EMPTY_FORM });
     setMonthlyMeasurements(Array.from({ length: 12 }, (_, index) => ({ month: index + 1, height: '', weight: '' })));
-    setMedicalRows([{ date: new Date().toISOString().split('T')[0], findings: '', laboratoryProcedure: '', prescription: '', careProvider: '', doctorSignature: '' }]);
+    setMedicalRows([emptyMedicalRow()]);
     setDentalServices({ ...EMPTY_DENTAL_SERVICES });
     setEditingId(null); setFormError(''); setSaveMessage(''); setIsFormOpen(false);
   };
@@ -232,6 +312,7 @@ export function Health() {
       date: r.date || new Date().toISOString().split('T')[0],
       medicalFindings: r.details?.medicalFindings || '', laboratoryProcedure: r.details?.laboratoryProcedure || '', prescription: r.details?.prescription || '', careProvider: r.details?.careProvider || '', doctorSignature: r.details?.doctorSignature || '',
       chiefComplaints: r.details?.chiefComplaints || '', referredBy: r.details?.referredBy || '', dentalService: r.details?.dentalService || '', dentalServiceCount: r.details?.dentalServiceCount || '', dentalRemarks: r.details?.dentalRemarks || '',
+      dentistName: r.details?.dentistName || '', dentalClinicName: r.details?.dentalClinicName || '',
       monitoringYear: r.details?.monitoringYear || new Date().getFullYear().toString(), observations: r.details?.observations || '', firstQuarter: r.details?.firstQuarter || '', secondQuarter: r.details?.secondQuarter || '', thirdQuarter: r.details?.thirdQuarter || '', fourthQuarter: r.details?.fourthQuarter || '',
       assessmentType: r.assessmentType || '',
       findings: r.findings || '',
@@ -248,7 +329,21 @@ export function Health() {
       followUpDate: r.followUpDate || '',
     });
     setMonthlyMeasurements(r.details?.monthlyMeasurements || Array.from({ length: 12 }, (_, index) => ({ month: index + 1, height: '', weight: '' })));
-    setMedicalRows(r.details?.medicalRows || [{ date: r.date || new Date().toISOString().split('T')[0], findings: r.details?.medicalFindings || '', laboratoryProcedure: r.details?.laboratoryProcedure || '', prescription: r.details?.prescription || '', careProvider: r.details?.careProvider || '', doctorSignature: r.details?.doctorSignature || '' }]);
+    // A record written before the sheet became a running log has a single set of
+    // fields on `details` rather than a `medicalRows` array; it is lifted into one
+    // row so the older shape stays editable instead of appearing blank.
+    setMedicalRows(
+      (r.details?.medicalRows || [{
+        date: r.date || new Date().toISOString().split('T')[0],
+        findings: r.details?.medicalFindings || '',
+        laboratoryProcedure: r.details?.laboratoryProcedure || '',
+        prescription: r.details?.prescription || '',
+        careProvider: r.details?.careProvider || '',
+        doctorName: r.details?.doctorName || '',
+        specialization: r.details?.specialization || '',
+        doctorSignature: r.details?.doctorSignature || '',
+      }]).map((row: Partial<ReturnType<typeof emptyMedicalRow>>) => ({ ...emptyMedicalRow(row.date), ...row })),
+    );
     setDentalServices(r.details?.dentalServices || { ...EMPTY_DENTAL_SERVICES });
     setEditingId(r.id);
     setFormError('');
@@ -259,7 +354,7 @@ export function Health() {
   const validateForm = () => {
     if (!form.residentId) return 'Please select a resident.';
     if (!form.date) return 'Please select a date.';
-    if (form.recordType === 'Medical Record' && medicalRows.every(row => !row.findings.trim() && !row.laboratoryProcedure.trim() && !row.prescription.trim() && !row.careProvider.trim() && !row.doctorSignature.trim())) return 'Add at least one medical record row.';
+    if (form.recordType === 'Medical Record' && medicalRows.every(row => !row.findings.trim() && !row.laboratoryProcedure.trim() && !row.prescription.trim() && !row.careProvider.trim() && !row.doctorName.trim())) return 'Add at least one medical record row.';
     if (form.recordType === 'Dental Services' && (!form.chiefComplaints.trim() || !Object.values(dentalServices).some(value => value === true))) return 'Chief complaint and at least one dental service are required.';
     if (form.recordType === 'Height & Weight Monitoring' && !form.monitoringYear.trim()) return 'Monitoring year is required.';
     if (form.recordType === 'Health Assessment' && (!form.assessmentType.trim() || !form.findings.trim())) return 'Assessment type and findings are required.';
@@ -300,6 +395,8 @@ export function Health() {
         dentalService: isDental ? dentalServiceSummary(dentalServices) : form.dentalService,
         dentalServiceCount: isDental ? dentalServiceCounts(dentalServices) : form.dentalServiceCount,
         dentalRemarks: form.dentalRemarks,
+        dentistName: form.dentistName,
+        dentalClinicName: form.dentalClinicName,
         monitoringYear: form.monitoringYear,
         monthlyMeasurements,
         observations: form.observations,
@@ -728,7 +825,8 @@ export function Health() {
                   note={`${medicalRows.length} ${medicalRows.length === 1 ? 'entry' : 'entries'}`}
                 >
                   <SectionNote>
-                    One row per consultation or entry. The doctor&rsquo;s signature is drawn per row.
+                    One row per consultation. Each row carries its own date, so a
+                    resident&rsquo;s history is one sheet rather than one record per visit.
                   </SectionNote>
                   <div className="overflow-x-auto rounded-lg border border-gray-200">
                     <table className="w-full min-w-[1040px] border-collapse text-xs">
@@ -739,14 +837,15 @@ export function Health() {
                           <th className="border-b border-gray-200 p-2 text-left font-bold">Laboratory Procedure</th>
                           <th className="border-b border-gray-200 p-2 text-left font-bold">Prescription</th>
                           <th className="border-b border-gray-200 p-2 text-left font-bold">Care Provider</th>
-                          <th className="border-b border-gray-200 p-2 text-left font-bold w-44">Doctor&apos;s Signature</th>
+                          <th className="border-b border-gray-200 p-2 text-left font-bold">Doctor&apos;s Name</th>
+                          <th className="border-b border-gray-200 p-2 text-left font-bold">Specialization</th>
                           <th className="border-b border-gray-200 p-2 w-10" />
                         </tr>
                       </thead>
                       <tbody>
                         {medicalRows.map((row, index) => (
                           <tr key={index} className="align-top odd:bg-white even:bg-gray-50/60">
-                            {(['date', 'findings', 'laboratoryProcedure', 'prescription', 'careProvider'] as const).map(field => (
+                            {(['date', 'findings', 'laboratoryProcedure', 'prescription', 'careProvider', 'doctorName', 'specialization'] as const).map(field => (
                               <td key={field} className="border-b border-gray-100 p-1.5">
                                 <Input
                                   type={field === 'date' ? 'date' : 'text'}
@@ -757,16 +856,6 @@ export function Health() {
                                 />
                               </td>
                             ))}
-                            <td className="border-b border-gray-100 p-1.5">
-                              <div className="h-14">
-                                <SignaturePadModal
-                                  value={row.doctorSignature}
-                                  onChange={value => setMedicalRows(rows => rows.map((item, rowIndex) => rowIndex === index ? { ...item, doctorSignature: value } : item))}
-                                  label={`Doctor's signature for the row dated ${row.date || 'this entry'}`}
-                                  hint="Sign"
-                                />
-                              </div>
-                            </td>
                             <td className="border-b border-gray-100 p-1.5 text-center">
                               <button
                                 type="button"
@@ -788,7 +877,7 @@ export function Health() {
                     size="sm"
                     variant="outline"
                     className="gap-1.5"
-                    onClick={() => setMedicalRows(rows => [...rows, { date: new Date().toISOString().split('T')[0], findings: '', laboratoryProcedure: '', prescription: '', careProvider: '', doctorSignature: '' }])}
+                    onClick={() => setMedicalRows(rows => [...rows, emptyMedicalRow()])}
                   >
                     <Plus className="h-3.5 w-3.5" /> Add entry
                   </Button>
@@ -847,20 +936,18 @@ export function Health() {
                     </p>
                   </FormSection>
 
-                  <FormSection title="Remarks & Sign-off">
+                  <FormSection title="Remarks &amp; Sign-off">
                     <Field label="Remarks">
                       <Textarea value={form.dentalRemarks} onChange={e => set('dentalRemarks', e.target.value)} className="rounded-lg min-h-[70px]" placeholder="Aftercare, follow-up, or any complication..." />
                     </Field>
-                    <Field label="Dentist's Signature" hint="Tap the box to draw the signature.">
-                      <div className="h-20 max-w-md">
-                        <SignaturePadModal
-                          value={form.doctorSignature}
-                          onChange={value => set('doctorSignature', value)}
-                          label="Dentist's signature"
-                          hint="Sign here"
-                        />
-                      </div>
-                    </Field>
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                      <Field label="Dentist's Name">
+                        <Input value={form.dentistName} onChange={e => set('dentistName', e.target.value)} className="rounded-lg" placeholder="Dr. Juan Dela Cruz" />
+                      </Field>
+                      <Field label="Dental Clinic Name">
+                        <Input value={form.dentalClinicName} onChange={e => set('dentalClinicName', e.target.value)} className="rounded-lg" placeholder="Clinic or health centre" />
+                      </Field>
+                    </div>
                   </FormSection>
                 </>
               )}
@@ -888,6 +975,9 @@ export function Health() {
                             <tr key={measure} className="align-middle">
                               <th className="border-b border-gray-100 p-2 text-left text-[10px] font-bold uppercase tracking-wider text-gray-500">
                                 {measure}
+                                <span className="block font-normal normal-case text-gray-400">
+                                  {measure === 'height' ? 'cm' : 'kg'}
+                                </span>
                               </th>
                               {monthlyMeasurements.map((entry, index) => (
                                 <td key={entry.month} className="border-b border-gray-100 p-1">
@@ -901,9 +991,47 @@ export function Health() {
                               ))}
                             </tr>
                           ))}
+                          {/* BMI and the healthy-weight reference are derived from the
+                              two rows above, never typed, so a corrected height
+                              corrects both at once. */}
+                          <tr className="align-middle bg-gray-50">
+                            <th className="border-b border-gray-100 p-2 text-left text-[10px] font-bold uppercase tracking-wider text-[#2F3E46]">
+                              BMI
+                              <span className="block font-normal normal-case text-gray-400">kg/m&sup2;</span>
+                            </th>
+                            {monthlyMeasurements.map((entry, index) => (
+                              <td
+                                key={entry.month}
+                                className="border-b border-gray-100 p-1 text-center text-xs font-semibold text-[#2F3E46]"
+                                aria-label={`BMI for ${MONTHS[index]}`}
+                              >
+                                {bmiFor(entry.height, entry.weight) || '—'}
+                              </td>
+                            ))}
+                          </tr>
+                          <tr className="align-middle">
+                            <th className="border-b border-gray-100 p-2 text-left text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                              Healthy weight
+                              <span className="block font-normal normal-case text-gray-400">for the height</span>
+                            </th>
+                            {monthlyMeasurements.map((entry, index) => (
+                              <td
+                                key={entry.month}
+                                className="border-b border-gray-100 p-1 text-center text-[10px] leading-tight text-gray-500"
+                                aria-label={`Healthy weight range for ${MONTHS[index]}`}
+                              >
+                                {healthyWeightRange(entry.height) || '—'}
+                              </td>
+                            ))}
+                          </tr>
                         </tbody>
                       </table>
                     </div>
+                    <SectionNote>
+                      BMI is computed from the height and weight in the same column, and the
+                      healthy-weight reference is the 18.5&ndash;24.9 BMI band for that height.
+                      Both are shown for guidance and are not stored separately.
+                    </SectionNote>
                   </FormSection>
 
                   <FormSection title="Observations" note="Narrative">
@@ -1049,8 +1177,8 @@ export function Health() {
             <div className="space-y-4 py-2 text-sm">
               <div className="text-center border-y-2 border-[#2F3E46] py-4 uppercase"><p className="text-xs">Republic of the Philippines</p><p className="text-xs">Province of Laguna</p><p className="font-black">City Government of Calamba</p><p className="text-xs">City Social Services Department</p><p className="font-black tracking-widest">Second Chance Home</p><h3 className="mt-2 font-black">{FORM_OPTIONS.find(option => option.value === viewRecord.recordType)?.title || viewRecord.recordType}</h3><p className="text-xs font-bold">{FORM_OPTIONS.find(option => option.value === viewRecord.recordType)?.code}</p></div>
               <div className="grid grid-cols-3 gap-3 border p-3"><span><b>Name:</b> {viewRecord.residentName}</span><span><b>Age:</b> {children.find(child => child.id === viewRecord.residentId)?.age || '—'}</span><span><b>Birthday:</b> {children.find(child => child.id === viewRecord.residentId)?.birthDate || '—'}</span></div>
-              {viewRecord.recordType === 'Medical Record' && <div className="overflow-x-auto"><table className="min-w-[1000px] w-full border-collapse text-xs"><thead><tr>{['Date', 'Medical Findings', 'Laboratory Procedure', 'Prescription', 'Care Provider', "Doctor's Signature"].map(label => <th key={label} className="border bg-gray-100 p-2 text-left">{label}</th>)}</tr></thead><tbody>{(viewRecord.details?.medicalRows || []).map((row: any, index: number) => <tr key={index}>{[row.date, row.findings, row.laboratoryProcedure, row.prescription, row.careProvider].map((value: string, cellIndex: number) => <td key={cellIndex} className="border p-2 align-top">{value || '—'}</td>)}<td className="border p-2 align-top">{row.doctorSignature ? <img src={row.doctorSignature} alt="Doctor signature" className="h-10 max-w-[180px] object-contain" /> : '—'}</td></tr>)}</tbody></table></div>}
-              {viewRecord.recordType === 'Height & Weight Monitoring' && <div className="overflow-x-auto"><table className="min-w-[900px] w-full border-collapse text-sm"><thead><tr><th className="border p-2 text-left">Month</th>{MONTHS.map(month => <th key={month} className="border p-2">{month}</th>)}</tr></thead><tbody><tr><th className="border p-2 text-left">Height</th>{(viewRecord.details?.monthlyMeasurements || []).map((row: any) => <td key={row.month} className="border p-2">{row.height || '—'}</td>)}</tr><tr><th className="border p-2 text-left">Weight</th>{(viewRecord.details?.monthlyMeasurements || []).map((row: any) => <td key={row.month} className="border p-2">{row.weight || '—'}</td>)}</tr></tbody></table></div>}
+              {viewRecord.recordType === 'Medical Record' && <div className="overflow-x-auto"><table className="min-w-[1000px] w-full border-collapse text-xs"><thead><tr>{['Date', 'Medical Findings', 'Laboratory Procedure', 'Prescription', 'Care Provider', "Doctor's Name", 'Specialization'].map(label => <th key={label} className="border bg-gray-100 p-2 text-left">{label}</th>)}</tr></thead><tbody>{(viewRecord.details?.medicalRows || []).map((row: any, index: number) => <tr key={index}>{[row.date, row.findings, row.laboratoryProcedure, row.prescription, row.careProvider, row.doctorName, row.specialization].map((value: string, cellIndex: number) => <td key={cellIndex} className="border p-2 align-top">{value || '—'}</td>)}</tr>)}</tbody></table></div>}
+              {viewRecord.recordType === 'Height & Weight Monitoring' && <div className="overflow-x-auto"><table className="min-w-[900px] w-full border-collapse text-sm"><thead><tr><th className="border p-2 text-left">Month</th>{MONTHS.map(month => <th key={month} className="border p-2">{month}</th>)}</tr></thead><tbody><tr><th className="border p-2 text-left">Height</th>{(viewRecord.details?.monthlyMeasurements || []).map((row: any) => <td key={row.month} className="border p-2">{row.height || '—'}</td>)}</tr><tr><th className="border p-2 text-left">Weight</th>{(viewRecord.details?.monthlyMeasurements || []).map((row: any) => <td key={row.month} className="border p-2">{row.weight || '—'}</td>)}</tr><tr className="bg-gray-50"><th className="border p-2 text-left">BMI</th>{(viewRecord.details?.monthlyMeasurements || []).map((row: any) => <td key={row.month} className="border p-2 font-semibold">{bmiFor(row.height, row.weight) || '—'}</td>)}</tr><tr><th className="border p-2 text-left text-xs font-normal">Healthy weight for height</th>{(viewRecord.details?.monthlyMeasurements || []).map((row: any) => <td key={row.month} className="border p-2 text-xs text-gray-500">{healthyWeightRange(row.height) || '—'}</td>)}</tr></tbody></table></div>}
               <div className="grid grid-cols-3 gap-y-2 gap-x-3">
                 <span className="font-semibold text-gray-500">ID</span><span className="col-span-2 font-mono text-xs">{viewRecord.id}</span>
                 <span className="font-semibold text-gray-500">Resident</span><span className="col-span-2 font-medium">{viewRecord.residentName}</span>
@@ -1078,14 +1206,14 @@ export function Health() {
                   <span className="font-semibold text-gray-500">Laboratory Procedure</span><span className="col-span-2">{viewRecord.details?.laboratoryProcedure || '—'}</span>
                   <span className="font-semibold text-gray-500">Prescription</span><span className="col-span-2">{viewRecord.details?.prescription || '—'}</span>
                   <span className="font-semibold text-gray-500">Care Provider</span><span className="col-span-2">{viewRecord.details?.careProvider || '—'}</span>
-                  <span className="font-semibold text-gray-500">Doctor&apos;s Signature</span><span className="col-span-2">{viewRecord.details?.doctorSignature ? <img src={viewRecord.details.doctorSignature} alt="Doctor signature" className="h-12 max-w-[220px] object-contain" /> : '—'}</span>
                 </>}
                 {viewRecord.recordType === 'Dental Services' && <>
                   <span className="font-semibold text-gray-500">Chief Complaint(s)</span><span className="col-span-2">{viewRecord.details?.chiefComplaints || '—'}</span>
                   <span className="font-semibold text-gray-500">Referred By</span><span className="col-span-2">{viewRecord.details?.referredBy || '—'}</span>
                   <span className="font-semibold text-gray-500">Dental Service</span><span className="col-span-2">{viewRecord.details?.dentalService || '—'}</span>
                   <span className="font-semibold text-gray-500">Number</span><span className="col-span-2">{viewRecord.details?.dentalServiceCount || '—'}</span>
-                  <span className="font-semibold text-gray-500">Dentist&apos;s Signature</span><span className="col-span-2">{viewRecord.details?.doctorSignature ? <img src={viewRecord.details.doctorSignature} alt="Dentist signature" className="h-12 max-w-[220px] object-contain" /> : '—'}</span>
+                  <span className="font-semibold text-gray-500">Dentist&apos;s Name</span><span className="col-span-2">{viewRecord.details?.dentistName || '—'}</span>
+                  <span className="font-semibold text-gray-500">Dental Clinic</span><span className="col-span-2">{viewRecord.details?.dentalClinicName || '—'}</span>
                 </>}
                 {viewRecord.recordType === 'Height & Weight Monitoring' && <>
                   <span className="font-semibold text-gray-500">Monitoring Year</span><span className="col-span-2">{viewRecord.details?.monitoringYear || '—'}</span>

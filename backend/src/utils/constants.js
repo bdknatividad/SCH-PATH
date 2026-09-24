@@ -378,6 +378,10 @@ const DOCUMENT_ROLE_PERMISSIONS = {
   'Diversion plan referral letter':     ['socialworker', 'centerhead'],
   'Diversion Plan Referral Letter':     ['socialworker', 'centerhead'],
   'Medical Certificate':                ['socialworker', 'nurse', 'centerhead'],
+  // The laboratory slip a consultation produces. The Nurse orders and receives
+  // it, and it is a medical record like any other, so it files into the
+  // Documents module's Medical Records folder via the "laboratory" keyword.
+  'Laboratory Results':                 ['nurse', 'centerhead'],
   'Medical Certificate / Birth Certificate': ['socialworker', 'centerhead'],
   'Birth/baptismal certificate':         ['socialworker', 'centerhead'],
   'Baptismal Certificate':              ['socialworker', 'centerhead'],

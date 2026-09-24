@@ -518,6 +518,19 @@ async function update(req, res, next) {
       req.body.age = calculateAge(req.body.birthDate);
     }
 
+    // The Medical Notes on the resident's Medical tab are `children.notes`. The
+    // Nurse and the Center Head own that field, and the Houseparent running the
+    // resident's daily program is the one who has to act on what it says, so a
+    // change has to reach them. The previous value is read before the write
+    // because an edit that changes nothing is not news — the form re-saves the
+    // same text whenever an unrelated field is touched.
+    const medicalNotes = typeof req.body.notes === 'string' ? req.body.notes : null;
+    let previousMedicalNotes = null;
+    if (medicalNotes !== null) {
+      const [before] = await pool.query('SELECT notes FROM children WHERE id = ?', [req.params.id]);
+      previousMedicalNotes = before[0]?.notes ?? null;
+    }
+
     await baseController.update(req, res, next);
 
     // When a child is discharged, close their active admission so a returning
@@ -534,6 +547,36 @@ async function update(req, res, next) {
             AND status = 'Active'`,
         [today, req.user?.username || 'System', req.params.id]
       );
+    }
+
+    if (medicalNotes !== null && (previousMedicalNotes ?? '') !== medicalNotes) {
+      try {
+        // Addressed by user id, not by name: the caseload rule is what decides
+        // who is told, so a Houseparent assigned to another resident never sees
+        // this, and the actor is not on the list because the list holds
+        // Houseparents only.
+        const houseparents = await notifications.houseparentsOf(req.params.id);
+        if (houseparents.length > 0) {
+          const name = await notifications.residentName(req.params.id);
+          await notifications.notifyUsers(
+            houseparents.map((hp) => hp.id),
+            {
+              type: 'medical-notes-updated',
+              title: 'Medical notes updated',
+              message: `The medical notes for ${name} were updated by ${req.user?.fullName || req.user?.username || 'staff'}. Please review them.`,
+              priority: 'Medium',
+              residentId: req.params.id,
+              relatedRecordType: 'children',
+              relatedRecordId: req.params.id,
+              actorUsername: req.user?.username || null,
+              dedupeKey: `medical-notes:${req.params.id}:${Date.now()}`,
+            }
+          );
+        }
+      } catch (alertError) {
+        // A failed alert must not fail the save the caller already has.
+        console.error('[ChildController] Medical notes alert failed (non-fatal):', alertError.message);
+      }
     }
   } catch (error) {
     next(error);

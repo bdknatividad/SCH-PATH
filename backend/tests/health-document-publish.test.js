@@ -790,18 +790,39 @@ test('the resident is auto-filled and the identity fields are not editable', () 
   );
 });
 
-test('the signature is drawn in the shared modal, not an inline canvas', () => {
-  // The inline canvas was 240x72 CSS pixels and unusable on a phone; the shared
-  // modal is the component every other signing surface in the app uses.
-  assert.match(HEALTH_FORM, /import \{ SignaturePadModal \} from '\.\/SignaturePad'/, 'the shared signature modal is no longer used');
+test('neither medical sheet collects a signature', () => {
+  // The medical sheet records the doctor's name and specialization per entry and
+  // the dental sheet records the dentist and the clinic; the signature pad both
+  // used to draw into is gone. What this pins is that it is gone from *both* —
+  // a half-removal that left one of the two pads behind is the easy mistake —
+  // and that the fields that replaced it are the ones on the form.
+  assert.doesNotMatch(
+    HEALTH_FORM,
+    /<SignaturePadModal/,
+    'the medical or dental form still offers a signature pad'
+  );
+  assert.doesNotMatch(
+    HEALTH_FORM,
+    /import \{ SignaturePadModal \}/,
+    'the signature modal is still imported although nothing renders it'
+  );
   assert.doesNotMatch(
     HEALTH_FORM,
     /function SignaturePad\(/,
     'the component has its own canvas again, so a signature drawn here is captured differently ' +
       'from every other form in the app'
   );
+
   const form = recordFormSource();
-  assert.match(form, /<SignaturePadModal/, 'the record form no longer offers a signature pad');
+  // The medical sheet: one row per consultation, each with its own doctor.
+  assert.match(
+    form,
+    /'doctorName', 'specialization'/,
+    'the medical sheet no longer records the doctor and the specialization per entry'
+  );
+  // The dental sheet: the dentist and the clinic that saw the resident.
+  assert.match(form, /label="Dentist's Name"/, 'the dental sheet no longer records the dentist');
+  assert.match(form, /label="Dental Clinic Name"/, 'the dental sheet no longer records the clinic');
 });
 
 test('the dental checklist is what the saved record carries', () => {
