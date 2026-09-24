@@ -35,9 +35,13 @@ async function canAccessResident(user, residentId) {
 
   // Legacy compatibility: older admissions stored the assigned Houseparent
   // only in admissions.houseparentOnDuty. Treat that as an assignment when it
-  // matches the authenticated HP's username/display name. This repairs old
-  // records without changing the database schema or exposing another HP's
-  // residents.
+  // matches the authenticated HP. This repairs old records without changing the
+  // database schema or exposing another HP's residents.
+  //
+  // The id is checked first, and the name match applies only to rows that
+  // predate `admissions.houseparentUserId`. A name is not a relationship — it
+  // moves when someone is renamed and collides when two people share one — so it
+  // is a migration aid, not a key.
   const [legacyRows] = await pool.query(
     `SELECT a.id
        FROM admissions a
@@ -45,14 +49,20 @@ async function canAccessResident(user, residentId) {
       WHERE a.residentId = ?
         AND a.status = 'Active'
         AND (
-          LOWER(TRIM(a.houseparentOnDuty)) = LOWER(TRIM(u.username))
-          OR (u.displayName IS NOT NULL AND LOWER(TRIM(a.houseparentOnDuty)) = LOWER(TRIM(u.displayName)))
-          OR (u.fullName IS NOT NULL AND LOWER(TRIM(a.houseparentOnDuty)) = LOWER(TRIM(u.fullName)))
-          OR EXISTS (
-            SELECT 1 FROM staff s
-             WHERE s.userId = u.id
-               AND s.name IS NOT NULL
-               AND LOWER(TRIM(a.houseparentOnDuty)) = LOWER(TRIM(s.name))
+          a.houseparentUserId = u.id
+          OR (
+            a.houseparentUserId IS NULL
+            AND (
+              LOWER(TRIM(a.houseparentOnDuty)) = LOWER(TRIM(u.username))
+              OR (u.displayName IS NOT NULL AND LOWER(TRIM(a.houseparentOnDuty)) = LOWER(TRIM(u.displayName)))
+              OR (u.fullName IS NOT NULL AND LOWER(TRIM(a.houseparentOnDuty)) = LOWER(TRIM(u.fullName)))
+              OR EXISTS (
+                SELECT 1 FROM staff s
+                 WHERE s.userId = u.id
+                   AND s.name IS NOT NULL
+                   AND LOWER(TRIM(a.houseparentOnDuty)) = LOWER(TRIM(s.name))
+              )
+            )
           )
         )
       LIMIT 1`,
@@ -362,6 +372,9 @@ async function getCaseload(req, res, next) {
     // were saved with houseparentOnDuty before the explicit assignment row was
     // introduced. Resolve those records against the current HP account and
     // merge them into the same Case Load response.
+    //
+    // `houseparentUserId` is the real link; the name match is kept only for rows
+    // admitted before that column existed and never backfilled.
     const [legacyRows] = await pool.query(
       `SELECT u.id AS userId, c.id AS residentId, c.name AS residentName
          FROM users u
@@ -370,14 +383,20 @@ async function getCaseload(req, res, next) {
         WHERE u.status = 'Active'
           AND LOWER(TRIM(u.role)) IN ('houseparent', 'house_parent', 'house parent')
           AND (
-            LOWER(TRIM(a.houseparentOnDuty)) = LOWER(TRIM(u.username))
-            OR (u.displayName IS NOT NULL AND LOWER(TRIM(a.houseparentOnDuty)) = LOWER(TRIM(u.displayName)))
-            OR (u.fullName IS NOT NULL AND LOWER(TRIM(a.houseparentOnDuty)) = LOWER(TRIM(u.fullName)))
-            OR EXISTS (
-              SELECT 1 FROM staff s
-               WHERE s.userId = u.id
-                 AND s.name IS NOT NULL
-                 AND LOWER(TRIM(a.houseparentOnDuty)) = LOWER(TRIM(s.name))
+            a.houseparentUserId = u.id
+            OR (
+              a.houseparentUserId IS NULL
+              AND (
+                LOWER(TRIM(a.houseparentOnDuty)) = LOWER(TRIM(u.username))
+                OR (u.displayName IS NOT NULL AND LOWER(TRIM(a.houseparentOnDuty)) = LOWER(TRIM(u.displayName)))
+                OR (u.fullName IS NOT NULL AND LOWER(TRIM(a.houseparentOnDuty)) = LOWER(TRIM(u.fullName)))
+                OR EXISTS (
+                  SELECT 1 FROM staff s
+                   WHERE s.userId = u.id
+                     AND s.name IS NOT NULL
+                     AND LOWER(TRIM(a.houseparentOnDuty)) = LOWER(TRIM(s.name))
+                )
+              )
             )
           )`,
       []

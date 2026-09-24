@@ -53,6 +53,7 @@ const RESOURCES = {
       'referringPartyContact',
       'referringPartySignature',
       'houseparentOnDuty',
+      'houseparentUserId',
       'houseparentSignature',
       'legalCategory',
       'specificOffense',

@@ -52,6 +52,39 @@ function resolveAdmissionStatus(admissionNumber, requested) {
   return DEFAULT_RETURNING_ADMISSION_STATUS;
 }
 
+/**
+ * The stable id of the Houseparent on duty.
+ *
+ * The slip has always recorded this person as a *printed name*
+ * (`houseparentOnDuty`), and the caseload scope then matched that name back
+ * against `users.username` / `displayName` / `fullName` to decide which
+ * residents a Houseparent may open. A name is not a key: renaming a member of
+ * staff silently moved their caseload, two people sharing a display name saw
+ * each other's residents, and a stray double space in the dropdown label was
+ * enough to detach the resident entirely.
+ *
+ * The admission now carries the id alongside the name. The name is still
+ * written — it is what the official slip prints — but it is a label again
+ * rather than the link. The name match survives only for rows admitted before
+ * this column existed, and only where the column is still NULL.
+ *
+ * An id that names nobody is refused as a 400 rather than stored, because a
+ * dangling id would look like an assignment while granting nothing.
+ *
+ * @param {unknown} value The selected Houseparent's `users.id`.
+ * @returns {Promise<string|null>} The id, or null when nothing was selected.
+ */
+async function resolveHouseparentUserId(value, executor = pool) {
+  const id = String(value ?? '').trim();
+  if (!id) return null;
+
+  const [rows] = await executor.query('SELECT id FROM users WHERE id = ? LIMIT 1', [id]);
+  if (!rows.length) {
+    throw new ApiError(400, 'The selected Houseparent on duty no longer exists.');
+  }
+  return rows[0].id;
+}
+
 function requireContactNumber(value, label) {
   const contact = String(value || '').replace(/\D/g, '');
 
@@ -199,6 +232,11 @@ async function create(req, res, next) {
       admission.houseparentOnDuty,
       'Houseparent on duty'
     );
+
+    // Resolved here rather than inside the transaction: an unknown id is the
+    // caller's mistake, and the transaction below creates a resident, a phase
+    // row and the admission, so it should not be opened to discover that.
+    const houseparentUserId = await resolveHouseparentUserId(admission.houseparentUserId);
 
     // Creating a resident, their first phase record and the admission snapshot
     // is one state transition across three tables, so it must not half-apply.
@@ -587,6 +625,7 @@ async function create(req, res, next) {
           referringPartyContact,
           referringPartySignature,
           houseparentOnDuty,
+          houseparentUserId,
           houseparentSignature,
           legalCategory,
           specificOffense,
@@ -596,7 +635,7 @@ async function create(req, res, next) {
           status,
           createdBy
         ) VALUES (
-          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Active', ?
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Active', ?
         )`,
         [
           admissionId,
@@ -619,6 +658,7 @@ async function create(req, res, next) {
           admission.referringPartyContact,
           admission.referringPartySignature,
           admission.houseparentOnDuty,
+          houseparentUserId,
           admission.houseparentSignature,
           admission.legalCategory,
           admission.specificOffense,
@@ -709,9 +749,21 @@ async function update(req, res, next) {
         throw new ApiError(400, 'Expected discharge date cannot be before the admission date.');
       }
     }
-    const fields = ['admissionDate','expectedDischargeDate','name','age','sex','birthDate','religion','address','residentSignature','guardianName','guardianContact','guardianAddress','guardianSignature','referringParty','referringPartyContact','referringPartySignature','houseparentOnDuty','houseparentSignature','residentImage','legalCategory','specificOffense','admissionStatus'];
+    const fields = ['admissionDate','expectedDischargeDate','name','age','sex','birthDate','religion','address','residentSignature','guardianName','guardianContact','guardianAddress','guardianSignature','referringParty','referringPartyContact','referringPartySignature','houseparentOnDuty','houseparentUserId','houseparentSignature','residentImage','legalCategory','specificOffense','admissionStatus'];
     const sets = []; const values = [];
-    for (const field of fields) { if (b[field] !== undefined) { sets.push(`${field} = ?`); values.push(b[field] === '' ? null : b[field]); } }
+    for (const field of fields) {
+      if (b[field] === undefined) continue;
+      // The Houseparent on duty is stored by id as well as by printed name, so
+      // reassigning a resident survives a rename of the new Houseparent. An id
+      // that names nobody is refused here rather than written as a dangling
+      // reference that would look like an assignment and grant nothing.
+      if (field === 'houseparentUserId') {
+        sets.push(`${field} = ?`);
+        values.push(await resolveHouseparentUserId(b[field]));
+        continue;
+      }
+      sets.push(`${field} = ?`); values.push(b[field] === '' ? null : b[field]);
+    }
     if (!sets.length) return res.json({ success: true, data: mapRow('admissions', rows[0]) });
     sets.push('modifiedBy = ?'); values.push(req.user?.username || 'System'); values.push(id);
 
@@ -790,6 +842,7 @@ async function getById(req, res, next) {
 
 module.exports = {
   resolveAdmissionStatus,
+  resolveHouseparentUserId,
   create,
   getByResident,
   getLatestForResident,

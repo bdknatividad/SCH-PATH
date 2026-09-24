@@ -237,6 +237,14 @@ interface AdmissionRecord {
 
   houseparentOnDuty: string;
 
+  /*
+   * The Houseparent on duty as a stable users.id. The name above is a label for
+   * the official slip; this is the link the caseload is resolved from, so it
+   * survives a rename and cannot be confused between two people with the same
+   * display name. Absent on admissions saved before the column existed.
+   */
+  houseparentUserId?: string | null;
+
   houseparentSignature?: string | null;
 
   legalCategory: string;
@@ -2090,7 +2098,13 @@ export function ChildRecords() {
       houseparentOnDuty: source.houseparentOnDuty || assignment?.userLabel || '',
       houseparentSignature: source.houseparentSignature || '',
       residentImage: source.residentImage || '',
-      assignedHouseparentId: assignment?.userId || '',
+      /*
+       * The admission's own id first, because it is what was chosen when this
+       * admission was created; the assignment row is the fallback for
+       * admissions that predate the column. Preferring the assignment would
+       * re-point a historical admission at whoever holds the resident now.
+       */
+      assignedHouseparentId: source.houseparentUserId || assignment?.userId || '',
     });
     setFormErrors({});
     setFormStep(1);
@@ -2147,6 +2161,7 @@ export function ChildRecords() {
             referringPartyContact: form.referringPartyContact.trim(),
             referringPartySignature: form.referringPartySignature || null,
             houseparentOnDuty: form.houseparentOnDuty.trim(),
+            houseparentUserId: form.assignedHouseparentId || null,
             houseparentSignature: form.houseparentSignature || null,
             residentImage: form.residentImage || null,
             admissionStatus,
@@ -2908,6 +2923,16 @@ export function ChildRecords() {
 
         houseparentOnDuty:
           form.houseparentOnDuty,
+
+        /*
+         * The stable users.id behind the printed name above. The
+         * name is what the slip shows; this is what links the
+         * resident to a Houseparent's caseload, so renaming a
+         * member of staff does not silently move their residents.
+         */
+        houseparentUserId:
+          form.assignedHouseparentId ||
+          null,
 
         houseparentSignature:
           form.houseparentSignature ||
@@ -3727,6 +3752,10 @@ export function ChildRecords() {
 
             houseparentOnDuty:
               form.houseparentOnDuty.trim(),
+
+            houseparentUserId:
+              form.assignedHouseparentId ||
+              null,
 
             houseparentSignature:
               form.houseparentSignature ||

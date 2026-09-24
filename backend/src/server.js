@@ -586,6 +586,69 @@ async function runMigrations() {
     console.warn('Migration warning (admissions.admissionStatus):', err.message);
   }
 
+  // The Houseparent on duty as a *stable id*, alongside the printed name.
+  //
+  // The caseload scope used to link a resident to their Houseparent by matching
+  // `admissions.houseparentOnDuty` — a name the Social Worker picks from a
+  // dropdown — against `users.username` / `displayName` / `fullName`. A name is
+  // not a key. Renaming a member of staff silently moved their caseload; two
+  // people sharing a display name saw each other's residents; and a stray double
+  // space in the label detached the resident entirely. None of it errored — the
+  // wrong list was simply returned.
+  //
+  // Backfilled here so existing admissions keep working, but only where the name
+  // resolves to exactly *one* active Houseparent. An ambiguous name is left NULL,
+  // which means the row falls through to the old name match and behaves exactly
+  // as it does today: the backfill can make the link more precise, never move a
+  // resident to a different Houseparent.
+  try {
+    await ensureColumn('admissions', 'houseparentUserId', 'VARCHAR(50) NULL', 'houseparentOnDuty');
+    const [candidates] = await pool.query(
+      `SELECT a.id AS admissionId, u.id AS userId
+         FROM admissions a
+         JOIN users u
+           ON u.status = 'Active'
+          AND LOWER(TRIM(u.role)) IN ('houseparent', 'house_parent', 'house parent')
+          AND (
+            LOWER(TRIM(a.houseparentOnDuty)) = LOWER(TRIM(u.username))
+            OR (u.displayName IS NOT NULL AND LOWER(TRIM(a.houseparentOnDuty)) = LOWER(TRIM(u.displayName)))
+            OR (u.fullName IS NOT NULL AND LOWER(TRIM(a.houseparentOnDuty)) = LOWER(TRIM(u.fullName)))
+          )
+        WHERE a.houseparentUserId IS NULL
+          AND a.houseparentOnDuty IS NOT NULL`
+    );
+
+    const resolved = new Map();
+    const ambiguous = new Set();
+    for (const row of candidates) {
+      const key = String(row.admissionId);
+      if (ambiguous.has(key)) continue;
+      const seen = resolved.get(key);
+      if (seen === undefined) resolved.set(key, String(row.userId));
+      else if (seen !== String(row.userId)) { resolved.delete(key); ambiguous.add(key); }
+    }
+
+    let linked = 0;
+    for (const [admissionId, userId] of resolved) {
+      const [result] = await pool.query(
+        'UPDATE admissions SET houseparentUserId = ? WHERE id = ? AND houseparentUserId IS NULL',
+        [userId, admissionId]
+      );
+      linked += result.affectedRows || 0;
+    }
+    if (linked > 0) {
+      console.log(`Migration: ${linked} admission(s) linked to their Houseparent by id.`);
+    }
+    if (ambiguous.size > 0) {
+      console.log(
+        `Migration: ${ambiguous.size} admission(s) left on the name match — ` +
+          'the printed name resolves to more than one Houseparent account.'
+      );
+    }
+  } catch (err) {
+    console.warn('Migration warning (admissions.houseparentUserId):', err.message);
+  }
+
   // ── violations ────────────────────────────────────────────────────────────
   //
   // Same omission as `admissions`, and the last one in this family: the only

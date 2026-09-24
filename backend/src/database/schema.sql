@@ -138,6 +138,12 @@ CREATE TABLE admissions (
   referringPartySignature LONGTEXT NULL,
 
   houseparentOnDuty VARCHAR(150) NOT NULL,
+
+  -- The Houseparent on duty as a stable users.id, alongside the printed name.
+  -- The name is what the official slip shows; this is what links the resident to
+  -- a caseload, so renaming a member of staff does not move their residents.
+  houseparentUserId VARCHAR(50) NULL,
+
   houseparentSignature LONGTEXT NULL,
 
   legalCategory VARCHAR(150) NOT NULL,
