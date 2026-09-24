@@ -148,8 +148,10 @@ change UX. `/violations` and `/phaseProgress` are likewise mounted without a
 module guard.
 
 **Caseload scope:** only `houseparent` is scoped (`utils/residentScope.js`), and
-the scope readers accept `assignmentType = 'houseparent'` while the seed writes
-`'household'` — see the header of `backend/tests/caseload-scope.test.js` before
-touching either side. Widening the reader to accept `'household'` is the one
-option that is wrong under both readings, because the seed creates the full
-houseparent × child cross product.
+the seed now writes `assignmentType = 'houseparent'` — the one value every reader
+grants scope on. The old `'household'` seed value was a **typo, fixed 2026-09-24
+(commit `effd62d`)**. Never widen a reader to accept `'household'`: the seed
+creates the full houseparent × child cross product, so accepting it would hand
+every Houseparent every resident. `/violations` and `/phaseProgress` are
+deliberately **facility-wide** for Houseparents, so `tests/caseload-scope.test.js`
+no longer asserts those two controllers consult the scope.
