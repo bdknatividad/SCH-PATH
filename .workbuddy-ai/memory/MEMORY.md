@@ -50,6 +50,37 @@ it. Restore from a copy you made — **not `git checkout --`** — because the f
 normally still uncommitted, so HEAD does not contain it and the checkout reverts
 the fix along with the mutation.
 
+**Check the mutator actually applied.** A mutation script that silently fails to
+match makes the whole battery vacuous — a green run then proves nothing. Have the
+mutator print `replaced N occurrence(s)` and fail loudly on zero.
+
+### Windows traps when scripting a mutation or a source-scanning test
+- **Python text-mode writes convert LF → CRLF.** `io.open(p, 'w')` writes `\r\n`.
+  A test that locates a block by a multi-line marker containing `\n` then stops
+  matching: `indexOf` gives `-1` and `slice(-1)` yields a *one-character* block —
+  which fails, or with a loose pattern passes for the wrong reason. Normalize on
+  read (`.replace(/\r\n/g, '\n')`) and assert the markers were found plus a
+  plausible block length. Write LF deliberately with `newline=''`.
+- **Python resolves `/tmp` as `C:\tmp`.** A helper heredoc'd to `/tmp/x.py` is not
+  readable by `python /tmp/x.py` under Git Bash. Use `"$(cygpath -w /tmp)/x.py"`.
+
+### Behavioural controller tests without a database
+Inject a pool stub into `require.cache` for `src/config/database` *before*
+requiring the controller, then dispatch on the SQL text inside a fake
+`query(sql, params)`. Lets the real rule be exercised — not source text. Patterns:
+`tests/violation-verification-access.test.js`,
+`tests/access-request-history-identity.test.js`.
+
+### Keying a relationship on a display name (the recurring defect class)
+Where a link is stored as a printed name, the fix shape is: add an id column
+*beside* the name; read the id first; gate the old name comparison on
+`<idColumn> IS NULL` so it is only a migration aid; backfill only where the name
+resolves to exactly one account; refuse an unknown id with a 400; and declare the
+column in **all** places the table is created (`ensureTable`, `server.js` boot
+migration, `schema.sql`). Applied to `admissions.houseparentUserId` (item 51) and
+`accessRequests.reviewedById` (item 50). The failure mode is always silent — the
+wrong list is returned — so it needs tests, not a smoke test.
+
 ### A controller test needs no database when validation precedes I/O
 If the code under test rejects bad input before its first query, drive the
 controller with fake `req`/`res` and a `next` that captures the error, and assert
