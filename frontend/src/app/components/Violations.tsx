@@ -98,6 +98,57 @@ const toMonthKey = (value: string | undefined | null) => {
 const findGuideByLabel = (matrix: ViolationItem[], label: string) =>
   matrix.find((item) => normalizeLabel(item.label) === normalizeLabel(label));
 
+/**
+ * The intervention types that have to be scheduled before a violation can be
+ * verified. Must stay identical to `isSchedulingInterventionType()` in
+ * `backend/src/controllers/violationController.js`.
+ *
+ * The rule is about the intervention's *type*, never about what its description
+ * happens to say. Deciding it by scanning the free text was the bug: a
+ * "Dialogue/Counseling" requirement whose description read "Counseling session
+ * with the resident" never used the word "dialogue", so the Schedule field was
+ * never rendered — while the API, which reads the type, refused the review with
+ * "A schedule date and time is required for this intervention." The reviewer was
+ * shown an error with no field to answer it.
+ *
+ * The mirror-image case is just as wrong: a "Household Chores" requirement whose
+ * description mentioned a dialogue used to demand a schedule the API never
+ * wanted.
+ */
+const SCHEDULING_INTERVENTION_TYPES = [
+  'psychosocial activity',
+  'dialogue / counseling',
+  'dialogue/counseling',
+];
+
+/** The stored type of an intervention row, normalised the way the API does. */
+const normalizeInterventionType = (row: any) =>
+  String(row?.interventionType ?? row?.type ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+
+const interventionNeedsSchedule = (row: any) =>
+  SCHEDULING_INTERVENTION_TYPES.includes(normalizeInterventionType(row));
+
+const interventionIsPsychosocial = (row: any) =>
+  normalizeInterventionType(row) === 'psychosocial activity';
+
+/**
+ * What to *show* for an intervention.
+ *
+ * Deliberately separate from the two predicates above: the guide's own wording
+ * is what a reviewer needs to read, and it is not a reliable signal for what the
+ * intervention is. The two were the same expression, which is how a description
+ * containing the word "dialogue" came to decide whether a schedule was needed.
+ */
+const interventionDisplayText = (row: any) =>
+  row?.officialText ||
+  row?.metadata?.officialText ||
+  row?.metadata?.rawText ||
+  row?.interventionType ||
+  'Unspecified';
+
 export function Violations() {
   const navigate = useNavigate();
   const { children, staff, violations, updateViolation, deleteViolation, refreshData, addAssessment } = useData();
@@ -553,11 +604,15 @@ export function Violations() {
     setReviewSuccess('');
     // Validate before the request so a missing field sends the person straight
     // back to it, instead of costing a round-trip and surfacing a server error.
-    if (decision === 'verify' && req && req.interventions.some((r: any) => /psychosocial|dialogue/i.test(String(r.officialText || r.metadata?.officialText || r.metadata?.rawText || r.interventionType || ''))) && !reviewForm.scheduleDateTime) {
+    // Judged on the intervention's type, exactly as the API judges it, so the
+    // field this insists on is a field the dialog actually rendered.
+    const requirementNeedsSchedule = Boolean(req?.interventions?.some(interventionNeedsSchedule));
+    const requirementIsPsychosocial = Boolean(req?.interventions?.some(interventionIsPsychosocial));
+    if (decision === 'verify' && requirementNeedsSchedule && !reviewForm.scheduleDateTime) {
       setReviewError('Please set the Schedule Date and Time for this intervention before verifying.');
       return;
     }
-    if (decision === 'verify' && req && req.interventions.some((r: any) => /psychosocial/i.test(String(r.officialText || r.metadata?.officialText || r.metadata?.rawText || r.interventionType || ''))) && reviewForm.psychosocialActivities.length === 0) {
+    if (decision === 'verify' && requirementIsPsychosocial && reviewForm.psychosocialActivities.length === 0) {
       setReviewError('Please select at least one Psychosocial Activity before verifying.');
       return;
     }
@@ -569,7 +624,7 @@ export function Violations() {
     try {
       await request(`/violations/${selectedViolation.id}/review`, {
         method: 'POST',
-        body: JSON.stringify({ status: decision === 'reject' ? 'Rejected' : 'Reviewed', actionTaken: notes || null, scheduleDateTime: req && req.interventions.some((r: any) => /psychosocial|dialogue/i.test(String(r.officialText || r.metadata?.officialText || r.metadata?.rawText || r.interventionType || ''))) ? reviewForm.scheduleDateTime : null, psychosocialActivities: req && req.interventions.some((r: any) => /psychosocial/i.test(String(r.officialText || r.metadata?.officialText || r.metadata?.rawText || r.interventionType || ''))) ? reviewForm.psychosocialActivities : [] }),
+        body: JSON.stringify({ status: decision === 'reject' ? 'Rejected' : 'Reviewed', actionTaken: notes || null, scheduleDateTime: requirementNeedsSchedule ? reviewForm.scheduleDateTime : null, psychosocialActivities: requirementIsPsychosocial ? reviewForm.psychosocialActivities : [] }),
       });
       // Confirm the outcome in the dialog before it closes — previously it
       // vanished silently, so a success was indistinguishable from a no-op.
@@ -1458,10 +1513,11 @@ export function Violations() {
           {selectedViolation && (() => {
             const req = reviewRequirements;
             const interventions = req?.interventions || [];
-            const interventionText = (r: any) =>
-              r.officialText || r.metadata?.officialText || r.metadata?.rawText || r.interventionType || 'Unspecified';
-            const needsSchedule = interventions.some((r: any) => /psychosocial|dialogue/i.test(String(interventionText(r))));
-            const isPsychosocial = interventions.some((r: any) => /psychosocial/i.test(String(interventionText(r))));
+            // Same signal as the API and as the validation above. Scanning the
+            // free text here is what hid the Schedule field for the exact
+            // interventions the API refuses to verify without one.
+            const needsSchedule = interventions.some(interventionNeedsSchedule);
+            const isPsychosocial = interventions.some(interventionIsPsychosocial);
             return <div className="space-y-4 py-2">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-lg bg-gray-50 p-4 text-sm">
                 <p><span className="font-medium">Incident Type:</span> {selectedViolation.type}</p>
@@ -1479,14 +1535,14 @@ export function Violations() {
                  <div className="mt-2 space-y-1 text-sm">
                    {interventions.map((r: any) => (
                      <div key={r.id} className="rounded bg-white border px-3 py-2">
-                       <div className="font-medium">{interventionText(r)}</div>
+                       <div className="font-medium">{interventionDisplayText(r)}</div>
                        {r.duration ? <div className="text-xs text-gray-500 mt-0.5">Duration: {r.duration} {r.unit || ''}</div> : null}
                        <div className="text-[10px] text-gray-400 mt-1">Configured intervention ID: {r.id}</div>
                      </div>
                    ))}
                  </div>
                </div>
-              {needsSchedule && <div className="space-y-2 rounded-lg border p-4"><Label>Schedule Date and Time</Label><Input type="datetime-local" min={new Date(Date.now() + 60000).toISOString().slice(0,16)} value={reviewForm.scheduleDateTime} onChange={(e) => setReviewForm(p => ({ ...p, scheduleDateTime: e.target.value }))} /><p className="text-xs text-gray-500">Scheduling is shown only because the configured intervention includes psychosocial activity or dialogue.</p></div>}
+              {needsSchedule && <div className="space-y-2 rounded-lg border p-4"><Label>Schedule Date and Time</Label><Input type="datetime-local" min={new Date(Date.now() + 60000).toISOString().slice(0,16)} value={reviewForm.scheduleDateTime} onChange={(e) => setReviewForm(p => ({ ...p, scheduleDateTime: e.target.value }))} /><p className="text-xs text-gray-500">The configured intervention type is Psychosocial Activity or Dialogue/Counseling, which has to be scheduled before this violation can be verified.</p></div>}
               {isPsychosocial && <div className="space-y-2 rounded-lg border p-4"><Label>Psychosocial Activity (select all that apply)</Label><div className="grid grid-cols-1 sm:grid-cols-2 gap-2">{PSYCHOSOCIAL_OPTIONS.map(option => <label key={option} className="flex items-center gap-2 text-sm"><Checkbox checked={reviewForm.psychosocialActivities.includes(option)} onCheckedChange={() => togglePsychosocialActivity(option)} />{option}</label>)}</div></div>}
               <div className="space-y-2 rounded-lg border p-4">
                 <Label htmlFor="review-notes">Review Notes</Label>
