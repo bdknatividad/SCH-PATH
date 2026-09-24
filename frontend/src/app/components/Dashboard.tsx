@@ -2062,33 +2062,15 @@ export function Dashboard() {
         </Card>
       )}
 
-      {/* Schedules */}
+      {/* Schedules.
+          Today's activities and today's hearings used to be repeated here as two
+          more cards. The "Scheduled Today" tile already opens the Today's
+          Schedule dialog, which lists both — so the page carried the same
+          schedules twice: once always-on, once a click away. The dialog is the
+          single place for them now. Pending Assessments stays, because it lists
+          *scheduled* assessments rather than only today's, so it is not part of
+          that dialog. */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {hasModule('Activities') && <Card className="shadow-sm border-none">
-          <CardHeader className="border-b border-gray-100">
-            <CardTitle className="flex items-center gap-2 text-md text-[#2F3E46]">
-              <Calendar className="w-5 h-5 text-[#FFD100]" /> Today's Activities
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="pt-4">
-            {todayActivities.length > 0 ? (
-              <div className="space-y-3">
-                {todayActivities.slice(0, 3).map((activity) => (
-                  <div key={activity.id} className="flex items-start gap-3 p-3 rounded-lg bg-gray-50 border-l-4 border-[#2F3E46]">
-                    <div className="text-xs font-bold bg-[#2F3E46] text-white p-1 rounded min-w-[60px] text-center">{activity.time}</div>
-                    <div className="flex-1">
-                      <p className="font-bold text-sm text-[#2F3E46]">{activity.title}</p>
-                      <p className="text-xs text-gray-500 italic">{activity.type}</p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-gray-500 text-sm py-4 italic">Clean schedule for today.</p>
-            )}
-          </CardContent>
-        </Card>}
-
         {hasModule('Assessments') && (
           <Card className="shadow-sm border-none">
             <CardHeader className="border-b border-gray-100">
@@ -2118,54 +2100,6 @@ export function Dashboard() {
             </CardContent>
           </Card>
         )}
-        {/* Hearing Schedule card */}
-        {hasModule('Court Records') && <Card
-          className="shadow-sm border-none cursor-pointer hover:shadow-md transition-shadow"
-          onClick={() => navigate('/court-records?filter=Scheduled')}
-        >
-          <CardHeader className="border-b border-gray-100">
-            <CardTitle className="flex items-center gap-2 text-md text-[#2F3E46]">
-              <Gavel className="w-5 h-5 text-[#FFD100]" /> Hearing Schedule
-              {scheduledHearings.length > 0 && (
-                <span className="ml-auto text-xs font-bold bg-[#FFD100] text-[#2F3E46] px-2 py-0.5 rounded-full">
-                  {scheduledHearings.length} scheduled
-                </span>
-              )}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="pt-4">
-            {todayHearings.length > 0 ? (
-              <div className="space-y-3">
-                {todayHearings.slice(0, 3).map(h => {
-                  const resident = children.find(c => c.id === h.residentId);
-                  return (
-                    <div key={h.id} className="flex items-start gap-3 p-3 rounded-lg bg-gray-50 border-l-4 border-[#FFD100]">
-                      <div className="text-xs font-bold bg-[#2F3E46] text-white p-1 rounded min-w-[60px] text-center">
-                        {h.hearingTime || 'TBA'}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-bold text-sm text-[#2F3E46] truncate">{resident?.name || '—'}</p>
-                        <p className="text-xs text-gray-500 italic">{h.hearingType || h.courtName || 'Court Hearing'}</p>
-                      </div>
-                    </div>
-                  );
-                })}
-                {scheduledHearings.length > todayHearings.length && (
-                  <p className="text-xs text-gray-400 text-center pt-1">
-                    +{scheduledHearings.length - todayHearings.length} more upcoming • Click to view all
-                  </p>
-                )}
-              </div>
-            ) : scheduledHearings.length > 0 ? (
-              <div className="space-y-2">
-                <p className="text-gray-500 text-sm italic">No hearings today.</p>
-                <p className="text-xs text-[#2F3E46] font-semibold">{scheduledHearings.length} upcoming hearing{scheduledHearings.length !== 1 ? 's' : ''} — click to view</p>
-              </div>
-            ) : (
-              <p className="text-gray-500 text-sm py-4 italic">No scheduled hearings.</p>
-            )}
-          </CardContent>
-        </Card>}
       </div>
 
       {/* ── CHILDREN OVERVIEW MODAL ── */}

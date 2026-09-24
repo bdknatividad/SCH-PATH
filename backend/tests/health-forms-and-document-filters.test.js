@@ -190,10 +190,21 @@ test('the Documents list filters residents by status and defaults to Active', ()
     /const filteredChildren = children\.filter\(c =>\s*\n\s*\(filterResident === 'all' \|\| c\.id === filterResident\)\s*\n\s*&& matchesResidentStatus\(c\)/,
     'the folder tree does not apply the status filter',
   );
+  // The queue is named now, so the filter and the list are asserted separately:
+  // the filter has to be applied where the queue is built, and the tab has to
+  // list that queue. Pinning the old inline `docs={pendingDocs.filter(...)}` only
+  // held while the expression happened to stay inline — the behaviour it meant to
+  // protect is "the pending queue applies the status filter", and that is what is
+  // checked here.
   assert.match(
     DOCUMENTS,
-    /docs=\{pendingDocs\.filter\(d =>[\s\S]{0,160}matchesResidentStatusForDocument\(d\.residentId\)/,
+    /const pendingApprovalQueue = pendingDocs\.filter\(d =>[\s\S]{0,200}matchesResidentStatusForDocument\(d\.residentId\)/,
     'the pending queue does not apply the status filter',
+  );
+  assert.match(
+    DOCUMENTS,
+    /docs=\{pendingApprovalQueue\}/,
+    'the Pending Review tab does not list the filtered pending queue',
   );
   for (const label of ['Active Residents', 'Discharged Residents']) {
     assert.ok(DOCUMENTS.includes(label), `the picker no longer offers "${label}"`);
