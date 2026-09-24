@@ -12,7 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/app/components/ui/ta
 import { useData } from '../state/DataContext';
 import { useAuth } from '../state/AuthContext';
 import { systemDialog } from '@/app/components/SystemDialog';
-import { formatShortDate } from '@/utils/dateFormatter';
+import { formatShortDate, isTodayOrLater } from '@/utils/dateFormatter';
 
 // Social Worker component now connected to real database via DataContext
 
@@ -59,13 +59,13 @@ export function SocialWorker() {
     );
   }, [children, searchTerm]);
 
-  // Get upcoming court hearings for assigned residents
+  // Get upcoming court hearings for assigned residents.
+  // "Upcoming" is a calendar-day question, not an instant one: `new Date(record.hearingDate)`
+  // is UTC midnight, so comparing it with `new Date()` hid every hearing due today.
   const upcomingHearings = useMemo(() => {
-    const now = new Date();
-    return courtRecords.filter(record => {
-      const hearingDate = new Date(record.hearingDate);
-      return hearingDate >= now && record.status === 'Scheduled';
-    }).sort((a, b) => new Date(a.hearingDate).getTime() - new Date(b.hearingDate).getTime());
+    return courtRecords.filter(record =>
+      isTodayOrLater(record.hearingDate) && record.status === 'Scheduled'
+    ).sort((a, b) => String(a.hearingDate || '').localeCompare(String(b.hearingDate || '')));
   }, [courtRecords]);
 
   // Get residents with violations

@@ -434,3 +434,27 @@ export function getCurrentPHDate(): string {
 
   return `${year}-${month}-${day}`;
 }
+
+/**
+ * Is a DATE-only value (`YYYY-MM-DD`) today or later?
+ *
+ * A hearing date, an admission date or any other value that came from an
+ * `<input type="date">` is a *calendar day*, not an instant. `new Date('2026-09-24')`
+ * parses as UTC midnight, which in Manila is 08:00 on the 24th — so comparing it
+ * against `new Date()` silently drops everything scheduled for *today* from the
+ * moment the clock passes 8am. A "Scheduled Today" list built that way is empty
+ * for the whole working day, which is exactly when it matters.
+ *
+ * The comparison therefore has to be on the calendar day, and for `YYYY-MM-DD`
+ * strings that is a plain string comparison: the format is zero-padded and
+ * big-endian, so lexicographic order is chronological order. Nothing is parsed
+ * as a `Date`, so there is no timezone to get wrong.
+ *
+ * A missing or malformed value is not "today or later" — it is not a date at
+ * all, and counting it would overstate the list.
+ */
+export function isTodayOrLater(value?: string | null): boolean {
+  const day = String(value ?? '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return false;
+  return day >= getCurrentPHDate();
+}

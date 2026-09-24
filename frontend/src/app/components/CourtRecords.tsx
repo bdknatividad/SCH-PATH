@@ -13,7 +13,7 @@ import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, A
 import { Search, Plus, Eye, Edit, Trash2, Gavel, Calendar, User, FileText, Printer, Download, ChevronDown, ChevronUp } from 'lucide-react';
 import { useData, CourtRecord } from '../state/DataContext';
 import { useAuth } from '../state/AuthContext';
-import { formatShortDate } from '@/utils/dateFormatter';
+import { formatShortDate, getCurrentPHDate, isTodayOrLater } from '@/utils/dateFormatter';
 
 export function CourtRecords() {
   const { children, courtRecords, addCourtRecord, updateCourtRecord, deleteCourtRecord } = useData();
@@ -58,9 +58,11 @@ export function CourtRecords() {
   });
 
   useEffect(() => {
-    // On mount, schedule 1-hour-before reminders for any hearings today
-    const today = new Date().toISOString().split('T')[0];
-    const todayHearings = courtRecords.filter(r => r.hearingDate === today && r.status === 'Scheduled');
+    // On mount, schedule 1-hour-before reminders for any hearings today.
+    // `toISOString()` is UTC, so after 16:00 Manila it already reads as
+    // tomorrow and today's reminders were never scheduled at all.
+    const today = getCurrentPHDate();
+    const todayHearings = courtRecords.filter(r => String(r.hearingDate || '').slice(0, 10) === today && r.status === 'Scheduled');
     if (todayHearings.length > 0 && 'Notification' in window) {
       Notification.requestPermission().then(perm => {
         if (perm === 'granted') {
@@ -199,8 +201,11 @@ export function CourtRecords() {
     }
   };
 
+  // A hearing is upcoming while its calendar day is today or later. This used to
+  // be `new Date(r.hearingDate) >= new Date()`, which compares UTC midnight
+  // against the current instant and so dropped every hearing scheduled for today.
   const upcomingHearings = courtRecords.filter(
-    (r) => r.status === 'Scheduled' && new Date(r.hearingDate) >= new Date()
+    (r) => r.status === 'Scheduled' && isTodayOrLater(r.hearingDate)
   ).length;
 
   return (
