@@ -109,7 +109,7 @@ const RESOURCES = {
     prefix: 'VIO',
     orderBy: 'createdAt DESC',
     jsonFields: [],
-    columns: ['id', 'residentId', 'date', 'type', 'description', 'severity', 'points', 'location', 'witnesses', 'reportedBy', 'reviewedBy', 'actionTaken', 'status', 'requiresAssessment', 'assessmentTriggered', 'assessmentCompleted', 'offenseNumber', 'interventionStartDate', 'interventionMonth', 'clearedBy', 'clearedAt', 'incidentGroupId', 'guideId', 'createdBy', 'modifiedBy'],
+    columns: ['id', 'residentId', 'date', 'type', 'description', 'severity', 'points', 'location', 'bodyLocation', 'witnesses', 'reportedBy', 'reviewedBy', 'actionTaken', 'status', 'requiresAssessment', 'assessmentTriggered', 'assessmentCompleted', 'offenseNumber', 'interventionStartDate', 'interventionMonth', 'clearedBy', 'clearedAt', 'incidentGroupId', 'guideId', 'createdBy', 'modifiedBy'],
   },
   alerts: {
     prefix: 'ALR',
@@ -151,7 +151,7 @@ const RESOURCES = {
     prefix: 'ESV',
     orderBy: 'visitDate DESC',
     jsonFields: [],
-    columns: ['id', 'educationRecordId', 'residentId', 'visitDate', 'school', 'purpose', 'findings', 'fileName', 'fileData', 'createdBy', 'modifiedBy'],
+    columns: ['id', 'educationRecordId', 'residentId', 'visitDate', 'school', 'purpose', 'findings', 'status', 'fileName', 'fileData', 'createdBy', 'modifiedBy'],
   },
   education_monthly_reports: {
     prefix: 'EMR',

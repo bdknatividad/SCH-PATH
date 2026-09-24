@@ -562,7 +562,10 @@ async function loadPeriodRecords(residentId, periodStart, periodEnd) {
     [residentId]
   ).catch(() => [[]]);
   const [schoolVisits] = await pool.query(
-    'SELECT * FROM education_school_visits WHERE residentId = ? AND visitDate BETWEEN ? AND ? ORDER BY visitDate ASC',
+    // Only visits that actually took place. A scheduled visit has not happened
+    // yet, and printing one in a quarter's report would record a visit that never
+    // occurred.
+    "SELECT * FROM education_school_visits WHERE residentId = ? AND status = 'Completed' AND visitDate BETWEEN ? AND ? ORDER BY visitDate ASC",
     [residentId, periodStart, periodEnd]
   ).catch(() => [[]]);
   const [interventions] = await pool.query(

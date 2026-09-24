@@ -169,6 +169,14 @@ export interface Violation {
   description?: string;
   severity: 'Minor' | 'Major' | 'Critical';
   location?: string;
+  /**
+   * Where on the body a body-marking violation happened.
+   *
+   * Only meaningful for the tattoo/piercing type, whose own wording is
+   * "sa anumang bahagi ng katawan" — the record could say *that* a tattoo was
+   * placed but not *where*, which is the part a case conference asks about.
+   */
+  bodyLocation?: string;
   witnesses?: string;
   reportedBy?: string;
   reviewedBy?: string;

@@ -682,6 +682,7 @@ async function runMigrations() {
       severity ENUM('Minor', 'Major', 'Critical') NOT NULL DEFAULT 'Minor',
       points INT NOT NULL DEFAULT 1,
       location VARCHAR(150) NULL,
+      bodyLocation VARCHAR(100) NULL,
       witnesses VARCHAR(255) NULL,
       reportedBy VARCHAR(100) NULL,
       reviewedBy VARCHAR(100) NULL,
@@ -706,6 +707,12 @@ async function runMigrations() {
       INDEX idx_violations_guideId (guideId)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
+
+  // Where on the body a body-marking violation happened. The tattoo/piercing
+  // violation's own wording is "sa anumang bahagi ng katawan" — "on any part of
+  // the body" — so the record needs somewhere to say *which* part.
+  await ensureColumn('violations', 'bodyLocation', 'VARCHAR(100) NULL', 'location');
+
   console.log('Migration: violations table ensured.');
 
   await pool.query(`CREATE TABLE IF NOT EXISTS staff (
@@ -2162,6 +2169,7 @@ async function runMigrations() {
         school VARCHAR(255) NOT NULL,
         purpose TEXT NULL,
         findings TEXT NULL,
+        status ENUM('Scheduled','Completed') NOT NULL DEFAULT 'Completed',
         fileName VARCHAR(255) NULL,
         fileData LONGTEXT NULL,
         createdBy VARCHAR(100) NULL,
@@ -2174,6 +2182,12 @@ async function runMigrations() {
         CONSTRAINT fk_education_visit_resident FOREIGN KEY (residentId) REFERENCES children(id) ON DELETE SET NULL
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
+
+    // A school visit used to exist only once it had happened — a date and an
+    // uploaded report. `status` lets one be planned ahead of time. Existing rows
+    // default to 'Completed', which is what they are.
+    await ensureColumn('education_school_visits', 'status', "ENUM('Scheduled','Completed') NOT NULL DEFAULT 'Completed'", 'findings');
+
     await pool.query(`
       CREATE TABLE IF NOT EXISTS education_monthly_reports (
         id VARCHAR(40) PRIMARY KEY,

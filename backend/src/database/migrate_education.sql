@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS education_school_visits (
   school VARCHAR(255) NOT NULL,
   purpose TEXT NULL,
   findings TEXT NULL,
+  status ENUM('Scheduled','Completed') NOT NULL DEFAULT 'Completed',
   fileName VARCHAR(255) NULL,
   fileData LONGTEXT NULL,
   createdBy VARCHAR(100) NULL,

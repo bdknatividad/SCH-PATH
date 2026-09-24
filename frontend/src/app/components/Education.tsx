@@ -23,7 +23,7 @@ import {
 import {
   GraduationCap, Plus, Search, Upload, Eye, Edit, Trash2,
   User, FileText, BookOpen, Award, X, Download, AlertCircle,
-  ChevronDown, ChevronUp, Paperclip,
+  ChevronDown, ChevronUp, Paperclip, CalendarDays, CheckCircle2,
 } from 'lucide-react';
 
 // ── TYPES ────────────────────────────────────────────────────────────────────
@@ -70,6 +70,11 @@ export interface Student {
   traineeNumber?: string;
   files: EducationFile[];
   residentId?: string;
+  /**
+   * Username of the account that created the learner record. Set by the API.
+   * Used to scope the Quarterly Education Report to an educator's own learners.
+   */
+  createdBy?: string;
 }
 
 // ── CONSTANTS ────────────────────────────────────────────────────────────────
@@ -99,6 +104,12 @@ export interface SchoolVisitReport {
   school: string;
   purpose: string;
   findings: string;
+  /**
+   * `Scheduled` for a visit that has been planned but not yet made, `Completed`
+   * once it has happened. Optional so reports stored before this field existed
+   * still load — those are read as `Completed`, which is what they are.
+   */
+  status?: 'Scheduled' | 'Completed';
   fileName?: string;
   fileData?: string;
   createdAt: string;
@@ -389,7 +400,7 @@ export function Education() {
   const [visitReports, setVisitReports] = useState<SchoolVisitReport[]>(() => loadVisits());
   const [isVisitUploadOpen, setIsVisitUploadOpen] = useState(false);
   const [pendingVisitFile, setPendingVisitFile] = useState<File | null>(null);
-  const [visitForm, setVisitForm] = useState({ studentId: '', visitDate: new Date().toISOString().split('T')[0], school: '', purpose: '', findings: '' });
+  const [visitForm, setVisitForm] = useState({ studentId: '', visitDate: new Date().toISOString().split('T')[0], school: '', purpose: '', findings: '', status: 'Completed' as 'Scheduled' | 'Completed' });
   const visitFileRef = useRef<HTMLInputElement>(null);
 
   const handleSaveVisit = async () => {
@@ -411,6 +422,7 @@ export function Education() {
       school: visitForm.school,
       purpose: visitForm.purpose,
       findings: visitForm.findings,
+      status: visitForm.status,
       fileName,
       fileData,
       createdAt: new Date().toISOString(),
@@ -438,7 +450,12 @@ export function Education() {
     // Save to the resident's Documents module — every visit report counts
     // toward Education Progress in the Child Record, whether or not a file
     // was attached, so this always runs (not just when there's a file).
-    const resident = residents.find(c => c.id === student?.residentId) || residents.find(c => c.name === student?.name);
+    // Only a completed visit has a report to file. A scheduled visit is a plan,
+    // and copying it into Documents would put a "School Visit Report" in the
+    // resident's record before the visit has happened.
+    const resident = visitForm.status === 'Completed'
+      ? residents.find(c => c.id === student?.residentId) || residents.find(c => c.name === student?.name)
+      : undefined;
     if (resident) {
       try {
         await addDocument({
@@ -469,8 +486,25 @@ export function Education() {
     }
 
     setIsVisitUploadOpen(false);
-    setVisitForm({ studentId: '', visitDate: new Date().toISOString().split('T')[0], school: '', purpose: '', findings: '' });
+    setVisitForm({ studentId: '', visitDate: new Date().toISOString().split('T')[0], school: '', purpose: '', findings: '', status: 'Completed' });
     setPendingVisitFile(null);
+  };
+
+  // A scheduled visit that has now happened. Only the status flips: the report is
+  // still to be uploaded, and that flow is what files it in Documents.
+  const markVisitCompleted = async (visit: SchoolVisitReport) => {
+    const previous = visitReports;
+    const updated = previous.map(v => (v.id === visit.id ? { ...v, status: 'Completed' as const } : v));
+    setVisitReports(updated);
+    saveVisits(updated);
+    try {
+      await updateResource<any>('education-school-visits', visit.id, { status: 'Completed' });
+    } catch (error) {
+      // Put the row back rather than showing a status the server did not accept.
+      setVisitReports(previous);
+      saveVisits(previous);
+      console.error('Unable to mark the school visit completed:', error);
+    }
   };
 
   // Progress Reports
@@ -547,9 +581,20 @@ export function Education() {
     preparedBySignature: '',
   });
 
+  // Which learners an account may file a Quarterly Education Report for.
+  //
+  // An educator files for their own learners — the ones whose record they
+  // created. A record with no `createdBy` is shown to everyone: the field
+  // predates this rule, and hiding a learner from every educator would be worse
+  // than showing one to the wrong educator. Center Head, Admin and the Social
+  // Worker are not scoped and see the whole roll.
+  const quarterlyLearnerPool = user?.role === 'educator'
+    ? students.filter(s => !s.createdBy || s.createdBy === user?.username)
+    : students;
+
   const openQuarterlyReport = () => {
     setQuarterlyError('');
-    const firstStudent = students.find(s => s.status === 'Active');
+    const firstStudent = quarterlyLearnerPool.find(s => s.status === 'Active');
     const next = firstStudent ? findNextAvailableQuarter(firstStudent.id) : { quarter: getCalendarQuarter(), year: String(new Date().getFullYear()) };
     setQuarterlyForm(prev => ({ ...prev, studentId: '', quarter: next.quarter, year: next.year }));
     setIsQuarterlyOpen(true);
@@ -1098,21 +1143,41 @@ export function Education() {
 
         {/* ── SCHOOL VISIT REPORTS TAB ── */}
         <TabsContent value="visits" className="space-y-4">
-          <div className="flex justify-between items-center">
+          <div className="flex justify-between items-center gap-3 flex-wrap">
             <div>
               <h3 className="font-bold text-[#2F3E46]">School Visit Reports</h3>
-              <p className="text-xs text-gray-400 mt-0.5">Each uploaded report = 1 school visit counted</p>
+              <p className="text-xs text-gray-400 mt-0.5">Each completed visit = 1 school visit counted</p>
             </div>
-            <Button className="bg-[#2F3E46] text-white" onClick={() => setIsVisitUploadOpen(true)}>
-              <Plus className="w-4 h-4 mr-1" /> Upload Visit Report
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  // A scheduled visit is a plan: no report yet, so clear any file
+                  // left over from a previous upload.
+                  setPendingVisitFile(null);
+                  setVisitForm(p => ({ ...p, status: 'Scheduled' }));
+                  setIsVisitUploadOpen(true);
+                }}
+              >
+                <CalendarDays className="w-4 h-4 mr-1" /> Schedule a Visit
+              </Button>
+              <Button
+                className="bg-[#2F3E46] text-white"
+                onClick={() => {
+                  setVisitForm(p => ({ ...p, status: 'Completed' }));
+                  setIsVisitUploadOpen(true);
+                }}
+              >
+                <Plus className="w-4 h-4 mr-1" /> Upload Visit Report
+              </Button>
+            </div>
           </div>
 
           {/* Per-student visit count */}
           {students.filter(s => s.status === 'Active').length > 0 && (
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
               {students.filter(s => s.status === 'Active').map(s => {
-                const count = visitReports.filter(v => v.studentId === s.id).length;
+                const count = visitReports.filter(v => v.studentId === s.id && (v.status ?? 'Completed') === 'Completed').length;
                 return (
                   <div key={s.id} className="p-3 border border-gray-200 rounded-xl bg-white flex items-center gap-3">
                     <div className="w-9 h-9 rounded-full bg-[#2F3E46] text-white flex items-center justify-center font-bold text-sm shrink-0">
@@ -1138,15 +1203,21 @@ export function Education() {
               {/* Copy before sorting: .sort() mutates in place, and this array is state. */}
               {[...visitReports].sort((a,b) => b.createdAt.localeCompare(a.createdAt)).map(r => {
                 const student = students.find(s => s.id === r.studentId);
+                const isScheduled = (r.status ?? 'Completed') === 'Scheduled';
                 return (
                   <div key={r.id} className="border border-gray-200 rounded-xl p-3 bg-white flex items-start gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center shrink-0">
-                      <FileText className="w-4 h-4 text-blue-600" />
+                    <div className={"w-8 h-8 rounded-lg flex items-center justify-center shrink-0 " + (isScheduled ? 'bg-amber-100' : 'bg-blue-100')}>
+                      {isScheduled
+                        ? <CalendarDays className="w-4 h-4 text-amber-600" />
+                        : <FileText className="w-4 h-4 text-blue-600" />}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <p className="text-sm font-bold text-[#2F3E46]">{student?.name || '—'}</p>
                         <span className="text-[10px] text-gray-400">{r.visitDate}</span>
+                        <span className={"text-[10px] font-bold px-2 py-0.5 rounded-full " + (isScheduled ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700')}>
+                          {isScheduled ? 'Scheduled' : 'Completed'}
+                        </span>
                       </div>
                       <p className="text-xs text-gray-600">{r.school}{r.purpose ? ` — ${r.purpose}` : ''}</p>
                       {r.findings && <p className="text-xs text-gray-400 italic mt-0.5">{r.findings}</p>}
@@ -1156,6 +1227,11 @@ export function Education() {
                         </p>
                       )}
                     </div>
+                    {isScheduled && (
+                      <Button variant="outline" className="shrink-0" onClick={() => void markVisitCompleted(r)}>
+                        <CheckCircle2 className="w-4 h-4 mr-1" /> Mark Completed
+                      </Button>
+                    )}
                   </div>
                 );
               })}
@@ -1634,9 +1710,12 @@ export function Education() {
               >
                 <SelectTrigger><SelectValue placeholder="Select learner..." /></SelectTrigger>
                 <SelectContent>
-                  {students.filter(s => s.status === 'Active').map(s => (
+                  {quarterlyLearnerPool.filter(s => s.status === 'Active').map(s => (
                     <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
                   ))}
+                  {quarterlyLearnerPool.filter(s => s.status === 'Active').length === 0 && (
+                    <div className="px-3 py-2 text-xs text-gray-500">No active learners are assigned to you.</div>
+                  )}
                 </SelectContent>
               </Select>
               {quarterlyForm.studentId && (() => {
@@ -1719,7 +1798,9 @@ export function Education() {
       <Dialog open={isVisitUploadOpen} onOpenChange={setIsVisitUploadOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle className="text-[#2F3E46]">Upload School Visit Report</DialogTitle>
+            <DialogTitle className="text-[#2F3E46]">
+              {visitForm.status === 'Scheduled' ? 'Schedule a School Visit' : 'Upload School Visit Report'}
+            </DialogTitle>
           </DialogHeader>
           <div className="space-y-3 py-2">
             <div className="space-y-1">
@@ -1751,23 +1832,32 @@ export function Education() {
               <Label className="text-sm font-bold">Findings / Notes</Label>
               <Textarea value={visitForm.findings} onChange={e => setVisitForm(p => ({...p, findings: e.target.value}))} rows={2} placeholder="Summary of visit findings..." />
             </div>
-            <div className="space-y-1">
-              <Label className="text-sm font-bold">Attach Report File (optional)</Label>
-              <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" onClick={() => visitFileRef.current?.click()}>
-                  <Upload className="w-4 h-4 mr-1" /> Choose File
-                </Button>
-                {pendingVisitFile && <span className="text-xs text-gray-500 truncate">{pendingVisitFile.name}</span>}
+            {visitForm.status === 'Completed' ? (
+              <div className="space-y-1">
+                <Label className="text-sm font-bold">Attach Report File (optional)</Label>
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" size="sm" onClick={() => visitFileRef.current?.click()}>
+                    <Upload className="w-4 h-4 mr-1" /> Choose File
+                  </Button>
+                  {pendingVisitFile && <span className="text-xs text-gray-500 truncate">{pendingVisitFile.name}</span>}
+                </div>
+                <input ref={visitFileRef} type="file" className="hidden"
+                  onChange={e => setPendingVisitFile(e.target.files?.[0] || null)} />
+                <p className="text-[10px] text-gray-400">File will also be saved to the resident's Documents folder.</p>
               </div>
-              <input ref={visitFileRef} type="file" className="hidden"
-                onChange={e => setPendingVisitFile(e.target.files?.[0] || null)} />
-              <p className="text-[10px] text-gray-400">File will also be saved to the resident's Documents folder.</p>
-            </div>
+            ) : (
+              // A scheduled visit is a plan, so there is no report to attach yet
+              // and nothing is filed in Documents until it is marked completed.
+              <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                This records a planned visit. It is not counted as a school visit, and nothing is filed in the
+                resident's Documents until you mark it Completed.
+              </p>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => { setIsVisitUploadOpen(false); setPendingVisitFile(null); }}>Cancel</Button>
             <Button onClick={handleSaveVisit} disabled={!visitForm.studentId || !visitForm.school} className="bg-[#2F3E46] text-white">
-              Save Visit Report
+              {visitForm.status === 'Scheduled' ? 'Schedule Visit' : 'Save Visit Report'}
             </Button>
           </DialogFooter>
         </DialogContent>

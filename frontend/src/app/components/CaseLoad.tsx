@@ -80,6 +80,34 @@ export function CaseLoad() {
     return scoped.filter(hp => [hp.label, hp.username, hp.displayName || ''].some(v => String(v).toLowerCase().includes(q)));
   }, [data, searchTerm, isHouseparent, user]);
 
+  // Every resident that currently has a Case Load Manager, taken from the
+  // caseload endpoint itself so this agrees with what the cards show.
+  const assignedResidentIds = useMemo(() => {
+    const ids = new Set<string>();
+    data.forEach((hp) => (hp.residents || []).forEach((r) => ids.add(String(r.id))));
+    return ids;
+  }, [data]);
+
+  // A resident who has been in the facility a month and still has no Case Load
+  // Manager. The facility's own rule is that a Houseparent takes the case within
+  // the first month, so these are the ones to chase.
+  //
+  // A resident with no usable admission date is left out rather than guessed at
+  // — an unknown start date cannot be "over a month".
+  const ONE_MONTH_MS = 30 * 24 * 60 * 60 * 1000;
+  const unassignedOverMonth = useMemo(() => {
+    const cutoff = Date.now() - ONE_MONTH_MS;
+    return (children || []).filter((c: any) => {
+      if (!c) return false;
+      if (String(c.status || '') === 'Discharged') return false;
+      if (assignedResidentIds.has(String(c.id))) return false;
+      const admitted = c.admissionDate || c.createdAt;
+      if (!admitted) return false;
+      const at = new Date(admitted).getTime();
+      return Number.isFinite(at) && at <= cutoff;
+    });
+  }, [children, assignedResidentIds]);
+
   // When an HP opens their own case load, fetch the same complete resident
   // records used by Child Records. The caseload summary intentionally returns
   // only id/name, so relying on it alone made the HP card lose age, gender,
@@ -319,6 +347,29 @@ export function CaseLoad() {
           <div className="relative w-full sm:w-80">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
             <input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Search houseparent…" className="h-10 w-full rounded-lg border border-gray-200 bg-white pl-9 pr-3 text-sm outline-none focus:border-[#FFD100]" />
+          </div>
+        </div>
+      )}
+
+      {!isHouseparent && unassignedOverMonth.length > 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+          <div className="flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+            <div className="min-w-0">
+              <p className="font-bold text-amber-800 text-sm">
+                {unassignedOverMonth.length} resident{unassignedOverMonth.length === 1 ? '' : 's'} past one month without a Case Load Manager
+              </p>
+              <p className="text-xs text-amber-700 mt-1">
+                A Houseparent should take the case as Case Load Manager within the resident's first month.
+              </p>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {unassignedOverMonth.map((c: any) => (
+                  <span key={c.id} className="text-[11px] bg-white border border-amber-200 text-amber-800 rounded-full px-2 py-0.5">
+                    {c.name}
+                  </span>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       )}

@@ -205,6 +205,20 @@ export function Violations() {
   const isReviewSubmitting = reviewPending !== null;
   const PSYCHOSOCIAL_OPTIONS = ['SSCT', 'Mental Health Questionnaire', 'MBTI Personality Type Test', 'CANS Assessment', 'Dialogue/Counseling Form', 'Other'];
 
+  // Body parts offered when the violation is a body-marking one.
+  //
+  // The violation type itself is editable in Manage Violations & Interventions,
+  // so it is matched by keyword rather than by exact label — the same approach
+  // `triController` uses to score this violation. A re-worded or Tagalog-only
+  // label still gets the dropdown.
+  const BODY_LOCATIONS = [
+    'Head', 'Face', 'Neck', 'Ear', 'Nose', 'Eyebrow', 'Tongue',
+    'Chest', 'Back', 'Abdomen', 'Navel',
+    'Upper Arm', 'Forearm', 'Hand', 'Finger',
+    'Thigh', 'Leg', 'Foot', 'Other',
+  ];
+  const isBodyMarkingViolation = (label: string) => /tattoo|tattat|piercing|bulitas|hikaw/i.test(label || '');
+
   const staffNames = staff.filter(s => s.status === 'Active').map(s => s.name);
 
   const defaultReportedBy = user?.username || '';
@@ -217,6 +231,7 @@ export function Violations() {
     note: '',
     severity: 'Minor' as 'Minor' | 'Major',
     location: '',
+    bodyLocation: '',
     witnesses: '',
     reportedBy: defaultReportedBy,
     actionTaken: '',
@@ -361,6 +376,7 @@ export function Violations() {
       note: '',
       severity: 'Minor',
       location: '',
+      bodyLocation: '',
       witnesses: '',
       reportedBy: user?.username || '',
       actionTaken: '',
@@ -474,6 +490,10 @@ export function Violations() {
               description: formData.note || null,
               severity: formData.severity,
               location: formData.location,
+              // Only a body-marking violation carries a body part. Every other
+              // type sends null rather than a stale value left over from a
+              // previous selection.
+              bodyLocation: isBodyMarkingViolation(formData.type) ? (formData.bodyLocation || null) : null,
               witnesses: formData.witnesses,
               reportedBy: formData.reportedBy,
               actionTaken: formData.actionTaken,
@@ -696,6 +716,7 @@ export function Violations() {
       note: violation.description || '',
       severity: violation.severity === 'Major' ? 'Major' : 'Minor',
       location: violation.location || '',
+      bodyLocation: (violation as any).bodyLocation || '',
       witnesses: violation.witnesses || '',
       reportedBy: violation.reportedBy || '',
       actionTaken: violation.actionTaken || '',
@@ -1163,7 +1184,15 @@ export function Violations() {
                 onValueChange={(value) => {
                   const found = findGuideByLabel(activeMatrix, value);
                   if (found) {
-                    setFormData(prev => ({ ...prev, type: found.label, severity: found.severity }));
+                    setFormData(prev => ({
+                      ...prev,
+                      type: found.label,
+                      severity: found.severity,
+                      // Switching to a type that is not a body-marking one drops
+                      // the body part, so it cannot be saved against a violation
+                      // it does not describe.
+                      bodyLocation: isBodyMarkingViolation(found.label) ? prev.bodyLocation : '',
+                    }));
                   }
                 }}
               >
@@ -1204,6 +1233,20 @@ export function Violations() {
               <Label>Note (optional)</Label>
               <Textarea value={formData.note} onChange={(e) => setFormData(prev => ({ ...prev, note: e.target.value }))} placeholder="Add any relevant note about this incident..." rows={3} />
             </div>
+
+            {isBodyMarkingViolation(formData.type) && (
+              <div className="space-y-2">
+                <Label>Body Location</Label>
+                <Select value={formData.bodyLocation} onValueChange={(part) => setFormData(prev => ({ ...prev, bodyLocation: part }))}>
+                  <SelectTrigger aria-label="Body location"><SelectValue placeholder="Which part of the body?" /></SelectTrigger>
+                  <SelectContent className="max-h-72">
+                    {BODY_LOCATIONS.map((part) => (
+                      <SelectItem key={part} value={part}>{part}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => { setIsAddDialogOpen(false); resetForm(); }}>Cancel</Button>
@@ -1278,6 +1321,12 @@ export function Violations() {
                     <div>
                       <p className="text-[10px] font-bold text-gray-400 uppercase">Location</p>
                       <p className="font-semibold text-[#2F3E46]">{selectedViolation.location}</p>
+                    </div>
+                  )}
+                  {(selectedViolation as any).bodyLocation && (
+                    <div>
+                      <p className="text-[10px] font-bold text-gray-400 uppercase">Body Location</p>
+                      <p className="font-semibold text-[#2F3E46]">{(selectedViolation as any).bodyLocation}</p>
                     </div>
                   )}
                 </div>
@@ -1378,6 +1427,9 @@ export function Violations() {
                       ...prev,
                       type: found.label,
                       severity: found.severity,
+                      // See the Log Incident dialog: a body part belongs only to
+                      // a body-marking violation.
+                      bodyLocation: isBodyMarkingViolation(found.label) ? prev.bodyLocation : '',
                     }));
                   }
                 }}
@@ -1436,6 +1488,19 @@ export function Violations() {
               <Label>Location</Label>
               <Input value={formData.location} onChange={(e) => setFormData({ ...formData, location: e.target.value })} placeholder="Where did it occur?" />
             </div>
+            {isBodyMarkingViolation(formData.type) && (
+              <div className="space-y-2">
+                <Label>Body Location</Label>
+                <Select value={formData.bodyLocation} onValueChange={(part) => setFormData(prev => ({ ...prev, bodyLocation: part }))}>
+                  <SelectTrigger aria-label="Body location"><SelectValue placeholder="Which part of the body?" /></SelectTrigger>
+                  <SelectContent className="max-h-72">
+                    {BODY_LOCATIONS.map((part) => (
+                      <SelectItem key={part} value={part}>{part}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div className="space-y-2">
               <Label>Witnesses</Label>
               <Input value={formData.witnesses} onChange={(e) => setFormData({ ...formData, witnesses: e.target.value })} placeholder="Names of witnesses" />
