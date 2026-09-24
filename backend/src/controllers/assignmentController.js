@@ -97,7 +97,14 @@ async function getByResident(req, res, next) {
   } catch (error) { next(error); }
 }
 
-const MAX_RESIDENTS_PER_HOUSEPARENT = 3;
+/**
+ * One Case Worker (the Houseparent acting as Case Load Manager) may hold at
+ * most 15 residents — the facility's 1:15 case-worker-to-resident ratio.
+ *
+ * This was 3, which is not a ratio the facility uses; it capped every
+ * Houseparent at three cards and made the fourth assignment fail with a 400.
+ */
+const MAX_RESIDENTS_PER_HOUSEPARENT = 15;
 
 async function countActiveHouseparentCaseload(userId) {
   const [rows] = await pool.query(

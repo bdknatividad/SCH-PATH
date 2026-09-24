@@ -154,9 +154,13 @@ function rangeFor(start: string, end: string | null): string {
 }
 
 /**
- * Every admission this resident has had, oldest first — or `[]` when there is
- * only one, because a single admission needs no grouping and the folder view
- * must stay exactly as it was for the common case.
+ * Every admission this resident has had — **the open admission first**, then the
+ * closed ones in the order they happened — or `[]` when there is only one,
+ * because a single admission needs no grouping and the folder view must stay
+ * exactly as it was for the common case.
+ *
+ * Current-first is the contract: the folder view renders this array in order,
+ * and the stay staff are working in must never sit below a wall of history.
  */
 export function admissionPeriodsFor(child: AdmissionHistorySource | null | undefined): AdmissionPeriod[] {
   if (!child || typeof child !== 'object') return [];

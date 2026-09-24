@@ -2923,17 +2923,23 @@ function educatorDashboardSource() {
   return { source, component: source.slice(start, end) };
 }
 
-test('the Educator dashboard shows the four education widgets the specification names', () => {
+test('the Educator dashboard shows the education widgets the specification names', () => {
   const { component } = educatorDashboardSource();
 
   for (const widget of [
     'Education Updates',
-    'Education Records Requiring Completion',
     'Upcoming Education Activities',
     'Assigned Educational Tasks',
   ]) {
     assert.ok(component.includes(widget), `the Educator dashboard is missing "${widget}"`);
   }
+
+  // "Requiring Completion" was removed on request: once a resident is endorsed
+  // to the school, tracking their remaining paperwork is not the Educator's job.
+  assert.ok(
+    !component.includes('Requiring Completion'),
+    'the Educator dashboard still shows the removed "Requiring Completion" statistic',
+  );
 
   // "The dashboard must show only education-related information" — nothing from
   // the shared dashboard, which is built around modules the role does not hold.

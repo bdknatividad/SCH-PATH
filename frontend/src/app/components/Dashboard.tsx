@@ -1043,13 +1043,16 @@ function NurseDashboard({
 // ── DASHBOARD ───────────────────────────────────────────────────────────────
 // ── EDUCATOR DASHBOARD ──────────────────────────────────────────────────────
 //
-// The Educator's specification names exactly four things its dashboard may show
-// — education updates, education records requiring completion, upcoming
-// education activities and assigned educational tasks — and requires the page to
-// show "only education-related information". The shared dashboard is built
-// around residents, violations, documents and hearings, none of which the role
-// holds, so the Educator leaves it here and reads the Education module's own
-// three collections instead.
+// The Educator's specification names what its dashboard may show — education
+// updates, upcoming education activities and assigned educational tasks — and
+// requires the page to show "only education-related information". The shared
+// dashboard is built around residents, violations, documents and hearings, none
+// of which the role holds, so the Educator leaves it here and reads the
+// Education module's own three collections instead.
+//
+// "Education Records Requiring Completion" was removed: once a resident is
+// endorsed to the school the Educator is not the one tracking their remaining
+// paperwork, so the list was noise rather than a work queue.
 //
 // Every link on this page stays inside the Education module. That matters:
 // Violations, Health, Activities, Reports and Court Records are all withheld, so
@@ -1106,19 +1109,6 @@ function monthLabel(key: string): string {
   return new Date(year, month - 1, 1).toLocaleString('default', { month: 'long', year: 'numeric' });
 }
 
-/** How many files an education record carries. `files` is a JSON column. */
-function attachedFileCount(student: EducatorStudent): number {
-  const raw = student.files;
-  if (Array.isArray(raw)) return raw.length;
-  if (typeof raw === 'string') {
-    try {
-      const parsed = JSON.parse(raw);
-      return Array.isArray(parsed) ? parsed.length : 0;
-    } catch { return 0; }
-  }
-  return 0;
-}
-
 /** The record a progress report or school visit belongs to, in either id shape. */
 function linkedRecordId(row: { studentId?: string; educationRecordId?: string }): string {
   return String(row.studentId || row.educationRecordId || '');
@@ -1152,20 +1142,6 @@ function EducatorDashboard({ displayRole, onOpen }: EducatorDashboardProps) {
 
   const today = isoDay(new Date());
   const currentMonth = monthKey(new Date());
-
-  /** Active students, plus the profile fields their record still needs. */
-  const incompleteRecords = useMemo(() => students
-    .filter((student) => String(student.status || 'Active') !== 'Dropped')
-    .map((student) => {
-      const missing: string[] = [];
-      if (!String(student.school || '').trim()) missing.push('School');
-      if (!String(student.gradeSection || '').trim()) missing.push('Grade / Section');
-      if (!String(student.educationLevel || '').trim()) missing.push('Education level');
-      if (!String(student.lrn || student.traineeNumber || '').trim()) missing.push('LRN / Trainee number');
-      if (attachedFileCount(student) === 0) missing.push('Attached file');
-      return { student, missing };
-    })
-    .filter((entry) => entry.missing.length > 0), [students]);
 
   /** Students with no progress report for the month in progress. */
   const outstandingReports = useMemo(() => {
@@ -1217,12 +1193,6 @@ function EducatorDashboard({ displayRole, onOpen }: EducatorDashboardProps) {
       value: students.length,
       caption: `${students.filter((s) => String(s.status || 'Active') === 'Active').length} active`,
       icon: GraduationCap,
-    },
-    {
-      title: 'Requiring Completion',
-      value: incompleteRecords.length,
-      caption: incompleteRecords.length ? 'Missing profile details' : 'All records complete',
-      icon: AlertCircle,
     },
     {
       title: 'Upcoming Visits',
@@ -1314,31 +1284,6 @@ function EducatorDashboard({ displayRole, onOpen }: EducatorDashboardProps) {
                   ))}
                 </ul>
               ),
-        )}
-
-        {listCard(
-          'Education Records Requiring Completion',
-          <AlertCircle className="w-4 h-4 text-[#2F3E46]" />,
-          loading
-            ? emptyRow('Loading education records...')
-            : incompleteRecords.length === 0
-              ? emptyRow('Every education record is complete.')
-              : (
-                <ul className="divide-y divide-gray-100">
-                  {incompleteRecords.slice(0, 6).map(({ student, missing }) => (
-                    <li key={student.id} className="py-2">
-                      <p className="text-xs font-medium text-[#2F3E46]">{student.name || student.id}</p>
-                      <p className="text-[11px] text-gray-500">Missing: {missing.join(', ')}</p>
-                    </li>
-                  ))}
-                  {incompleteRecords.length > 6 && (
-                    <li className="pt-2 text-[10px] text-gray-400">
-                      +{incompleteRecords.length - 6} more
-                    </li>
-                  )}
-                </ul>
-              ),
-          incompleteRecords.length,
         )}
 
         {listCard(
@@ -1608,18 +1553,32 @@ export function Dashboard() {
   const alerts: { message: string; type: 'alert'; link: string }[] = [];
 
   // Scheduled Today = every schedule the signed-in user is meant to attend
-  // today. The tile used to count today's assessments alone while its dialog
-  // listed activities and hearings too, so a day full of activities read as an
-  // empty schedule. Cancelled activities are not a schedule, so they are out of
-  // both the tile and the dialog.
-  const todayActivities = activities.filter(
-    a => a.date === todayString && String(a.status || '') !== 'Cancelled',
-  );
-  const todayAssessments = assessments.filter(a => a.date === todayString && a.status === 'Scheduled');
-  const scheduledHearings = (courtRecords || []).filter(r => r.status === 'Scheduled');
+  // today, and exactly the four lists the dialog below renders. The tile used to
+  // count today's assessments alone while its dialog listed activities and
+  // hearings too, so a day full of activities read as an empty schedule.
+  //
+  // Each source is read through the *same* module gate its section uses, so the
+  // number can never include a row the dialog is hiding — and the tile is shown
+  // when any one of the four modules is held, rather than only the first two.
+  // Cancelled activities are not a schedule, so they are out of both.
+  const canSeeActivities = hasModule('Activities');
+  const canSeeAssessments = hasModule('Assessments');
+  const canSeeHearings = hasModule('Court Records');
+  const canSeeInterventions = hasModule('Violations');
+
+  const todayActivities = canSeeActivities
+    ? activities.filter(a => a.date === todayString && String(a.status || '') !== 'Cancelled')
+    : [];
+  const todayAssessments = canSeeAssessments
+    ? assessments.filter(a => a.date === todayString && a.status === 'Scheduled')
+    : [];
+  const scheduledHearings = canSeeHearings
+    ? (courtRecords || []).filter(r => r.status === 'Scheduled')
+    : [];
   const todayHearings = scheduledHearings.filter(r => r.hearingDate === todayString);
+  const todayInterventions = canSeeInterventions ? assignedSchedules : [];
   const scheduledTodayCount =
-    todayActivities.length + todayAssessments.length + todayHearings.length + assignedSchedules.length;
+    todayActivities.length + todayAssessments.length + todayHearings.length + todayInterventions.length;
 
   const ratingByResidentId = new Map(monthlyRatings.map(rating => [rating.residentId, rating]));
 
@@ -1650,9 +1609,14 @@ export function Dashboard() {
   };
 
   // ── Computed stats ─────────────────────────────────────────────────
-  const activeCount    = children.filter(c => c.status !== 'Discharged').length;
+  // One definition of "active" for the whole page. `activeChildren` above is the
+  // precise reading (an explicit `Active`, or a row that predates the status
+  // column); `activeCount` used to be a looser `status !== 'Discharged'`, which
+  // counted a row with any other value as active. Two readings of the same word
+  // is how the "Active Cases" tile and the "Total Residents" tile came to
+  // disagree.
+  const activeCount    = activeChildren.length;
   const closedCount    = children.filter(c => c.status === 'Discharged').length;
-  const openCount      = activeCount;
 
   const needImprovementCount = activeChildren.filter(c => getRealTimeUrgency(c.id).label === 'Need Improvement').length;
   const fairCount = activeChildren.filter(c => getRealTimeUrgency(c.id).label === 'Fair').length;
@@ -1693,10 +1657,13 @@ export function Dashboard() {
   // Role-based stats cards (Active Residents removed, others clickable)
   const buildStats = () => {
     const base: any[] = [];
-    if (hasModule('Child Records')) {
+    // A Social Worker's own "My Caseload" card below reports Active / Closed /
+    // pending documents together, so the generic Closed Cases tile here would
+    // print the same number twice on one page.
+    if (hasModule('Child Records') && userRole !== 'socialworker') {
       base.push({ title: 'Closed Cases', value: String(closedCount), icon: FolderX, color: '#64748b', sub: 'Discharged', clickable: true });
     }
-    if (hasModule('Activities') || hasModule('Assessments')) {
+    if (canSeeActivities || canSeeAssessments || canSeeHearings || canSeeInterventions) {
       base.push({ title: 'Scheduled Today', value: String(scheduledTodayCount), icon: Calendar, color: '#2F3E46', sub: "Today's schedule", clickable: true });
     }
     if (['centerhead','admin'].includes(userRole)) {
@@ -1745,8 +1712,13 @@ export function Dashboard() {
   // a Nurse holds no document approval authority, so a list of documents
   // "awaiting your review" could never have been acted on. The Nurse's own page
   // reports health document *status* instead.
+  //
+  // Both pre-decision statuses count. `Submitted` is a document waiting for a
+  // first look and `Under Review` is one a reviewer has opened but not decided —
+  // `GET /documents/pending` and the Documents module both treat the two as
+  // pending, so counting only `Submitted` made this tile under-report.
   const pendingApprovals = documents.filter(d =>
-    d.status === 'Submitted' &&
+    (d.status === 'Submitted' || d.status === 'Under Review') &&
     (userRole === 'socialworker'
       ? !['Psychological Testing', 'Discernment Assessment', 'Mental Health Report'].includes(d.title || '')
       : true)
@@ -2313,7 +2285,7 @@ export function Dashboard() {
                 is expected to run today. This is the only per-user schedule in
                 the schema, and it is what the "Assigned schedules must display
                 correctly" requirement refers to. */}
-            {hasModule('Violations') && <div>
+            {canSeeInterventions && <div>
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
                   <div className="w-7 h-7 rounded-lg bg-emerald-100 flex items-center justify-center">
@@ -2324,9 +2296,9 @@ export function Dashboard() {
                 <button onClick={() => { setShowScheduleChoice(false); navigate('/violations?tab=interventions'); }}
                   className="text-xs text-emerald-600 font-semibold hover:underline">View all →</button>
               </div>
-              {assignedSchedules.length > 0 ? (
+              {todayInterventions.length > 0 ? (
                 <div className="space-y-1.5">
-                  {assignedSchedules.slice(0, 3).map(s => (
+                  {todayInterventions.slice(0, 3).map(s => (
                     <div key={s.id} className="flex items-center gap-2 p-2 bg-emerald-50 rounded-lg border-l-3 border-emerald-400">
                       <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded whitespace-nowrap">
                         {formatShortDate(s.scheduledAt)} · {scheduleClock(s.scheduledAt)}
@@ -2335,7 +2307,7 @@ export function Dashboard() {
                       <span className="text-[10px] text-gray-400 truncate">{s.interventionType || 'Intervention'}</span>
                     </div>
                   ))}
-                  {assignedSchedules.length > 3 && <p className="text-xs text-gray-400 pl-2">+{assignedSchedules.length - 3} more</p>}
+                  {todayInterventions.length > 3 && <p className="text-xs text-gray-400 pl-2">+{todayInterventions.length - 3} more</p>}
                 </div>
               ) : (
                 <p className="text-xs text-gray-400 italic pl-2">No assigned schedules today.</p>

@@ -188,6 +188,7 @@ test('two closed admissions produce three numbered folders, oldest first', () =>
     [1, 2, 3],
   );
   // Chronological, so the reader meets the admissions in the order they happened.
+  // `admissionPeriodKeyFor` reads this order, so it is a contract, not styling.
   assert.deepEqual(
     periods.map((period) => period.startDate),
     ['2024-02-01', '2025-03-12', '2026-05-04'],
@@ -694,14 +695,35 @@ test('period folders are open by default, child folders are not', () => {
 
 test('both admissions stay readable — no period is filtered out', () => {
   const source = read(FOLDER_VIEW);
-  const block = source.slice(source.indexOf('const periodGroups'), source.indexOf('const flatGroups'));
+  const block = source.slice(source.indexOf('const displayPeriods'), source.indexOf('const flatGroups'));
 
   // Every period is rendered, including one with nothing filed in it: an
   // admission that exists but produced no files is a fact about the record.
-  assert.match(block, /periods\.map\(period => \(\{/, 'the folder view no longer renders every admission');
+  //
+  // The list is a *reordered copy* of `periods` (current admission first), not a
+  // narrowed one — `displayPeriods` is built with a spread and a stable sort, so
+  // the same set of admissions is rendered, just in reading order.
+  assert.match(block, /\[\.\.\.periods\]\.sort\(/, 'the folder view no longer copies the period list to reorder it');
+  assert.match(block, /displayPeriods\.map\(period => \(\{/, 'the folder view no longer renders every admission');
   assert.doesNotMatch(block, /periods\.filter\(/, 'a period is being dropped — a previous admission must not disappear');
   assert.doesNotMatch(block, /\.slice\(0,/, 'only some admissions are being shown');
   assert.match(source, /No documents filed for this admission\./, 'an empty period no longer says so');
+});
+
+test('the current admission is the first folder, past admissions below it', () => {
+  const source = read(FOLDER_VIEW);
+  const block = source.slice(source.indexOf('const displayPeriods'), source.indexOf('const flatGroups'));
+
+  // Requirement: the folder view always shows the current admission first, with
+  // past admissions below it. `isCurrent` is the flag the resolver sets, and the
+  // sort keys on it rather than on a date — two admissions can share a date, and
+  // the resolver deliberately leaves `periods` itself oldest-first because
+  // `admissionPeriodKeyFor` reads its boundaries in that order.
+  assert.match(
+    block,
+    /\[\.\.\.periods\]\.sort\(\(a, b\) => Number\(b\.isCurrent\) - Number\(a\.isCurrent\)\)/,
+    'the current admission is no longer pinned above the past ones',
+  );
 });
 
 // ── No browser dialogs ─────────────────────────────────────────────────────

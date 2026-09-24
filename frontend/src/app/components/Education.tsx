@@ -31,10 +31,16 @@ import {
 export type EducationLevel =
   | 'High School'
   | 'Senior High School'
+  | 'Tutorial'
   | 'Alternative Learning System (ALS)'
+  | 'ALS Elementary'
+  | 'ALS Junior High School'
+  | 'ALS Senior High School'
+  | 'Calamba Manpower Development Center (CMDC)'
+  // Legacy spellings. Kept in the union so a record written before the ALS
+  // levels were split still renders; they are no longer offered in the picker.
   | 'ALS - Elementary'
-  | 'ALS - High School'
-  | 'Calamba Manpower Development Center (CMDC)';
+  | 'ALS - High School';
 
 export interface EducationFile {
   id: string;
@@ -128,31 +134,46 @@ const loadProgress = (): ProgressReport[] => {
 const saveProgress = (r: ProgressReport[]) => {
   try { localStorage.setItem(PROGRESS_KEY, JSON.stringify(r)); } catch {}
 };
+// What the picker offers. Deliberately more specific than the type union: an
+// ALS learner is recorded at the level they are actually in, and a resident who
+// is not enrolled at all (the enrollment window closed, or they are between
+// schools) is recorded as Tutorial rather than being forced into a school level
+// they do not have.
 const EDUCATION_LEVELS: EducationLevel[] = [
   'High School',
   'Senior High School',
+  'Tutorial',
   'Alternative Learning System (ALS)',
-  'ALS - Elementary',
-  'ALS - High School',
+  'ALS Elementary',
+  'ALS Junior High School',
+  'ALS Senior High School',
   'Calamba Manpower Development Center (CMDC)',
 ];
 
 const LEVEL_COLORS: Record<EducationLevel, { bg: string; text: string; accent: string }> = {
-  'High School':                             { bg: '#DBEAFE', text: '#1E40AF', accent: '#3B82F6' },
-  'Senior High School':                      { bg: '#FEF3C7', text: '#92400E', accent: '#F59E0B' },
-  'Alternative Learning System (ALS)':       { bg: '#D1FAE5', text: '#065F46', accent: '#10B981' },
+  'High School':                                { bg: '#DBEAFE', text: '#1E40AF', accent: '#3B82F6' },
+  'Senior High School':                         { bg: '#FEF3C7', text: '#92400E', accent: '#F59E0B' },
+  'Tutorial':                                   { bg: '#FFE4E6', text: '#9F1239', accent: '#FB7185' },
+  'Alternative Learning System (ALS)':          { bg: '#D1FAE5', text: '#065F46', accent: '#10B981' },
+  'ALS Elementary':                             { bg: '#ECFDF5', text: '#047857', accent: '#10B981' },
+  'ALS Junior High School':                     { bg: '#F0FDF4', text: '#166534', accent: '#22C55E' },
+  'ALS Senior High School':                     { bg: '#DCFCE7', text: '#14532D', accent: '#16A34A' },
+  'Calamba Manpower Development Center (CMDC)': { bg: '#EDE9FE', text: '#5B21B6', accent: '#7C3AED' },
   'ALS - Elementary':                           { bg: '#ECFDF5', text: '#047857', accent: '#10B981' },
   'ALS - High School':                          { bg: '#F0FDF4', text: '#166534', accent: '#22C55E' },
-  'Calamba Manpower Development Center (CMDC)': { bg: '#EDE9FE', text: '#5B21B6', accent: '#7C3AED' },
 };
 
 const LEVEL_SHORT: Record<EducationLevel, string> = {
   'High School': 'HS',
   'Senior High School': 'SHS',
+  'Tutorial': 'TUT',
   'Alternative Learning System (ALS)': 'ALS',
+  'ALS Elementary': 'ALS-E',
+  'ALS Junior High School': 'ALS-JHS',
+  'ALS Senior High School': 'ALS-SHS',
+  'Calamba Manpower Development Center (CMDC)': 'CMDC',
   'ALS - Elementary': 'ALS-E',
   'ALS - High School': 'ALS-HS',
-  'Calamba Manpower Development Center (CMDC)': 'CMDC',
 };
 
 const EMPTY_STUDENT: Omit<Student, 'id' | 'files'> = {
@@ -1165,11 +1186,17 @@ export function Education() {
                 <Label className="font-bold text-[#2F3E46]">Resident / Learner *</Label>
                 <Select value={studentForm.name} onValueChange={v => {
                   const res = residents.find(r => r.name === v);
+                  // Pull the rest of the learner's details off the resident
+                  // record rather than making the Educator retype what the
+                  // system already holds. `children` carries all three.
                   setStudentForm(p => ({
                     ...p,
                     name: v,
                     gender: (res?.gender as 'Male' | 'Female') || 'Male',
                     age: res?.age || p.age,
+                    address: res?.address || p.address,
+                    guardianName: res?.guardianName || p.guardianName,
+                    guardianContact: res?.guardianContact || p.guardianContact,
                   }));
                 }}>
                   <SelectTrigger className="rounded-xl"><SelectValue placeholder="Select resident..." /></SelectTrigger>
@@ -1221,7 +1248,6 @@ export function Education() {
                   <SelectContent>
                     <SelectItem value="Active">Active</SelectItem>
                     <SelectItem value="Completed">Completed</SelectItem>
-                    <SelectItem value="Dropped">Dropped</SelectItem>
                   </SelectContent>
                 </Select>
               </div>

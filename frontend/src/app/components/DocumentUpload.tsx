@@ -1613,9 +1613,18 @@ export function DocumentUpload() {
                  * is dropped and nothing is merged: every document is placed in
                  * exactly one period, so both admissions stay readable and a
                  * file can always be traced to the admission it was made under.
+                 *
+                 * Displayed current-first. `periods` itself is oldest-first
+                 * because `admissionPeriodKeyFor` reads its boundaries in that
+                 * order, so the reordering happens here rather than in the
+                 * resolver. The sort is stable, so the closed stays keep their
+                 * chronological order below the current one.
                  */
+                const displayPeriods = splitByAdmission
+                  ? [...periods].sort((a, b) => Number(b.isCurrent) - Number(a.isCurrent))
+                  : [];
                 const periodGroups = splitByAdmission
-                  ? periods.map(period => ({
+                  ? displayPeriods.map(period => ({
                       period,
                       docs: allDocs.filter(d =>
                         admissionPeriodKeyFor(d, periods, historyRow?.readmissionDatetime) === period.key
@@ -1628,7 +1637,7 @@ export function DocumentUpload() {
                 // header badge above keeps counting from `allDocs`/`flatGroups`
                 // so it always reads as the resident's true totals.
                 const filteredPeriodGroups = splitByAdmission
-                  ? periods.map(period => ({
+                  ? displayPeriods.map(period => ({
                       period,
                       docs: childDocsMatchingSearch.filter(d =>
                         admissionPeriodKeyFor(d, periods, historyRow?.readmissionDatetime) === period.key

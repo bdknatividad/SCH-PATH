@@ -103,11 +103,11 @@ export interface QprPeriod {
 }
 
 /**
- * The rating suggestions. These are the two values the official form's own
- * worked example uses; the field stays free text so staff are not forced into a
+ * The rating suggestions the facility uses on the form's "Present level of
+ * Functioning" line. The field stays free text so staff are not forced into a
  * vocabulary the facility has not agreed on.
  */
-const RATING_SUGGESTIONS = ['Normal', 'Moderate'];
+const RATING_SUGGESTIONS = ['Normal', 'Moderate', 'Severe'];
 
 function formatDate(value?: string | null): string {
   const iso = String(value ?? '').slice(0, 10);
