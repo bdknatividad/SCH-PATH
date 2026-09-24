@@ -7,7 +7,7 @@
  * be got wrong in a way that either exposes a resident's records or locks a
  * member of staff out of their own caseload.
  *
- * Measured against the live API while writing these:
+ * Measured against the live API before either fix:
  *
  *   HP 2 / HP 10  GET /children                 -> 200, 0 items
  *                 GET /documents/resident/CH001 -> 403 "not assigned to this resident"
@@ -15,42 +15,35 @@
  *                 GET /violations               -> 200, 3 items  (all of them)
  *                 GET /phaseProgress            -> 200, 4 items  (all of them)
  *
- * Two separate problems are visible in that block and they pull in opposite
- * directions — houseparents see nothing where they should see their caseload,
+ * Two separate problems were visible in that block, pulling in opposite
+ * directions — houseparents saw nothing where they should see their caseload,
  * and everything where they should see only their caseload.
  *
- * The tests marked `skip` below each need a decision that is a matter of policy
- * rather than of code:
+ * Both were put to the product owner and are now settled. The answers are
+ * recorded here because they are policy, not something the code can derive:
  *
- *   1. Should a Houseparent's `/violations` and `/phaseProgress` be limited to
- *      their caseload? They are not scoped at all today, so a Houseparent with
- *      an empty caseload reads every resident's incidents. Narrowing changes
- *      what staff can see day to day.
+ *   1. `assignmentType` vocabulary — TYPO, now fixed. `seedDatabase` wrote
+ *      `'household'`; every reader grants scope on `'houseparent'` only.
+ *      `'household'` had no counterpart writer anywhere (the assignment UI posts
+ *      `'houseparent'`, and `assignmentController` passes through whatever it is
+ *      handed), so the seeded rows were inert by accident: a seeded Houseparent
+ *      signed in to an empty caseload. The seed now writes `'houseparent'`, and
+ *      the test below pins that.
  *
- *   2. The `assignmentType` vocabulary. **Read this before "fixing" the seed.**
- *      `seedDatabase` inserts `'household'`; every reader requires
- *      `'houseparent'`. There are two readings and they lead to opposite code:
+ *      The competing reading — that `'household'` was a deliberate
+ *      whole-facility placeholder that should grant nothing — was rejected. Note
+ *      the effect of the fix: the seed builds the full houseparent x child cross
+ *      product, so every seeded Houseparent is now assigned every Active
+ *      resident. Seeded data therefore cannot demonstrate per-Houseparent
+ *      isolation.
  *
- *      (a) Typo. The seed's own log line says "Created N resident assignments
- *          (houseparent -> child)", so it meant to write `'houseparent'` and
- *          the rows it creates are inert by accident.
- *          Fix: make the seed write `'houseparent'`.
- *
- *      (b) Deliberate. `assignmentController` documents `'household'` as "the
- *          shared whole-facility placeholder ... every Houseparent has one, so
- *          notifying on them would be pure noise". The seed builds the full
- *          houseparent x child cross product, which is what such a placeholder
- *          looks like, and no reader accepts the value.
- *          Fix: none — a placeholder is meant to grant nothing.
- *
- *      The readings are not equivalent in effect. Under (a) every seeded
- *      Houseparent gains every resident, because the cross product becomes
- *      live. That is why this is skipped rather than fixed: `'household'` is
- *      produced in exactly one place (the seed) and read in none, so the code
- *      cannot settle it — only the intended access model can.
- *
- * Un-skip them once those are answered; they are written to pass against the
- * corrected code.
+ *   2. `/violations` and `/phaseProgress` scope — LEFT FACILITY-WIDE, on
+ *      purpose. A Houseparent with an empty caseload does read every resident's
+ *      incidents and phase entries, and that is the intended behaviour rather
+ *      than an oversight. There is deliberately no test here asserting those two
+ *      controllers consult the caseload scope: the answer was "no", and a
+ *      skipped test whose premise has been rejected is just a stale
+ *      known-issue.
  */
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -62,9 +55,6 @@ const read = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
 const RESIDENT_SCOPE = read('src/utils/residentScope.js');
 const SEED = read('src/scripts/seedDatabase.js');
 
-const NEEDS_POLICY =
-  'KNOWN ISSUE: documented in .workbuddy-ai/memory/2026-09-23.md — needs a policy decision before the code changes';
-
 test('the scope reader accepts the assignment type its writer is documented to use', () => {
   // `assignedResidentIds` is the primary source of truth for a Houseparent's
   // caseload, and it filters on `assignmentType`. Whatever vocabulary it accepts
@@ -74,11 +64,11 @@ test('the scope reader accepts the assignment type its writer is documented to u
   assert.match(RESIDENT_SCOPE, /'houseparent'/, 'the reader must accept the houseparent type');
 });
 
-test('the seed writes the same assignment type the readers require', { skip: NEEDS_POLICY }, () => {
-  // This asserts reading (a) in the header — the typo interpretation. If reading
-  // (b) turns out to be correct, delete this test rather than making it pass:
-  // the point of (b) is that the seed is supposed to write a value no reader
-  // accepts.
+test('the seed writes the same assignment type the readers require', () => {
+  // Pins reading (a) in the header — the typo interpretation, which the product
+  // owner confirmed and the seed now satisfies. If this ever fails, the seed has
+  // gone back to writing a value no reader accepts and every seeded Houseparent
+  // will see an empty caseload again.
   const insert = SEED.match(/INSERT INTO residentAssignments[\s\S]{0,400}?\)`/);
   assert.ok(insert, 'expected the residentAssignments seed INSERT');
 
@@ -91,20 +81,6 @@ test('the seed writes the same assignment type the readers require', { skip: NEE
     `the seed writes '${written[1]}' but every reader requires 'houseparent', ` +
       'so the seeded assignments grant nothing',
   );
-});
-
-test('caseload scoping is applied to every resident-scoped module, not just some', { skip: NEEDS_POLICY }, () => {
-  // `documents`, `children`, `activities`, `alerts` and access requests all
-  // apply it. `/violations` and `/phaseProgress` do not, which is how a
-  // Houseparent with an empty caseload still reads every resident's incidents.
-  for (const controller of ['violationController', 'phaseController']) {
-    const source = read(`src/controllers/${controller}.js`);
-    assert.match(
-      source,
-      /residentScope/,
-      `${controller} handles resident-scoped rows but never consults the caseload scope`,
-    );
-  }
 });
 
 test('every reader that grants caseload scope agrees on one assignment type', () => {

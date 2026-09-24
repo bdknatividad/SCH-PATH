@@ -1121,9 +1121,23 @@ async function seedResidentAssignments() {
         if (!existingKeys.has(key)) {
           const [allAssns] = await pool.query('SELECT id FROM residentAssignments');
           const id = generateId('ASN', allAssns);
+          // The value has to be 'houseparent': that is the only assignmentType
+          // any reader grants caseload scope on (utils/residentScope.js,
+          // assignmentController, notificationService), and it is what the
+          // assignment UI itself posts. This used to write 'household', which no
+          // reader accepts, so every row this function created was inert — a
+          // Houseparent signed in and saw an empty caseload.
+          //
+          // Consequence worth knowing before seeding a demo: the loop below is
+          // the full houseparent x child cross product, so with a live value
+          // every seeded Houseparent is assigned every Active resident. That is
+          // intentional here — the seed exists to give each demo login something
+          // to look at — but it means seeded data cannot be used to demonstrate
+          // per-Houseparent isolation. Real assignments made through the UI are
+          // one-resident-at-a-time and are unaffected.
           await pool.query(
             `INSERT INTO residentAssignments (id, residentId, userId, assignmentType, status, startAt, source, createdBy)
-             VALUES (?, ?, ?, 'household', 'Active', NOW(), 'system', 'system')`,
+             VALUES (?, ?, ?, 'houseparent', 'Active', NOW(), 'system', 'system')`,
             [id, child.id, hp.id]
           );
           createdCount++;

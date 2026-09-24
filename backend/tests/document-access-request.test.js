@@ -131,10 +131,10 @@ const houseparent = { id: 'UHP01', username: 'hp1', role: 'houseparent' };
 
 test('the caseload-scoped roles are exactly the ones with a real assignment', () => {
   // Only Houseparent qualifies. This is a fact about the schema, not a policy
-  // preference: residentAssignments.assignmentType only ever holds
-  // 'houseparent'/'household' and children has no per-staff column, so
-  // "my assigned child" is not expressible for any other role. Scoping
-  // Psychologist/Educator/Nurse here would lock them out of everything.
+  // preference: residentAssignments.assignmentType holds 'houseparent' and
+  // children has no per-staff column, so "my assigned child" is not expressible
+  // for any other role. Scoping Psychologist/Educator/Nurse here would lock them
+  // out of everything.
   assert.deepEqual([...CASELOAD_SCOPED_ROLES], ['houseparent']);
 });
 

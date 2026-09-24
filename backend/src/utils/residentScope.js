@@ -18,13 +18,13 @@ const { normalizeRole } = require('./authorization');
  * assigned to.
  *
  * Only Houseparents qualify, and that is a fact about the data rather than a
- * policy choice: `residentAssignments.assignmentType` only ever holds
- * `houseparent` and `household`, and `children` has no per-staff column, so
- * Houseparent is the only role for which "my assigned child" is expressible.
- * Psychological Staffs, Educators and Nurses have no per-child assignment anywhere in
- * the schema — their scope is expressed by document type/category and by
- * responsibility instead. Applying a caseload filter to them would lock them out
- * of everything.
+ * policy choice: `residentAssignments.assignmentType` holds `houseparent` — the
+ * only value any writer produces, now that the seed's old `household` typo is
+ * gone — and `children` has no per-staff column, so Houseparent is the only role
+ * for which "my assigned child" is expressible. Psychological Staffs, Educators
+ * and Nurses have no per-child assignment anywhere in the schema — their scope
+ * is expressed by document type/category and by responsibility instead.
+ * Applying a caseload filter to them would lock them out of everything.
  */
 const CASELOAD_SCOPED_ROLES = new Set(['houseparent']);
 
