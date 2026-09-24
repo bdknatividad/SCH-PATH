@@ -164,3 +164,25 @@ still shows seeded Houseparents an empty caseload until those rows are rewritten
 which is a deliberate access change awaiting a decision. Note also that the seed
 never writes `admissions.houseparentOnDuty`, so the legacy fallback in
 `residentScope.js` does not cover seeded Houseparents.
+
+## Two traps that make a failure look like a non-failure
+
+**`/store` swallows per-table errors.** Each table in the bulk load is wrapped in
+try/catch and assigned `[]` on error, logged only server-side. So a *broken*
+table and a genuinely *empty* one are indistinguishable from outside — both
+render as "no records". To tell them apart, compare `/store` against the
+individual endpoint for the same table. All 19 resources currently agree.
+
+**A literal route declared after a `/:param` sibling is unreachable.** Express
+matches in declaration order, so `router.get('/:id')` above
+`router.get('/daily-data')` meant the literal path could never be called — it
+404'd as "report not found" for its whole life, while the route file advertised
+it. Fixed in `reportRoutes.js`; guarded generally by
+`tests/route-shadowing.test.js`. Keep literal paths above catch-alls.
+
+**The live deployment's database is confirmed working** (measured 2026-09-24, not
+assumed): ~147 read probes across the whole API, zero 5xx. Railway holds both the
+backend and the MySQL; Vercel serves the SPA. The seeded `centerhead` login in
+`scripts/seedDatabase.js` works against it, which is enough to reach every module.
+**`/api/health` still does not query MySQL**, so Railway's healthcheck would
+report the service healthy with a dead database — an unfixed blind spot.
