@@ -683,14 +683,83 @@ test('the Child → Category → File structure is the same inside a period', ()
   assert.match(source, /splitByAdmission\s*\?\s*`\$\{periods\.length\} admissions/, 'the child header no longer counts admissions for a returning resident');
 });
 
-test('period folders are open by default, child folders are not', () => {
+test('the current admission opens by default, past ones do not', () => {
   const source = read(FOLDER_VIEW);
 
-  // The period level exists to make a file's admission visible; collapsing it
-  // would hide exactly the fact it was added to show.
-  assert.match(source, /expandedPeriods\[periodKey\] \?\? true/, 'period folders no longer default to open');
+  // Item 4 asks for the folder view to default to the current admission. A
+  // returning resident's card would otherwise open every admission at once and
+  // push the current one's files below a screenful of closed ones.
+  //
+  // This reverses an earlier decision that every period be open, so the reason
+  // nothing is lost by it is asserted here rather than assumed: a collapsed
+  // admission still names its period, its range and its file count on its own
+  // header, so the admission a file belongs to is never hidden.
+  assert.match(
+    source,
+    /expandedPeriods\[periodKey\] \?\? period\.isCurrent/,
+    'the current admission must be the one open by default'
+  );
+  // An explicit toggle still wins: the stored value is read before the default.
+  assert.match(
+    source,
+    /const isPeriodOpen = expandedPeriods\[periodKey\] \?\?/,
+    'the user\u2019s own toggle must win over the default'
+  );
+  for (const label of ['{period.label}', '{period.rangeLabel}', "{docs.length} file{docs.length !== 1 ? 's' : ''}"]) {
+    assert.ok(source.includes(label), `a collapsed admission must still show ${label}`);
+  }
+
   // The child folder still starts closed — the tree is an index of residents.
   assert.match(source, /expandedChildren\[nameKey\] \?\? false/, 'child folders no longer default to closed');
+});
+
+test('each admission folder carries its own search over its own files', () => {
+  const source = read(FOLDER_VIEW);
+
+  // Item 4 asks for the search to work per resident *and* per admission. The
+  // resident's box is the outer one; this is the inner one, so "find this under
+  // the 2023 admission" is answerable without the resident's other admission's
+  // files in the way.
+  assert.match(
+    source,
+    /const \[periodSearchByKey, setPeriodSearchByKey\]/,
+    'there is no per-admission search state'
+  );
+  assert.match(
+    source,
+    /setPeriodSearchByKey\(prev => \(\{ \.\.\.prev, \[periodKey\]: e\.target\.value \}\)\)/,
+    'the per-admission search box is not keyed to its own admission'
+  );
+
+  // It composes with the resident's search rather than replacing it: the filter
+  // runs over `docs`, which `filteredPeriodGroups` has already narrowed.
+  assert.match(
+    source,
+    /const periodDocsMatchingSearch = periodSearchTerm\s*\?\s*docs\.filter\(/,
+    'the per-admission search must narrow the already-narrowed list'
+  );
+  assert.match(
+    source,
+    /groupByCategory\(periodDocsMatchingSearch\)/,
+    'the category folders must be built from the narrowed list'
+  );
+
+  // The header badge keeps counting the admission's true total, not the search's:
+  // a narrowed view must not read as "this admission holds one file".
+  assert.ok(
+    source.includes("{docs.length} file{docs.length !== 1 ? 's' : ''}"),
+    'the admission header must still count its own files'
+  );
+  assert.doesNotMatch(
+    source,
+    /periodDocsMatchingSearch\.length\} file/,
+    'the admission header must count the admission, not the search result'
+  );
+
+  // And a search that empties an admission says so, rather than claiming the
+  // admission holds nothing.
+  assert.match(source, /No documents in this admission match/, 'a search that matches nothing must say so');
+  assert.match(source, /No documents filed for this admission\./, 'an empty admission must still say so');
 });
 
 test('both admissions stay readable — no period is filtered out', () => {

@@ -600,6 +600,13 @@ export function DocumentUpload() {
   // by the same nameKey the card itself is keyed on. Independent of the
   // toolbar search above — narrows only that one resident's own documents.
   const [folderSearchByChild, setFolderSearchByChild] = useState<Record<string, string>>({});
+  // Per-admission search inside each admission folder of a returning resident's
+  // card, keyed by `${nameKey}::${period.key}`. Narrower than the resident's own
+  // search above: a resident with two admissions holds different files under
+  // each, so "find this under the 2023 admission" is a different question from
+  // "find this anywhere in their history". The two compose — this one only ever
+  // sees the files that already survived the resident's search.
+  const [periodSearchByKey, setPeriodSearchByKey] = useState<Record<string, string>>({});
   const [selectedDocIds, setSelectedDocIds] = useState<Set<string>>(new Set());
   const [bulkMode, setBulkMode] = useState(false);
   const [bulkDownloading, setBulkDownloading] = useState(false);
@@ -651,9 +658,12 @@ export function DocumentUpload() {
   const [expandedChildren, setExpandedChildren] = useState<Record<string, boolean>>({});
   const [expandedCategories, setExpandedCategories] = useState<Record<string, boolean>>({});
   // Admission periods are the level between a returning resident and their
-  // category folders. Open by default: the whole reason the level exists is that
-  // a file's admission must be visible, and a collapsed period would hide it
-  // behind another click.
+  // category folders. The *current* admission is the one open by default — it is
+  // where the resident's live files are, and a returning resident's card would
+  // otherwise open every admission at once and push the current one's files below
+  // a screenful of closed ones. The closed admissions are still labelled with
+  // their period, their range and their file count on their own header, so a
+  // file's admission is never hidden, and one click opens them.
   const [expandedPeriods, setExpandedPeriods] = useState<Record<string, boolean>>({});
 
   const ROLE_LABELS: Record<string, string> = {
@@ -1775,8 +1785,16 @@ export function DocumentUpload() {
                             it was made under. */}
                         {splitByAdmission && filteredPeriodGroups.map(({ period, docs }) => {
                           const periodKey = `${nameKey}::${period.key}`;
-                          const isPeriodOpen = expandedPeriods[periodKey] ?? true;
-                          const categories = groupByCategory(docs);
+                          const isPeriodOpen = expandedPeriods[periodKey] ?? period.isCurrent;
+                          // The admission's own search, applied on top of the
+                          // resident's. `docs` has already survived the resident's
+                          // search, so the two narrow rather than replace each other.
+                          const periodSearchQuery = periodSearchByKey[periodKey] || '';
+                          const periodSearchTerm = periodSearchQuery.trim().toLowerCase();
+                          const periodDocsMatchingSearch = periodSearchTerm
+                            ? docs.filter(d => String(d.title || '').toLowerCase().includes(periodSearchTerm))
+                            : docs;
+                          const categories = groupByCategory(periodDocsMatchingSearch);
                           return (
                             <div key={period.key} className="border border-gray-300 rounded-lg overflow-hidden bg-white">
                               <button
@@ -1795,13 +1813,32 @@ export function DocumentUpload() {
                                   </span>
                                   <span className="block text-[11px] text-gray-300">{period.rangeLabel}</span>
                                 </span>
+                                {/* The admission's true total, not the search's:
+                                    a narrowed view must not read as "this
+                                    admission holds one file". */}
                                 <span className="text-xs text-gray-300 mr-1">{docs.length} file{docs.length !== 1 ? 's' : ''}</span>
                                 {isPeriodOpen ? <ChevronDown className="w-3.5 h-3.5 text-gray-300" /> : <ChevronRightIcon className="w-3.5 h-3.5 text-gray-300" />}
                               </button>
                               {isPeriodOpen && (
                                 <div className="space-y-2 p-2">
+                                  {docs.length > 0 && (
+                                    <div className="relative">
+                                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
+                                      <Input
+                                        value={periodSearchQuery}
+                                        onChange={(e) => setPeriodSearchByKey(prev => ({ ...prev, [periodKey]: e.target.value }))}
+                                        placeholder="Search this admission's documents by name"
+                                        aria-label={`Search the ${period.label} admission's documents by name`}
+                                        className="pl-8 h-8 text-xs bg-white"
+                                      />
+                                    </div>
+                                  )}
                                   {categories.length === 0 ? (
-                                    <p className="text-xs text-gray-400 italic text-center py-3">No documents filed for this admission.</p>
+                                    <p className="text-xs text-gray-400 italic text-center py-3">
+                                      {periodSearchTerm
+                                        ? `No documents in this admission match "${periodSearchQuery.trim()}".`
+                                        : 'No documents filed for this admission.'}
+                                    </p>
                                   ) : categories.map(({ folder, docs: folderDocs }) =>
                                     renderCategoryFolder(
                                       periodKey,
