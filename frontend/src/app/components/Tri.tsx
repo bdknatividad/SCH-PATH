@@ -603,6 +603,7 @@ function OfficialTriEditor({
   const overlayButton = 'absolute z-10 m-0 border-0 bg-transparent p-0 text-center text-[10px] font-bold leading-none text-black hover:bg-yellow-200/60 focus:bg-yellow-200/70 focus:outline focus:outline-2 focus:outline-yellow-500 disabled:pointer-events-none';
 
   return (
+    <>
     <div className="relative min-h-0 flex-1 overflow-y-auto bg-neutral-200 px-2 py-4 sm:px-6">
       <div ref={pdfHostRef} className="mx-auto w-full max-w-[900px]">
         <div className="mb-3 rounded border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
@@ -797,25 +798,40 @@ function OfficialTriEditor({
           </div>
         </PdfDocument>
       </div>
+    </div>
 
-      <button
-        type="button"
-        onClick={onToggleResidentViolations}
-        className="fixed bottom-5 left-5 z-[80] rounded-full bg-[#2F3E46] px-4 py-3 text-xs font-bold text-white shadow-xl ring-2 ring-white/90 hover:bg-[#3d4f58] sm:left-8"
-      >
-        <span className="flex items-center gap-2"><Eye className="h-4 w-4" /> {showResidentViolations ? 'Hide Violations' : 'Show Violations'}</span>
-      </button>
+    {/*
+      The violations reference.
+
+      It used to be pinned to the viewport with `fixed`. This editor is a
+      full-screen dialog, and the scroll area above is the dialog's `flex-1`
+      row — so its bottom edge is exactly the footer's top edge, and `bottom-5`
+      therefore landed on top of Save Draft while the panel covered Save &
+      Submit. Those are the two controls a Houseparent needs to finish the form,
+      and the overlap got worse on a phone, where the footer wraps to two rows.
+
+      It now takes its own row between the form and the footer, so nothing is
+      covered at any width, and the panel scrolls inside a bounded height rather
+      than growing until it meets the footer.
+    */}
+    <div className="shrink-0 border-t border-gray-200 bg-gray-50">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3 py-2 sm:px-6">
+        <button
+          type="button"
+          onClick={onToggleResidentViolations}
+          className="inline-flex shrink-0 items-center gap-2 rounded-lg bg-[#2F3E46] px-3 py-1.5 text-xs font-bold text-white hover:bg-[#3d4f58]"
+        >
+          <Eye className="h-4 w-4" /> {showResidentViolations ? 'Hide Violations' : 'Show Violations'}
+        </button>
+        <p className="min-w-0 flex-1 text-[11px] text-gray-500">
+          Reference the resident's actual incident history while answering this TRI.
+        </p>
+      </div>
 
       {showResidentViolations && (
-        <div className="fixed bottom-20 right-3 z-[79] flex max-h-[72vh] w-[min(94vw,430px)] flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-2xl sm:right-8">
-          <div className="border-b bg-[#2F3E46] px-4 py-3 text-white">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-xs font-black uppercase tracking-wide">Violations for {child?.name || 'Resident'}</p>
-                <p className="mt-0.5 text-[11px] text-gray-300">Reference the resident's actual incident history while answering this TRI.</p>
-              </div>
-              <button type="button" onClick={onToggleResidentViolations} className="shrink-0 rounded-md border border-white/30 px-2 py-1 text-[10px] font-bold">Hide</button>
-            </div>
+        <div className="max-h-[32vh] overflow-y-auto border-t border-gray-200 bg-white">
+          <div className="border-b bg-[#2F3E46] px-4 py-2 text-white">
+            <p className="text-xs font-black uppercase tracking-wide">Violations for {child?.name || 'Resident'}</p>
           </div>
           <div className="grid grid-cols-1 gap-2 border-b bg-gray-50 p-3 sm:grid-cols-2">
             <div>
@@ -827,7 +843,7 @@ function OfficialTriEditor({
               <Input type="date" value={violationToDate} onChange={e => onViolationToDateChange(e.target.value)} className="mt-1 h-8 text-xs" />
             </div>
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto p-3">
+          <div className="p-3">
             {residentViolations.length === 0 ? (
               <p className="py-6 text-center text-xs text-gray-400">No violations found for this resident in the selected date range.</p>
             ) : (
@@ -876,6 +892,7 @@ function OfficialTriEditor({
         </div>
       )}
     </div>
+    </>
   );
 }
 
