@@ -17,14 +17,19 @@
  *    Dashboard already demonstrates that. The bands now live once in
  *    `utils/triRating.ts` and are cross-checked against the backend here.
  *
- * These read the source rather than run it because the frontend has no test runner
- * and the logic lives in a .ts module the backend suite cannot import.
+ * The source assertions below pin the *shape* of the rule. The behavioural
+ * assertions at the end run the real module instead: Node 22 strips TypeScript
+ * types on import, so `triRating.ts` is executable from here and the arrow a
+ * given band move produces can be asserted directly rather than described by a
+ * regex. (This header used to say the module could not be imported; that stopped
+ * being true when the suite moved onto Node 22.)
  */
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 
 const read = (rel) => fs.readFileSync(path.resolve(__dirname, '../..', rel), 'utf8');
 
@@ -35,6 +40,22 @@ const CONTROLLER = read('backend/src/controllers/triController.js');
 // The backend bands moved out of the controller so the PDF writer can label the
 // summary block without a second copy of the thresholds.
 const SCORING = read('backend/src/utils/triScoring.js');
+
+/**
+ * The real trend helper, imported rather than pattern-matched.
+ *
+ * Loaded lazily so the source-reading tests above still report individually if
+ * the import is unavailable. Type stripping is unflagged from Node 22.18.
+ */
+let trendModule = null;
+const loadTrend = async () => {
+  if (!trendModule) {
+    trendModule = await import(
+      pathToFileURL(path.resolve(__dirname, '../../frontend/src/utils/triRating.ts')).href
+    );
+  }
+  return trendModule;
+};
 
 // ── trap 1: an absent previous score is not zero ────────────────────────────────
 
@@ -156,4 +177,91 @@ test('submit refreshes the previous-period snapshot', () => {
   );
   assert.match(body, /previousPoints = \?/, 'the submit UPDATE no longer writes previousPoints');
   assert.match(body, /previousRating = \?/, 'the submit UPDATE no longer writes previousRating');
+});
+
+// ── the arrow itself, run rather than matched ──────────────────────────────────
+//
+// Everything above reads the source, which can only show that the rule is
+// written down. These run it, which is the only way to prove which arrow a given
+// band move actually draws — the complaint was about the arrow a user sees.
+
+const ARROW_GLYPHS = ['▲', '▼', '='];
+
+test('a resident with a single TRI gets no arrow at all', async () => {
+  const { triTrend } = await loadTrend();
+  const first = triTrend({ rating: 'Fair', finalPoints: 200 }, null);
+
+  assert.equal(first.direction, 'unknown');
+  assert.equal(
+    first.label,
+    '',
+    'a first TRI produced a label, and that label is what renders as the arrow'
+  );
+  for (const glyph of ARROW_GLYPHS) {
+    assert.ok(!first.label.includes(glyph), `the label for a first TRI contains "${glyph}"`);
+  }
+});
+
+test('the arrow follows the adjectival band in the direction the facility reports', async () => {
+  const { triTrend } = await loadTrend();
+
+  const improved = triTrend({ rating: 'Good', finalPoints: 301 }, { rating: 'Fair', finalPoints: 151 });
+  assert.equal(improved.direction, 'improved');
+  assert.ok(improved.label.includes('▲'), `a band that went up drew no up arrow: "${improved.label}"`);
+  assert.ok(!improved.label.includes('▼'), 'a band that went up drew a down arrow');
+
+  const declined = triTrend({ rating: 'Fair', finalPoints: 151 }, { rating: 'Good', finalPoints: 301 });
+  assert.equal(declined.direction, 'declined');
+  assert.ok(declined.label.includes('▼'), `a band that went down drew no down arrow: "${declined.label}"`);
+  assert.ok(!declined.label.includes('▲'), 'a band that went down drew an up arrow');
+
+  const same = triTrend({ rating: 'Good', finalPoints: 320 }, { rating: 'Good', finalPoints: 320 });
+  assert.equal(same.direction, 'unchanged');
+  assert.ok(!same.label.includes('▲') && !same.label.includes('▼'), `a flat band drew an arrow: "${same.label}"`);
+});
+
+test('the band decides the arrow even where the raw points disagree', async () => {
+  const { triTrend } = await loadTrend();
+
+  // Stored ratings can outlive a threshold change, so the two can point opposite
+  // ways: here the band went up while the points went down. The facility reports
+  // the band, so the band has to win — otherwise the arrow contradicts the words
+  // printed next to it.
+  const trend = triTrend({ rating: 'Good', finalPoints: 300 }, { rating: 'Fair', finalPoints: 400 });
+
+  assert.equal(trend.direction, 'improved', 'the raw points overrode the adjectival band');
+  assert.equal(trend.pointsDelta, -100, 'the signed delta is no longer reported');
+  assert.ok(trend.label.includes('▲'), `the band went up but the arrow did not: "${trend.label}"`);
+  assert.ok(trend.label.includes('-100 pts'), `the falling points are not shown: "${trend.label}"`);
+});
+
+test('a record with no band falls back to points, and an absent score is never zero', async () => {
+  const { triTrend } = await loadTrend();
+
+  // A TRI can be Finalized with 0 points, which has no band at all.
+  const noBands = triTrend({ rating: null, finalPoints: 40 }, { rating: null, finalPoints: 10 });
+  assert.equal(noBands.direction, 'improved');
+  assert.ok(noBands.label.includes('▲'), `a points-only improvement drew no up arrow: "${noBands.label}"`);
+  assert.ok(!noBands.label.includes('→'), `a record with no bands printed a band arrow: "${noBands.label}"`);
+
+  // The trap this file documents at the top, asserted behaviourally: a previous
+  // record with no score is absent, not zero.
+  const phantom = triTrend({ rating: 'Fair', finalPoints: 200 }, { rating: null, finalPoints: null });
+  assert.equal(phantom.direction, 'unknown', 'an absent previous score was read as a score of zero');
+  assert.equal(phantom.pointsDelta, null);
+  assert.equal(phantom.label, '');
+});
+
+test('the child page only claims a first rating when there is really no earlier record', () => {
+  const start = CHILD_DETAIL.indexOf("direction === 'unknown' ? (");
+  assert.ok(start > 0, 'the child page no longer branches on an unknown trend');
+  const branch = CHILD_DETAIL.slice(start, CHILD_DETAIL.indexOf(') : (', start));
+
+  assert.match(
+    branch,
+    /previousTri\s*\?/,
+    'the child page says "First recorded rating" whenever it cannot compare, including when an ' +
+      'earlier record exists but carries neither a rating nor points — a claim the page cannot make'
+  );
+  assert.match(branch, /First recorded rating/, 'the no-earlier-record wording is gone');
 });

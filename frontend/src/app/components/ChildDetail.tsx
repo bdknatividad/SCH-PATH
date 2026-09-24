@@ -1222,7 +1222,16 @@ export function ChildDetail({ id: idProp, onBack }: ChildDetailProps = {}) {
                 <div className="mt-3 border-t border-gray-100 pt-3" data-tri-trend={triTrendSummary.direction}>
                   <p className="text-xs text-gray-500">
                     {triTrendSummary.direction === 'unknown' ? (
-                      <span className="italic">First recorded rating — nothing to compare against yet.</span>
+                      // 'unknown' covers two different situations, and calling
+                      // both "first recorded rating" is wrong. Either there is
+                      // genuinely no earlier record, or there is one but it
+                      // carries neither a rating nor points (a Finalized TRI can
+                      // score 0), and that case does have a period to name.
+                      <span className="italic">
+                        {previousTri
+                          ? `The ${triTrendPeriod} record has no rating or points to compare against.`
+                          : 'First recorded rating — nothing to compare against yet.'}
+                      </span>
                     ) : (
                       <>
                         <span className="text-gray-400">vs {triTrendPeriod}</span>
