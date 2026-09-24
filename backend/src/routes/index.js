@@ -51,6 +51,46 @@ router.get('/health', (req, res) => {
   });
 });
 
+/**
+ * Readiness — is there a working database behind this process?
+ *
+ * `/health` above is a *liveness* check: it answers "is this process up?" and
+ * deliberately touches nothing, so Railway's healthcheck stays cheap and a
+ * database blip cannot send the service into a restart loop. The cost of that
+ * choice is a real blind spot — a dead MySQL still reported the service as
+ * healthy, and the only way to find out otherwise was to log in and read a
+ * screen. This closes it with the cheapest possible round-trip.
+ *
+ * Unauthenticated, because a monitor has no account. That is also why it says
+ * nothing beyond reachability: no table names, no row counts, and no driver
+ * error text (which can carry the host and user). The detail goes to the log.
+ *
+ *   200  database connected
+ *   503  database unreachable
+ *
+ * Point a monitor — or Railway's healthcheck, if you would rather the service
+ * restart when the database is gone — at this path.
+ */
+router.get('/health/db', async (req, res) => {
+  const startedAt = Date.now();
+  try {
+    await pool.query('SELECT 1');
+    res.json({
+      success: true,
+      database: 'connected',
+      latencyMs: Date.now() - startedAt,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error('Database readiness check failed:', error.message);
+    res.status(503).json({
+      success: false,
+      database: 'unreachable',
+      timestamp: new Date().toISOString(),
+    });
+  }
+});
+
 // Store endpoint - get all data (used by frontend DataContext)
 // Requires authentication; returns only the rows the caller's role may read.
 const EDUCATION_TABLES = new Set([
