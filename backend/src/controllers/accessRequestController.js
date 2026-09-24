@@ -15,10 +15,13 @@ const notifications = require('../services/notificationService');
 const REQUEST_COLUMNS = [
   'id', 'requesterId', 'requesterUsername', 'requesterRole', 'targetUserId', 'targetRole',
   'documentId', 'residentId', 'moduleName', 'recordTab', 'reason', 'status', 'reviewedBy',
-  'reviewedAt', 'reviewerNote', 'createdAt', 'updatedAt',
+  'reviewedById', 'reviewedAt', 'reviewerNote', 'createdAt', 'updatedAt',
 ];
 
+let tableReady = false;
+
 async function ensureTable() {
+  if (tableReady) return;
   await pool.query(`
     CREATE TABLE IF NOT EXISTS accessRequests (
       id VARCHAR(40) PRIMARY KEY,
@@ -34,6 +37,7 @@ async function ensureTable() {
       reason TEXT NOT NULL,
       status ENUM('Pending', 'Approved', 'Rejected') NOT NULL DEFAULT 'Pending',
       reviewedBy VARCHAR(100) NULL,
+      reviewedById VARCHAR(40) NULL,
       reviewedAt TIMESTAMP NULL,
       reviewerNote TEXT NULL,
       createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -41,7 +45,8 @@ async function ensureTable() {
       INDEX idx_access_requesterId (requesterId),
       INDEX idx_access_status (status),
       INDEX idx_access_targetRole (targetRole),
-      INDEX idx_access_documentId (documentId)
+      INDEX idx_access_documentId (documentId),
+      INDEX idx_access_reviewedById (reviewedById)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
   try {
@@ -57,6 +62,44 @@ async function ensureTable() {
   } catch (error) {
     if (error.code !== 'ER_DUP_FIELDNAME') throw error;
   }
+  try {
+    // Who decided the request, as a stable users.id, beside the printed username.
+    //
+    // `reviewedBy` is a display name, and the history was scoped by comparing it
+    // to the caller's username with `===`. That is not a relationship: renaming
+    // an account silently emptied its own audit trail, and because the column
+    // collation is case-insensitive while the JavaScript comparison is not, the
+    // two could disagree about whether a name even matched.
+    await pool.query('ALTER TABLE accessRequests ADD COLUMN reviewedById VARCHAR(40) NULL AFTER reviewedBy');
+    await pool.query('ALTER TABLE accessRequests ADD INDEX idx_access_reviewedById (reviewedById)');
+  } catch (error) {
+    if (!['ER_DUP_FIELDNAME', 'ER_DUP_KEYNAME'].includes(error.code)) throw error;
+  }
+
+  // Backfill existing decisions from the stored username, but only where that
+  // name resolves to exactly one account. An ambiguous name is left NULL, which
+  // means the row falls through to the old name comparison and behaves exactly
+  // as it does today — the backfill can make a link more precise, never hand one
+  // person's audit trail to another.
+  try {
+    await pool.query(
+      `UPDATE accessRequests ar
+         JOIN (
+           SELECT LOWER(TRIM(username)) AS uname, MIN(id) AS id
+             FROM users
+            GROUP BY LOWER(TRIM(username))
+           HAVING COUNT(*) = 1
+         ) u ON u.uname = LOWER(TRIM(ar.reviewedBy))
+          SET ar.reviewedById = u.id
+        WHERE ar.reviewedById IS NULL
+          AND ar.reviewedBy IS NOT NULL
+          AND TRIM(ar.reviewedBy) <> ''`
+    );
+  } catch (error) {
+    console.warn('[AccessRequests] Reviewer backfill skipped:', error.message);
+  }
+
+  tableReady = true;
 }
 
 /**
@@ -175,11 +218,17 @@ async function create(req, res, next) {
         throw new ApiError(409, 'You already have access to this document');
       }
 
+      // `createdBy` / `uploadedBy` / `submittedBy` all hold a *username* (see
+      // documentController, which writes `req.user.username` into each). The
+      // lookup used to also match them against `users.id`, which is a different
+      // kind of value entirely: it could only ever hit by coincidence, and when
+      // it did it addressed the request to an unrelated account whose id
+      // happened to read like the uploader's name.
       const owners = [document.createdBy, document.uploadedBy, document.submittedBy].filter(Boolean);
       if (!resolvedTargetUserId && owners.length > 0) {
         const [users] = await pool.query(
-          'SELECT id, username, role FROM users WHERE username IN (?) OR id IN (?) LIMIT 1',
-          [owners, owners]
+          'SELECT id, username, role FROM users WHERE username IN (?) LIMIT 1',
+          [owners]
         );
         if (users[0]) {
           resolvedTargetUserId = users[0].id;
@@ -250,9 +299,18 @@ async function create(req, res, next) {
  * re-read what was approved or rejected, by whom, when, and why.
  *
  * Scope. A full-access caller (Center Head / Administrator) sees every completed
- * request. Everyone else sees the ones they themselves decided, matched on
- * `reviewedBy` — "all document access requests they previously approved or
- * rejected". Rows are never deleted, so the history is permanent.
+ * request. Everyone else sees the ones they themselves decided — "all document
+ * access requests they previously approved or rejected" — matched on
+ * `reviewedById`, the stable user id. Rows are never deleted, so the history is
+ * permanent.
+ *
+ * The match is on the id rather than on the printed `reviewedBy` name, which is
+ * what it used to be. Comparing a display name to the caller's username with
+ * `===` meant that renaming an account silently emptied its own audit trail, and
+ * that the comparison disagreed with the database's case-insensitive collation
+ * about whether two names matched at all. The name is still returned for display;
+ * it is no longer what the trail is keyed on. Rows decided before the id column
+ * existed fall back to the name comparison, and only those.
  *
  * `?status=` accepts All (default), Approved or Rejected; anything else is
  * treated as All so a malformed filter cannot silently empty the table.
@@ -282,8 +340,22 @@ async function getHistory(req, res, next) {
 
     const seesEveryDecision = hasRole(req.user, 'centerhead', 'admin');
     const visible = rows
-      .filter((row) => seesEveryDecision
-        || String(row.reviewedBy || '') === String(req.user.username || ''))
+      .filter((row) => {
+        if (seesEveryDecision) return true;
+        // The id decides. The name is consulted only for a decision taken before
+        // the id was recorded, so it can never override a recorded reviewer.
+        if (row.reviewedById != null) {
+          return String(row.reviewedById) === String(req.user.id);
+        }
+        // The legacy fallback compares the way the column itself does —
+        // case-insensitively, on trimmed values. `reviewedBy` collates as
+        // utf8mb4_unicode_ci, so a strict `===` here disagreed with the database
+        // about whether two names matched at all. Usernames are unique under
+        // that same collation, so `joyce` and `JOYCE` cannot both exist and this
+        // cannot hand one account's trail to another.
+        return String(row.reviewedBy || '').trim().toLowerCase()
+          === String(req.user.username || '').trim().toLowerCase();
+      })
       .map((row) => ({
         ...mapRow('accessRequests', row),
         documentTitle: row.documentTitle,
@@ -316,10 +388,10 @@ async function review(req, res, next) {
 
     await pool.query(
       `UPDATE accessRequests
-         SET status = ?, reviewedBy = ?, reviewedAt = NOW(),
+         SET status = ?, reviewedBy = ?, reviewedById = ?, reviewedAt = NOW(),
              reviewerNote = COALESCE(?, reviewerNote)
        WHERE id = ?`,
-      [decision, req.user.username, reviewerNote || null, id]
+      [decision, req.user.username, req.user.id, reviewerNote || null, id]
     );
 
     if (decision === 'Approved') {

@@ -428,6 +428,7 @@ async function runMigrations() {
       reason TEXT NOT NULL,
       status ENUM('Pending', 'Approved', 'Rejected') NOT NULL DEFAULT 'Pending',
       reviewedBy VARCHAR(100) NULL,
+      reviewedById VARCHAR(40) NULL,
       reviewedAt TIMESTAMP NULL,
       reviewerNote TEXT NULL,
       createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -436,7 +437,8 @@ async function runMigrations() {
       INDEX idx_access_requesterId (requesterId),
       INDEX idx_access_status (status),
       INDEX idx_access_targetRole (targetRole),
-      INDEX idx_access_documentId (documentId)
+      INDEX idx_access_documentId (documentId),
+      INDEX idx_access_reviewedById (reviewedById)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
   console.log('Migration: accessRequests table ensured.');

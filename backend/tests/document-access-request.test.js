@@ -352,8 +352,12 @@ test('an approval is the grant, and rejection preserves the record', () => {
     'async function review', 'module.exports');
 
   // The approved row itself is what getApprovedDocumentIds() reads.
-  assert.ok(/SET status = \?, reviewedBy = \?, reviewedAt = NOW\(\)/.test(body),
+  assert.ok(/SET status = \?, reviewedBy = \?, reviewedById = \?, reviewedAt = NOW\(\)/.test(body),
     'the decision must be written to the row');
+  // The reviewer is recorded by stable id as well as by printed name, because
+  // the history is scoped by the id — a name moves when an account is renamed.
+  assert.ok(/\[decision, req\.user\.username, req\.user\.id, reviewerNote \|\| null, id\]/.test(body),
+    'the reviewer must be recorded by user id, not only by username');
   assert.ok(/reviewerNote = COALESCE\(\?, reviewerNote\)/.test(body),
     'an omitted note must not erase a previously stored one');
   // Nothing deletes the row: rejection keeps the history.
