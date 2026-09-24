@@ -1119,6 +1119,82 @@ async function getAllowedForRole(req, res, next) {
 const APPROVER_ROLES = ['centerhead', 'socialworker', 'admin'];
 const APPROVAL_STATUSES = ['Approved', 'Rejected', 'Reassessment', 'Under Review'];
 
+/**
+ * Reopen the intervention a Form 08 belongs to when the report is sent back for
+ * reassessment.
+ *
+ * "For Reassessment" means the Incident Report is not acceptable and has to be
+ * produced again. Until now the decision wrote only `incidentReports.status`:
+ * the violation's tracker rows stayed 'Completed'. The Intervention Tracker
+ * therefore kept showing the case as finished, and — worse — every completion
+ * gate was already satisfied by work that has to be redone, because
+ * `violationController.markDone` and the Form 08 filing both require all tracker
+ * rows 'Completed'. Reopening the intervention is what makes the decision mean
+ * anything.
+ *
+ * Two writes, in one transaction:
+ *
+ *   - `intervention_tracker` back to 'In Progress', completion markers cleared.
+ *     This is what the Tracker lists, what its counts read, and what both
+ *     completion gates check. Reversible from the UI: the Tracker's own
+ *     "Mark Complete" button puts the row back to 'Completed'.
+ *
+ *   - `violations` moved off 'Resolved'. The Tracker's active list excludes
+ *     'Resolved', so leaving it there would keep the reopened intervention filed
+ *     under Done even though its rows are pending again. Only a Resolved
+ *     violation is moved — a violation still in progress is already pending, and
+ *     its status is not ours to rewrite. Reversible via Mark Done.
+ *
+ * `intervention_requirements` is deliberately NOT reset, and that is worth
+ * spelling out because resetting it looks like the obvious completion of this
+ * fix. A requirement row only ever becomes 'Done' through the linked Assessment
+ * created when the violation was verified (`violationController.review`), and
+ * both paths that could set it back to 'Done' are unreachable afterwards:
+ * `PUT /violation-guide/intervention-requirements/:id` has no caller in the SPA,
+ * and the Assessments list refuses to re-complete an assessment that is already
+ * 'Completed' (`item.status !== 'Completed'`). Resetting the rows would
+ * therefore be irreversible through the UI, and `markDone` — which requires
+ * every requirement 'Done' — could never pass again: the intervention would be
+ * reopened with no way to close it. Leaving them alone costs nothing, because
+ * every gate that matters also checks the tracker rows reset above, so the
+ * reopened intervention is blocked on the tracker regardless.
+ *
+ * A 'Failed' decision deliberately does not come through here: it asks for the
+ * report to be filled out again, not for the intervention to be reopened.
+ *
+ * @param {string} violationId - The violation the Form 08 was raised against.
+ * @param {Object} [actor] - The authenticated user making the decision.
+ */
+async function reopenInterventionForReassessment(violationId, actor) {
+  if (!violationId) return;
+
+  const connection = await pool.getConnection();
+  try {
+    await connection.beginTransaction();
+
+    await connection.query(
+      `UPDATE intervention_tracker
+          SET status = 'In Progress', completionDate = NULL, completedBy = NULL
+        WHERE violationId = ?`,
+      [violationId]
+    );
+
+    await connection.query(
+      `UPDATE violations
+          SET status = 'Reviewed', reviewedBy = ?
+        WHERE id = ? AND status = 'Resolved'`,
+      [actor?.username || 'System', violationId]
+    );
+
+    await connection.commit();
+  } catch (error) {
+    await connection.rollback().catch(() => {});
+    throw error;
+  } finally {
+    connection.release();
+  }
+}
+
 async function update(req, res, next) {
   try {
     const status = req.body?.status;
@@ -1322,12 +1398,28 @@ async function update(req, res, next) {
     if (isIncidentReport && ['Rejected', 'Reassessment'].includes(status)) {
       const incidentStatus = status === 'Reassessment' ? 'Reassessment' : 'Failed';
       const reason = String(req.body?.rejectionReason || '').trim();
+      const [incidentRows] = await pool.query(
+        'SELECT id, violationId FROM incidentReports WHERE pdfDocumentId = ? LIMIT 1',
+        [document.id]
+      );
       await pool.query(
         `UPDATE incidentReports
          SET status = ?, updatedAt = CURRENT_TIMESTAMP
          WHERE pdfDocumentId = ?`,
         [incidentStatus, document.id]
       );
+
+      // The report is going to be produced again, so the intervention it records
+      // goes back to pending and reappears in the Intervention Tracker. Failure
+      // here must not lose the decision — the status write above already
+      // committed, and the caller can reopen the intervention from the tracker.
+      if (incidentStatus === 'Reassessment') {
+        try {
+          await reopenInterventionForReassessment(incidentRows[0]?.violationId, req.user);
+        } catch (reopenErr) {
+          console.error('[DocumentController] Reopening the intervention failed (non-fatal):', reopenErr.message);
+        }
+      }
 
       try {
         const uploader = document.uploadedBy || document.submittedBy || document.createdBy;
@@ -1481,4 +1573,7 @@ module.exports = {
   loadDocumentScope,
   residentInScope,
   documentVisibleTo,
+  // Exported so the reassessment guard can assert the intervention is actually
+  // reopened rather than trusting the status write.
+  reopenInterventionForReassessment,
 };
