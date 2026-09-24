@@ -68,7 +68,12 @@ const TEMPLATE_ROWS_PER_PAGE = 3;
 // The blank narrative box the client overlays its textarea on. Fixed for the
 // same reason the rows are: the box may not grow to fit what is typed into it,
 // or the textarea would slide out from under the cursor mid-sentence.
-const TEMPLATE_NARRATIVE_HEIGHT = 150;
+//
+// 134 rather than a rounder number because the block has to fit between the last
+// aspect row and the signature band without moving either. See TEMPLATE_GEOMETRY:
+// the heading's band takes 16 of the 42 points the block needs, and the box takes
+// the rest.
+const TEMPLATE_NARRATIVE_HEIGHT = 134;
 
 // ── Type scale ──
 const BODY_SIZE = 9;
@@ -186,9 +191,12 @@ const TEMPLATE_GEOMETRY = (() => {
   // signature band therefore has to be derived from the narrative's bottom edge
   // rather than from the last row — moving the box without moving the band would
   // print the signature over the narrative.
+  //
+  // The block's own heading needs a band of its own (SECTION_HEADING_HEIGHT)
+  // below the row, on top of the box: see `drawNarrativeSection`.
   const rowsOnPageTwo = Math.max(0, ASPECTS.length - TEMPLATE_ROWS_PER_PAGE);
   const narrativeStart = tableTops[1] - rowsOnPageTwo * TEMPLATE_ROW_HEIGHT;
-  const narrativeTop = round(narrativeStart - SECTION_HEADING_HEIGHT - NARRATIVE_LIFT);
+  const narrativeTop = round(narrativeStart - SECTION_HEADING_HEIGHT * 2 - NARRATIVE_LIFT);
   const narrativeBottom = narrativeTop - TEMPLATE_NARRATIVE_HEIGHT;
   const signatureStart = narrativeBottom - NARRATIVE_TAIL;
   const signatureRuleY = signatureStart - SECTION_HEADING_HEIGHT - SIGNATURE_LIFT - SIGNATURE_HEIGHT;
@@ -762,12 +770,17 @@ function drawTemplateAspectRow(page, y, aspect, fonts, zebra, height) {
  * overlays a textarea on it and a box that grew would move the textarea. The
  * finished report sizes it to the text it actually carries, capped to the box.
  *
+ * @param {number} top       the y the block starts at — the bottom edge of
+ *   whatever is above it. The heading's own band is reserved *below* that line
+ *   rather than straddling it: `drawSectionHeading` puts the baseline at its `y`
+ *   and the glyphs above it, so passing the row's bottom edge straight through
+ *   would print the title along the row's border, underlining it.
  * @param {string} narrative the report's `narrative` column.
  * @param {number} height    the box's height in points.
  * @returns {number} the y below the box.
  */
-function drawNarrativeSection(page, y, narrative, fonts, height) {
-  const headingBottom = drawSectionHeading(page, y, 'NARRATIVE REPORT', fonts.bold);
+function drawNarrativeSection(page, top, narrative, fonts, height) {
+  const headingBottom = drawSectionHeading(page, top - SECTION_HEADING_HEIGHT, 'NARRATIVE REPORT', fonts.bold);
   const boxTop = headingBottom - NARRATIVE_LIFT;
   const boxBottom = boxTop - height;
 
@@ -985,7 +998,7 @@ async function buildQuarterlyReportPdf(report = {}, sections = [], childName) {
       MIN_NARRATIVE_HEIGHT,
       narrativeLines.length * LINE_STEP + CELL_PAD * 2 + 6
     );
-    ensureSpace(SECTION_HEADING_HEIGHT + NARRATIVE_LIFT + narrativeHeight + NARRATIVE_TAIL);
+    ensureSpace(SECTION_HEADING_HEIGHT * 2 + NARRATIVE_LIFT + narrativeHeight + NARRATIVE_TAIL);
     y = drawNarrativeSection(page, y, report.narrative, fonts, narrativeHeight);
   }
 
@@ -1104,5 +1117,6 @@ module.exports = {
   PAGE_WIDTH,
   PAGE_HEIGHT,
   LINE_STEP,
+  SECTION_HEADING_HEIGHT,
   MONTH_NAMES,
 };

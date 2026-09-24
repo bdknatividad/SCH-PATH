@@ -1500,7 +1500,7 @@ test('a report with no narrative prints no narrative section at all', async () =
 });
 
 test('the narrative box cannot overlap the signature band, and both stay on the page', () => {
-  const { narrative, signature, page } = pdf.TEMPLATE_GEOMETRY;
+  const { narrative, signature, page, table } = pdf.TEMPLATE_GEOMETRY;
 
   // pdf-lib measures y upward from the bottom, so "above" is a larger y. The
   // signature band is derived from the narrative's bottom edge for exactly this
@@ -1509,6 +1509,16 @@ test('the narrative box cannot overlap the signature band, and both stay on the 
   assert.ok(
     narrativeBottom > signature.top,
     `the narrative box (bottom ${narrativeBottom}) must clear the signature band (top ${signature.top})`
+  );
+
+  // The heading needs a band of its own between the last aspect row and the box.
+  // Without it the title's baseline lands on the row's bottom border and the
+  // glyphs print up into the row — which is what the block did when it was first
+  // added, and what `drawNarrativeSection` now reserves room for.
+  const lastRowBottom = table.tableTops[1] - (pdf.ASPECTS.length - table.rowsPerPage) * table.rowHeight;
+  assert.ok(
+    narrative.top <= lastRowBottom - pdf.SECTION_HEADING_HEIGHT * 2,
+    `the narrative box top (${narrative.top}) must leave the heading a band below the last row (${lastRowBottom})`
   );
 
   // The band's own lowest drawn element is the "Signature over Printed Name"
@@ -1569,6 +1579,18 @@ test('a paragraph break in the narrative is drawn as a gap, not run together', (
   // And the blank line itself must not be drawn: pdf-lib has no use for an
   // empty string, and a drawn one would be an invisible no-op either way.
   assert.equal(drawn.filter((entry) => entry.text === '').length, 0, 'the blank line must not be drawn');
+
+  // The heading gets a band of its own below the line the block starts at.
+  // Drawing it *at* that line — which is what the block did first — put the
+  // baseline on the border of the row above, so the title printed along it.
+  const heading = drawn.find((entry) => entry.text === 'NARRATIVE REPORT');
+  assert.ok(heading, 'the section must be labelled');
+  assert.ok(
+    heading.y <= 400 - pdf.SECTION_HEADING_HEIGHT,
+    `the heading (${heading.y}) must sit a full band below the block top (400)`
+  );
+  // And the box starts below the heading, not on it.
+  assert.ok(first.y < heading.y, 'the box must start below its own heading');
 });
 
 test('a report table that predates the narrative column is given it', async () => {
