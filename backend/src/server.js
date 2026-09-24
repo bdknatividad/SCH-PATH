@@ -498,9 +498,9 @@ async function runMigrations() {
       residentSignature LONGTEXT NULL,
       residentImage LONGTEXT NULL,
 
-      guardianName VARCHAR(150) NOT NULL,
-      guardianContact VARCHAR(100) NOT NULL,
-      guardianAddress TEXT NOT NULL,
+      guardianName VARCHAR(150) NULL,
+      guardianContact VARCHAR(100) NULL,
+      guardianAddress TEXT NULL,
       guardianSignature LONGTEXT NULL,
 
       referringParty VARCHAR(150) NOT NULL,
@@ -513,6 +513,8 @@ async function runMigrations() {
       legalCategory VARCHAR(150) NOT NULL,
       specificOffense TEXT NOT NULL,
       caseHistory TEXT NOT NULL,
+
+      admissionStatus VARCHAR(40) NULL,
 
       expectedDischargeDate DATE NULL,
       status ENUM('Active', 'Closed') NOT NULL DEFAULT 'Active',
@@ -534,6 +536,55 @@ async function runMigrations() {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
   console.log('Migration: admissions table ensured.');
+
+  // The guardian is optional at admission. `guardianName`, `guardianContact` and
+  // `guardianAddress` were NOT NULL, which made "we do not have a guardian's
+  // details yet" impossible to record: the Social Worker had to type something
+  // into all three before the resident could be admitted at all, and whatever
+  // they typed was then indistinguishable from a real guardian.
+  //
+  // Relaxed for existing databases too. `IS_NULLABLE` is read first so this does
+  // not re-run a table rebuild on every boot, and the whole statement is a no-op
+  // where the column is already nullable.
+  for (const [column, definition] of [
+    ['guardianName', 'VARCHAR(150) NULL'],
+    ['guardianContact', 'VARCHAR(100) NULL'],
+    ['guardianAddress', 'TEXT NULL'],
+  ]) {
+    const [nullable] = await pool.query(
+      `SELECT IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND LOWER(TABLE_NAME) = 'admissions'
+          AND LOWER(COLUMN_NAME) = LOWER(?)`,
+      [column]
+    );
+    if (nullable.length === 0 || nullable[0].IS_NULLABLE === 'YES') continue;
+    await pool.query(`ALTER TABLE \`admissions\` MODIFY COLUMN \`${column}\` ${definition}`);
+    console.log(`Migration: admissions.${column} is now nullable.`);
+  }
+
+  // How the admission is classified: New / Returning Resident (Abscon/Tumakas) /
+  // Relapse. Only "New" is derivable — it is the absence of an earlier
+  // admission — so the two returning values are chosen by the Social Worker and
+  // have to be stored rather than recomputed on each render. Existing rows are
+  // backfilled from the vocabulary the interface used before the column existed,
+  // which had exactly two values and derived them from the admission number.
+  try {
+    await ensureColumn('admissions', 'admissionStatus', 'VARCHAR(40) NULL', 'caseHistory');
+    const [backfilled] = await pool.query(
+      `UPDATE admissions
+          SET admissionStatus = CASE
+                WHEN admissionNumber > 1 THEN ?
+                ELSE 'New'
+              END
+        WHERE admissionStatus IS NULL`,
+      ['Returning Resident (Abscon/Tumakas)']
+    );
+    if (backfilled.affectedRows > 0) {
+      console.log(`Migration: ${backfilled.affectedRows} admission(s) classified.`);
+    }
+  } catch (err) {
+    console.warn('Migration warning (admissions.admissionStatus):', err.message);
+  }
 
   // ── violations ────────────────────────────────────────────────────────────
   //

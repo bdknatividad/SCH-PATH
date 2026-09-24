@@ -1,7 +1,11 @@
 const { pool } = require('../config/database');
 const { ApiError } = require('../middleware/errorHandler');
 const { generateId, runInTransactionWithIdRetry, normalizeAge, mapRow } = require('../utils/helpers');
-const { PHASE_REQUIREMENTS } = require('../utils/constants');
+const {
+  PHASE_REQUIREMENTS,
+  ADMISSION_STATUSES,
+  DEFAULT_RETURNING_ADMISSION_STATUS,
+} = require('../utils/constants');
 const notifications = require('../services/notificationService');
 const { canAccessResident } = require('./assignmentController');
 
@@ -24,6 +28,28 @@ function requireValidDate(value, label) {
   if (Number.isNaN(new Date(value).getTime())) {
     throw new ApiError(400, `${label} must be a valid date.`);
   }
+}
+
+/**
+ * Classify an admission.
+ *
+ * A first admission is `New` and nothing else can be true of it, whatever the
+ * caller sends — the system knows there is no earlier admission, so it does not
+ * ask. A later admission has to be told apart: a resident who left without
+ * permission and a resident who returned to substance use are identical in the
+ * data, so the caller's choice is taken. An omitted or unrecognised value falls
+ * back to the label the interface used before the vocabulary existed, rather
+ * than refusing an admission the Social Worker has already completed.
+ *
+ * @param {number} admissionNumber - 1 for a first admission, higher afterwards.
+ * @param {unknown} requested - The caller's classification, if any.
+ * @returns {string} One of `ADMISSION_STATUSES`.
+ */
+function resolveAdmissionStatus(admissionNumber, requested) {
+  if (Number(admissionNumber) <= 1) return 'New';
+  const value = String(requested ?? '').trim();
+  if (value && value !== 'New' && ADMISSION_STATUSES.includes(value)) return value;
+  return DEFAULT_RETURNING_ADMISSION_STATUS;
 }
 
 function requireContactNumber(value, label) {
@@ -131,10 +157,18 @@ async function create(req, res, next) {
     requireField(resident.religion, 'Religion');
     requireField(resident.address, 'Complete address');
 
-    requireField(resident.guardianName, 'Guardian name');
-    requireField(resident.guardianContact, 'Guardian contact');
-    requireContactNumber(resident.guardianContact,'Guardian contact');
-    requireField(resident.guardianAddress, 'Guardian address');
+    // The guardian is optional. The Social Worker is often admitting a resident
+    // whose guardian has not been traced yet, or who has none — making all three
+    // fields mandatory forced something to be typed into each one, and a
+    // placeholder is worse than a blank because it reads as a real guardian
+    // afterwards. What is still enforced is the *format*: a contact number that
+    // was supplied has to be a usable one.
+    const guardianName = String(resident.guardianName ?? '').trim();
+    const guardianContact = String(resident.guardianContact ?? '').trim();
+    const guardianAddress = String(resident.guardianAddress ?? '').trim();
+    if (guardianContact) {
+      requireContactNumber(guardianContact, 'Guardian contact');
+    }
 
     requireField(admission.admissionDate, 'Date of admission');
     if (admission.expectedDischargeDate != null && String(admission.expectedDischargeDate).trim() !== '') {
@@ -288,6 +322,8 @@ async function create(req, res, next) {
       );
       const previousAdmissionId = previousAdmissionRows[0]?.id || null;
 
+      const admissionStatus = resolveAdmissionStatus(admissionNumber, admission.admissionStatus);
+
       /*
        * Create resident master record only for first admission.
        */
@@ -325,8 +361,8 @@ async function create(req, res, next) {
             caseHistory,
             resident.birthDate,
             resident.address,
-            resident.guardianName,
-            resident.guardianContact,
+            guardianName || null,
+            guardianContact || null,
             req.user?.username || 'System',
           ]
         );
@@ -445,8 +481,8 @@ async function create(req, res, next) {
             JSON.stringify(previousCases),
             resident.birthDate,
             resident.address,
-            resident.guardianName,
-            resident.guardianContact,
+            guardianName || null,
+            guardianContact || null,
             admission.admissionDate,
             new Date().toISOString(),
             residentId,
@@ -555,11 +591,12 @@ async function create(req, res, next) {
           legalCategory,
           specificOffense,
           caseHistory,
+          admissionStatus,
           expectedDischargeDate,
           status,
           createdBy
         ) VALUES (
-          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Active', ?
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Active', ?
         )`,
         [
           admissionId,
@@ -574,9 +611,9 @@ async function create(req, res, next) {
           resident.address,
           admission.residentSignature,
           admission.residentImage || null,
-          resident.guardianName,
-          resident.guardianContact,
-          resident.guardianAddress,
+          guardianName || null,
+          guardianContact || null,
+          guardianAddress || null,
           admission.guardianSignature,
           admission.referringParty,
           admission.referringPartyContact,
@@ -586,6 +623,7 @@ async function create(req, res, next) {
           admission.legalCategory,
           admission.specificOffense,
           caseHistory,
+          admissionStatus,
           admission.expectedDischargeDate || null,
           req.user?.username || 'System',
         ]
@@ -671,7 +709,7 @@ async function update(req, res, next) {
         throw new ApiError(400, 'Expected discharge date cannot be before the admission date.');
       }
     }
-    const fields = ['admissionDate','expectedDischargeDate','name','age','sex','birthDate','religion','address','residentSignature','guardianName','guardianContact','guardianAddress','guardianSignature','referringParty','referringPartyContact','referringPartySignature','houseparentOnDuty','houseparentSignature','residentImage','legalCategory','specificOffense'];
+    const fields = ['admissionDate','expectedDischargeDate','name','age','sex','birthDate','religion','address','residentSignature','guardianName','guardianContact','guardianAddress','guardianSignature','referringParty','referringPartyContact','referringPartySignature','houseparentOnDuty','houseparentSignature','residentImage','legalCategory','specificOffense','admissionStatus'];
     const sets = []; const values = [];
     for (const field of fields) { if (b[field] !== undefined) { sets.push(`${field} = ?`); values.push(b[field] === '' ? null : b[field]); } }
     if (!sets.length) return res.json({ success: true, data: mapRow('admissions', rows[0]) });
@@ -688,6 +726,13 @@ async function update(req, res, next) {
     const updatedAdmission = updatedRows[0];
     // Keep the resident master record synchronized with the current admission.
     // Personal Info reads from children, while the official slip reads from admissions.
+    //
+    // The two guardian fields are assigned rather than COALESCEd. They are the
+    // one pair the caller can now legitimately clear — the guardian is optional —
+    // and `COALESCE(NULL, guardianName)` would keep the old name on Personal Info
+    // after the slip had been blanked, so the two views would disagree about
+    // whether the resident has a guardian. `updatedAdmission` is read back after
+    // the write, so it is the authoritative current value either way.
     await connection.query(
       `UPDATE children
           SET name = COALESCE(?, name),
@@ -696,8 +741,8 @@ async function update(req, res, next) {
               birthDate = COALESCE(?, birthDate),
               admissionDate = COALESCE(?, admissionDate),
               address = COALESCE(?, address),
-              guardianName = COALESCE(?, guardianName),
-              guardianContact = COALESCE(?, guardianContact),
+              guardianName = ?,
+              guardianContact = ?,
               legalCategory = COALESCE(?, legalCategory),
               caseType = COALESCE(?, caseType)
         WHERE id = ?`,
@@ -744,6 +789,7 @@ async function getById(req, res, next) {
 }
 
 module.exports = {
+  resolveAdmissionStatus,
   create,
   getByResident,
   getLatestForResident,

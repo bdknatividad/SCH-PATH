@@ -57,6 +57,7 @@ const RESOURCES = {
       'legalCategory',
       'specificOffense',
       'caseHistory',
+      'admissionStatus',
       'status',
       'closedDate',
       'createdBy',
@@ -229,6 +230,28 @@ const ASSESSMENT_TYPES = {
   MEDICAL: { type: 'Medical', assessor: 'Nurse', title: 'Medical Assessment' },
   GENERAL: { type: 'Psychological', assessor: 'Psychological Staff', title: 'Psychological Assessment' },
 };
+
+/**
+ * How an admission is classified on the Admission Slip.
+ *
+ * `New` is the only value the system can determine for itself — it is the
+ * absence of any earlier admission. The two returning values cannot be derived
+ * from anything stored: a resident who left without permission and a resident
+ * who returned to substance use look identical in the data, so the Social Worker
+ * chooses between them and the choice is stored. Both are kept as one label with
+ * the local terms in brackets, because "Abscon/Tumakas" is what the staff call
+ * it and the slip is read by the same people.
+ *
+ * @constant {Array<string>}
+ */
+const ADMISSION_STATUSES = [
+  'New',
+  'Returning Resident (Abscon/Tumakas)',
+  'Relapse',
+];
+
+/** The status a returning admission gets when the caller does not choose one. */
+const DEFAULT_RETURNING_ADMISSION_STATUS = 'Returning Resident (Abscon/Tumakas)';
 
 /**
  * User roles in the system
@@ -521,6 +544,8 @@ module.exports = {
   PHASE_REQUIREMENTS,
   LEGACY_DOCUMENT_ALIASES,
   LEGACY_TASK_ALIASES,
+  ADMISSION_STATUSES,
+  DEFAULT_RETURNING_ADMISSION_STATUS,
   DOCUMENT_ROLE_PERMISSIONS,
   VIOLATION_MATRIX,
   RESIDENT_STATUS_THRESHOLDS,

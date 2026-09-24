@@ -128,9 +128,9 @@ CREATE TABLE admissions (
   residentSignature LONGTEXT NULL,
   residentImage LONGTEXT NULL,
 
-  guardianName VARCHAR(150) NOT NULL,
-  guardianContact VARCHAR(100) NOT NULL,
-  guardianAddress TEXT NOT NULL,
+  guardianName VARCHAR(150) NULL,
+  guardianContact VARCHAR(100) NULL,
+  guardianAddress TEXT NULL,
   guardianSignature LONGTEXT NULL,
 
   referringParty VARCHAR(150) NOT NULL,
@@ -143,6 +143,8 @@ CREATE TABLE admissions (
   legalCategory VARCHAR(150) NOT NULL,
   specificOffense TEXT NOT NULL,
   caseHistory TEXT NOT NULL,
+
+  admissionStatus VARCHAR(40) NULL,
 
   expectedDischargeDate DATE NULL,
   status ENUM('Active', 'Closed') NOT NULL DEFAULT 'Active',

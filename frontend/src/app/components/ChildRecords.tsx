@@ -205,6 +205,12 @@ interface AdmissionRecord {
   residentId: string;
   admissionNumber: number;
 
+  /*
+   * New / Returning Resident (Abscon/Tumakas) / Relapse. Stored on the admission
+   * because the two returning values cannot be derived from the data.
+   */
+  admissionStatus?: string | null;
+
   admissionDate: string;
   expectedDischargeDate?: string | null;
 
@@ -1724,6 +1730,22 @@ export function ChildRecords() {
       []
     );
 
+  /**
+   * Which kind of returning admission this is.
+   *
+   * "New" is the only classification the system can work out for itself — it is
+   * the absence of an earlier admission. A resident who left without permission
+   * (Abscon/Tumakas) and a resident who returned to substance use (Relapse) are
+   * indistinguishable in the data, so the Social Worker picks one and the choice
+   * is stored on the admission rather than guessed on every render.
+   */
+  const [
+    returningAdmissionStatus,
+    setReturningAdmissionStatus,
+  ] = useState<
+    'Returning Resident (Abscon/Tumakas)' | 'Relapse'
+  >('Returning Resident (Abscon/Tumakas)');
+
   const [
     showExistingAdmission,
     setShowExistingAdmission,
@@ -2127,6 +2149,7 @@ export function ChildRecords() {
             houseparentOnDuty: form.houseparentOnDuty.trim(),
             houseparentSignature: form.houseparentSignature || null,
             residentImage: form.residentImage || null,
+            admissionStatus,
           }),
         });
       }
@@ -2753,32 +2776,19 @@ export function ChildRecords() {
           'Complete address is required.';
       }
 
+      // The guardian is optional — the Social Worker may be admitting a resident
+      // whose guardian has not been traced yet, or who has none. Only the format
+      // of a contact number that was actually supplied is checked, so a blank
+      // field is accepted and a malformed one is still caught here rather than by
+      // the API.
       if (
-        !form.guardianName.trim()
-      ) {
-        errors.guardianName =
-          'Guardian name is required.';
-      }
-
-      if (
-        !form.guardianContact.trim()
-      ) {
-        errors.guardianContact =
-          'Guardian contact is required.';
-      } else if (
+        form.guardianContact.trim() &&
         !/^\d{11}$/.test(
           form.guardianContact
         )
       ) {
         errors.guardianContact =
           'Guardian contact must contain exactly 11 digits.';
-      }
-
-      if (
-        !form.guardianAddress.trim()
-      ) {
-        errors.guardianAddress =
-          'Guardian complete address is required.';
       }
 
       if (
@@ -2910,6 +2920,8 @@ export function ChildRecords() {
           form.specificOffense,
 
         caseHistory: '',
+
+        admissionStatus,
       };
     };
 
@@ -3689,6 +3701,8 @@ export function ChildRecords() {
 
             caseHistory: '',
 
+            admissionStatus,
+
             residentSignature:
               form.residentSignature ||
               null,
@@ -3939,11 +3953,20 @@ export function ChildRecords() {
   const exactResident =
     findExactResident();
 
+  /**
+   * A returning admission is one being opened against a resident the system
+   * already knows. Editing an existing slip keeps whatever it was classified as,
+   * so re-saving the form cannot silently reclassify a Relapse as an Abscon.
+   */
+  const isReturningAdmission = Boolean(
+    !editingId && (duplicateChild || exactResident)
+  );
+
   const admissionStatus = editingId
-    ? 'First Admission'
-    : duplicateChild || exactResident
-      ? 'Returning Resident'
-      : 'First Admission';
+    ? existingAdmission?.admissionStatus || 'New'
+    : isReturningAdmission
+      ? returningAdmissionStatus
+      : 'New';
 
   return (
     <div className="space-y-6 p-4">
@@ -4450,12 +4473,12 @@ export function ChildRecords() {
                   </div>
                 </div>
 
-                {/* AUTOMATIC STATUS */}
+                {/* ADMISSION STATUS */}
                 <div className="rounded-2xl border-2 border-[#2F3E46]/10 bg-[#f8f9fa] p-5">
 
                   <div className="flex items-center justify-between gap-4">
 
-                    <div>
+                    <div className="min-w-0">
 
                       <p className="text-xs uppercase tracking-wider font-bold text-gray-400">
                         Admission Status
@@ -4468,29 +4491,29 @@ export function ChildRecords() {
                       </p>
 
                       <p className="text-xs text-gray-500 mt-1">
-                        Determined automatically
-                        using the resident's full
-                        name and date of birth.
+                        {isReturningAdmission
+                          ? 'This resident already has an admission on record. Choose how this one is classified.'
+                          : editingId
+                            ? 'Kept from the admission on record.'
+                            : 'First admission for this resident.'}
                       </p>
 
                     </div>
 
                     <Badge
                       className={
-                        admissionStatus ===
-                        'Returning Resident'
-                          ? 'bg-blue-100 text-blue-700 hover:bg-blue-100'
-                          : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100'
+                        admissionStatus === 'New'
+                          ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100'
+                          : 'bg-blue-100 text-blue-700 hover:bg-blue-100'
                       }
                     >
-                      {admissionStatus ===
-                      'Returning Resident' ? (
-                        <History
+                      {admissionStatus === 'New' ? (
+                        <CheckCircle2
                           size={13}
                           className="mr-1"
                         />
                       ) : (
-                        <CheckCircle2
+                        <History
                           size={13}
                           className="mr-1"
                         />
@@ -4503,6 +4526,38 @@ export function ChildRecords() {
                     </Badge>
 
                   </div>
+
+                  {/* Only a returning admission has a choice to make: the two
+                      returning classifications are indistinguishable from the
+                      data, so one of them has to be picked by hand. */}
+                  {isReturningAdmission && (
+                    <div className="mt-4 space-y-2">
+                      <p className="text-xs font-semibold text-gray-500">
+                        Classify this admission
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {([
+                          'Returning Resident (Abscon/Tumakas)',
+                          'Relapse',
+                        ] as const).map((option) => (
+                          <button
+                            key={option}
+                            type="button"
+                            onClick={() => setReturningAdmissionStatus(option)}
+                            aria-pressed={returningAdmissionStatus === option}
+                            className={[
+                              'rounded-xl border px-3 py-2 text-left text-xs font-semibold transition-colors',
+                              returningAdmissionStatus === option
+                                ? 'border-[#2F3E46] bg-[#2F3E46] text-white'
+                                : 'border-gray-300 bg-white text-[#2F3E46] hover:border-[#2F3E46]',
+                            ].join(' ')}
+                          >
+                            {option}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* ACTIONS */}
