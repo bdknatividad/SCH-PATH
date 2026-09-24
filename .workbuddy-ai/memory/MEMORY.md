@@ -64,6 +64,17 @@ mutator print `replaced N occurrence(s)` and fail loudly on zero.
 - **Python resolves `/tmp` as `C:\tmp`.** A helper heredoc'd to `/tmp/x.py` is not
   readable by `python /tmp/x.py` under Git Bash. Use `"$(cygpath -w /tmp)/x.py"`.
 
+### Verifying a push — the remote-tracking ref lies
+`GIT_TERMINAL_PROMPT=0` is set and the `git-credential-manager.exe` helper reads
+Windows Credential Manager non-interactively, so `git push` works without a
+prompt. But **the sandbox discards the write to `refs/remotes/origin/master`**:
+after a push that the server accepted, `git log origin/master..HEAD` still lists
+the commits you just pushed, and `git fetch origin master` *prints*
+`53bf20a..34f3686 master -> origin/master` while `git rev-parse origin/master`
+still returns the old SHA. Do not conclude the push failed. Ask the server —
+`git ls-remote origin master` — and to make the local ref agree, edit the
+`refs/remotes/origin/master` line in `.git/packed-refs` by hand.
+
 ### Behavioural controller tests without a database
 Inject a pool stub into `require.cache` for `src/config/database` *before*
 requiring the controller, then dispatch on the SQL text inside a fake
