@@ -31,7 +31,7 @@ const baseController = createController('children');
  * The rule is the *Medical tab of Child Records*, not the module. Holding Child
  * Records is not enough: the Educator holds the module read-only for Personal
  * Info and Education, and its specification says it must never reach medical
- * records. Every role that legitimately reads the summary — Nurse, Psychologist,
+ * records. Every role that legitimately reads the summary — Nurse, Psychological Staff,
  * Social Worker, Center Head — also holds the Medical tab, so keying on the tab
  * narrows the rule to exactly the callers who need narrowing.
  *
@@ -821,7 +821,7 @@ async function readmit(req, res, next) {
 
 /**
  * POST /api/children/:id/toggle-psych-assessment
- * Toggle the needsPsychAssessment flag and auto-create alert for Psychologist
+ * Toggle the needsPsychAssessment flag and auto-create alert for Psychological Staff
  * @async
  */
 async function togglePsychAssessment(req, res, next) {
@@ -876,7 +876,7 @@ async function togglePsychAssessment(req, res, next) {
     res.json({
       success: true,
       message: needsPsychAssessment
-        ? `Psychological Assessment flagged as required for ${child.name}. Psychologist has been notified.`
+        ? `Psychological Assessment flagged as required for ${child.name}. Psychological Staff has been notified.`
         : `Psychological Assessment requirement removed for ${child.name}.`,
       needsPsychAssessment: !!needsPsychAssessment,
     });

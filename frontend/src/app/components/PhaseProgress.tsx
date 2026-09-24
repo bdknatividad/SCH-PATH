@@ -1461,7 +1461,7 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
                           // would otherwise let a Houseparent upload it.
                           const canUpload = !isHouseparent && (!allowedRoles || allowedRoles.includes(userRole));
                           const roleDisplayNames: Record<string,string> = {
-                            socialworker: 'Social Worker', psychologist: 'Psychologist',
+                            socialworker: 'Social Worker', psychologist: 'Psychological Staff',
                             centerhead: 'Center Head', nurse: 'Nurse', educator: 'Educator',
                           };
                           const roleLabel = allowedRoles
@@ -1645,8 +1645,8 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
                       <p className="text-sm font-medium text-purple-800">Does this child need a Psychological Assessment?</p>
                       <p className="text-xs text-purple-600">
                         {needsPsychAssessment
-                          ? 'Flagged — Psychologist has been notified. Waiting for assessment upload.'
-                          : 'Check this to flag and notify the Psychologist to conduct an assessment.'}
+                          ? 'Flagged — Psychological Staff has been notified. Waiting for assessment upload.'
+                          : 'Check this to flag and notify the Psychological Staff to conduct an assessment.'}
                       </p>
                     </div>
                   </label>

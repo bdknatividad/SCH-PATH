@@ -175,6 +175,57 @@ test('the frontend keeps a byte-identical copy of the definition', () => {
   );
 });
 
+test('the role is called "Psychological Staff" on every surface that prints it', () => {
+  // The role was renamed from "Psychologist" to "Psychological Staff". The KEY
+  // stays `psychologist`: it is what `users.role` stores and what every route
+  // guard and `normalizeRole()` compares against, so renaming it would break the
+  // database and the guards at once. Only the display label moved.
+  const definition = JSON.parse(read('backend/src/config/rbac.definition.json'));
+  assert.ok(definition.roles.psychologist, 'the psychologist role KEY was renamed — that breaks stored roles');
+  assert.equal(definition.roles.psychologist.label, 'Psychological Staff', 'the role label drifted back');
+
+  // No user-facing surface may still render the old label. Comments are not
+  // labels, and the `Clinical Psychologist` intervention value is a separate
+  // clinical designation rather than this role, so only code lines are scanned.
+  const isComment = (line) => {
+    const trimmed = line.trim();
+    return trimmed.startsWith('//') || trimmed.startsWith('*')
+      || trimmed.startsWith('/*') || trimmed.startsWith('{/*');
+  };
+  const offenders = [];
+  for (const file of [
+    'frontend/src/app/components/Dashboard.tsx',
+    'frontend/src/app/components/DocumentUpload.tsx',
+    'frontend/src/app/components/PhaseProgress.tsx',
+    'frontend/src/app/components/Assessments.tsx',
+    'frontend/src/app/components/Activities.tsx',
+    'frontend/src/app/components/Violations.tsx',
+    'backend/src/utils/constants.js',
+    'backend/src/controllers/childController.js',
+    'backend/src/controllers/documentController.js',
+  ]) {
+    read(file).split('\n').forEach((line, index) => {
+      if (isComment(line)) return;
+      if (/'Psychologist'|"Psychologist"|>Psychologist/.test(line)) {
+        offenders.push(`${file}:${index + 1}: ${line.trim()}`);
+      }
+    });
+  }
+  assert.deepEqual(offenders, [], 'the old role label is still rendered somewhere');
+});
+
+test('the role rename reached the assessor value the system writes', () => {
+  // `constants.js` seeds the assessor of every auto-created assessment. It is
+  // displayed verbatim in the Assessments table, so it is a label, not a key.
+  const constants = read('backend/src/utils/constants.js');
+  assert.doesNotMatch(
+    constants,
+    /assessor: 'Psychologist'/,
+    'an auto-created assessment is still stamped with the old role label',
+  );
+  assert.match(constants, /assessor: 'Psychological Staff'/);
+});
+
 test('the storage-shaped module list still covers every module in the definition', () => {
   // `MODULE_ORDER` is the order `users.accessibleModules` is written in. It is
   // explicit (order is a storage decision) but must not silently miss a module

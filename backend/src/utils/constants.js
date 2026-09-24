@@ -224,10 +224,10 @@ const VIOLATION_SEVERITY = {
  * @constant {Object}
  */
 const ASSESSMENT_TYPES = {
-  VIOLENT: { type: 'Psychological', assessor: 'Psychologist', title: 'Crisis Intervention Assessment' },
+  VIOLENT: { type: 'Psychological', assessor: 'Psychological Staff', title: 'Crisis Intervention Assessment' },
   BEHAVIORAL: { type: 'Behavioral', assessor: 'Social Worker', title: 'Behavioral Assessment' },
   MEDICAL: { type: 'Medical', assessor: 'Nurse', title: 'Medical Assessment' },
-  GENERAL: { type: 'Psychological', assessor: 'Psychologist', title: 'Psychological Assessment' },
+  GENERAL: { type: 'Psychological', assessor: 'Psychological Staff', title: 'Psychological Assessment' },
 };
 
 /**
@@ -443,7 +443,7 @@ const VIOLATION_MATRIX = [
     id: 'VM001',
     keywords: ['fight', 'assault', 'aggress', 'violence', 'attack', 'harm', 'weapon'],
     severity: ['Major', 'Critical'],
-    autoAssessment: { type: 'Psychological', assessor: 'Psychologist', title: 'Crisis Intervention Assessment' },
+    autoAssessment: { type: 'Psychological', assessor: 'Psychological Staff', title: 'Crisis Intervention Assessment' },
     intervention: 'Immediate psychological crisis intervention; isolate from peers; notify center head',
     escalate: true,
   },
@@ -452,14 +452,14 @@ const VIOLATION_MATRIX = [
     keywords: ['drug', 'substance', 'alcohol', 'inhale', 'sniff'],
     severity: ['Critical'],
     autoAssessment: { type: 'Medical', assessor: 'Nurse', title: 'Substance Use Medical Assessment' },
-    intervention: 'Medical assessment required; substance abuse counseling; notify psychologist and center head',
+    intervention: 'Medical assessment required; substance abuse counseling; notify the Psychological Staff and the Center Head',
     escalate: true,
   },
   {
     id: 'VM003',
     keywords: ['escape', 'runaway', 'absent without leave', 'awol'],
     severity: ['Major', 'Critical'],
-    autoAssessment: { type: 'Psychological', assessor: 'Psychologist', title: 'Risk & Safety Assessment' },
+    autoAssessment: { type: 'Psychological', assessor: 'Psychological Staff', title: 'Risk & Safety Assessment' },
     intervention: 'Risk and safety assessment; review living arrangements; notify guardian and court',
     escalate: true,
   },

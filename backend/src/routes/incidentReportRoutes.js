@@ -14,7 +14,7 @@ const { requireModule, requirePermission } = require('../middleware/rbac');
 /**
  * Incident forms belong to the Violations module. Reading one therefore requires
  * holding that module — otherwise the endpoint is a direct-API bypass for a role
- * whose menu never offers it. The Psychologist holds Violations, so this is a
+ * whose menu never offers it. The Psychological Staff holds Violations, so this is a
  * no-op for them; it closes the path for every role that does not.
  */
 const canReadIncidentForms = requireModule('Violations');
@@ -22,7 +22,7 @@ const canReadIncidentForms = requireModule('Violations');
 /**
  * POST /api/incident-reports
  * Social Worker saves a completed digital Incident Report against a violation.
- * The Psychologist is deliberately absent: the specification forbids creating
+ * The Psychological Staff is deliberately absent: the specification forbids creating
  * an incident.
  */
 router.post('/', authorize('socialworker', 'centerhead', 'houseparent'), asyncHandler(incidentReportController.create));
@@ -43,9 +43,9 @@ router.get('/resident/:residentId', canReadIncidentForms, asyncHandler(incidentR
 
 /**
  * POST /api/incident-reports/:id/verify
- * Psychologist verifies the report and selects the intervention.
+ * Psychological Staff verifies the report and selects the intervention.
  *
- * This is the Psychologist's only write on an incident form, and it is the
+ * This is the Psychological Staff's only write on an incident form, and it is the
  * "review within the assigned workflow" the specification allows. The
  * capability, not the role name, is the gate — so a future role granted
  * `verify` on Violations inherits the endpoint with no route change.

@@ -324,9 +324,9 @@
       }
     },
     "psychologist": {
-      "label": "Psychologist",
+      "label": "Psychological Staff",
       "fullAccess": false,
-      "description": "Clinical assessment and verification. Holds Dashboard, Child Records (Personal Info / Phase Timeline / Medical / Behavioral), Violations (through Manage Violations & Interventions), Assessments and Documents. Reads incident forms and tracks interventions, but never creates or edits an incident and never deletes an intervention. Files the documents the role itself produces, but holds no document delete and no global document approval: a document request is decided only when it is addressed to the Psychologist role.",
+      "description": "Clinical assessment and verification. Holds Dashboard, Child Records (Personal Info / Phase Timeline / Medical / Behavioral), Violations (through Manage Violations & Interventions), Assessments and Documents. Reads incident forms and tracks interventions, but never creates or edits an incident and never deletes an intervention. Files the documents the role itself produces, but holds no document delete and no global document approval: a document request is decided only when it is addressed to the Psychological Staff role.",
       "modules": [
         "Dashboard",
         "Child Records",

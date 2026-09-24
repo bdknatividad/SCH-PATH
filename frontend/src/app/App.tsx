@@ -212,7 +212,7 @@ export default function App() {
             {/* Guarded by Activities, not Assessments: the page writes
                 `activityEvaluations`, which the API and the store both treat as
                 an Activities resource. Under the Assessments guard a
-                Psychologist could open the form and then have every save
+                Psychological Staff could open the form and then have every save
                 refused, because the role holds no Activities module. */}
             <Route path="/evaluation-form" element={
               <ProtectedRoute moduleName="Activities">

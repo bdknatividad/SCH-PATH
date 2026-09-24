@@ -191,7 +191,7 @@ export function Activities() {
     setIsDialogOpen(false);
   };
 
-  // Psychologist: mark a child as NOT recommended for an activity
+  // Psychological Staff: mark a child as NOT recommended for an activity
   const handleRestrictChild = async () => {
     if (!restrictDialogActivity || !restrictChildId) return;
     const notRec = [...(restrictDialogActivity.notRecommendedResidentIds || [])];
@@ -569,13 +569,13 @@ export function Activities() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Psychologist Override Dialog */}
+      {/* Psychological Staff Override Dialog */}
       <Dialog open={isRestrictDialogOpen} onOpenChange={setIsRestrictDialogOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-[#2F3E46]">
               <ShieldAlert className="w-5 h-5 text-orange-500" />
-              Psychologist Activity Override
+              Psychological Staff Activity Override
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 text-sm">

@@ -223,7 +223,7 @@ interface DocumentAuditEntry {
 
 const ROLE_LABEL_FALLBACK: Record<string, string> = {
   nurse: 'Nurse',
-  psychologist: 'Psychologist',
+  psychologist: 'Psychological Staff',
   socialworker: 'Social Worker',
   educator: 'Educator',
   centerhead: 'Center Head',
@@ -636,7 +636,7 @@ export function DocumentUpload() {
 
   const ROLE_LABELS: Record<string, string> = {
     nurse: 'Nurse',
-    psychologist: 'Psychologist',
+    psychologist: 'Psychological Staff',
     socialworker: 'Social Worker',
     educator: 'Educator',
     centerhead: 'Center Head',
@@ -1283,7 +1283,7 @@ export function DocumentUpload() {
   // Approving and deleting are *capabilities*, not per-document-type upload
   // rights. `DOCUMENT_ROLE_PERMISSIONS` answers "who may upload a Psychological
   // Assessment" — using it as a delete authority handed the Delete button to the
-  // Psychologist, whose spec forbids deleting documents outright.
+  // Psychological Staff, whose spec forbids deleting documents outright.
   const canApprove = can('Documents', 'approve');
   const canDeleteDocuments = can('Documents', 'delete');
   const pendingDocs = documents.filter(d => d.status === 'Submitted' || d.status === 'Under Review');
@@ -1451,7 +1451,7 @@ export function DocumentUpload() {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           {/* Four tab labels overflow a phone; the list scrolls instead.
               Which tabs exist is the RBAC definition's answer, not a role check
-              here: the Psychologist holds Folders by Child / All Documents /
+              here: the Psychological Staff holds Folders by Child / All Documents /
               Access Requests and no global review queue. */}
           <TabsList className="max-w-full justify-start overflow-x-auto">
             {tabs.map((tab) => {
@@ -1465,7 +1465,7 @@ export function DocumentUpload() {
                 // The review queue needs the submenu *and* the capability. A
                 // stored per-account grant can hand a role the tab, but approval
                 // authority is what decides whether there is anything behind it —
-                // and the Psychologist is never granted global approval.
+                // and the Psychological Staff is never granted global approval.
                 if (!canApprove) return null;
                 return (
                   <TabsTrigger key={tab.key} value="pending" className="relative shrink-0">

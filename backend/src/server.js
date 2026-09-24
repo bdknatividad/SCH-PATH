@@ -1136,7 +1136,7 @@ async function runMigrations() {
     // must be ensured before the one that depends on it. Running these out of
     // order (or swallowing the resulting ER_BAD_FIELD_ERROR) is what produced
     // "Unknown column 'interventionTrackerId' in 'field list'" when a
-    // Psychologist verified a violation — violationController.review INSERTs
+    // Psychological Staff verified a violation — violationController.review INSERTs
     // into assessments with exactly that column.
     await ensureColumn('assessments', 'violationIds', 'JSON NULL', 'triggeredBy');
     await ensureColumn('assessments', 'interventionTrackerId', 'VARCHAR(40) NULL', 'violationIds');
@@ -1539,7 +1539,7 @@ async function runMigrations() {
     try { await pool.query(`UPDATE intervention_tracker SET status = 'In Progress' WHERE status = 'Pending'`); } catch (err) { console.warn('Migration warning (intervention_tracker status backfill):', err.message); }
     try { await pool.query(`ALTER TABLE intervention_tracker MODIFY COLUMN status ENUM('In Progress','Completed') NOT NULL DEFAULT 'In Progress'`); } catch (err) { console.warn('Migration warning (intervention_tracker status enum):', err.message); }
     // Every one of these columns is written by violationController.review when a
-    // Psychologist verifies a violation, so a missing one breaks verification
+    // Psychological Staff verifies a violation, so a missing one breaks verification
     // outright. psychosocialActivities is anchored AFTER scheduledAt, and
     // endDate AFTER startDate — each dependency is therefore ensured first.
     // These used to be plain ALTERs with an empty `catch`, which is how the

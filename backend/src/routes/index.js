@@ -66,7 +66,7 @@ const EDUCATION_ROLES = ['educator', 'centerhead', 'admin'];
  *
  * The store is one request that returns every table at once, so it was handing
  * every authenticated account the data behind modules it cannot open — a
- * Psychologist could read Court Records and Health straight out of the payload.
+ * Psychological Staff could read Court Records and Health straight out of the payload.
  * A resource listed here is emptied when the caller does not hold its module,
  * which is what the sidebar and the routes already enforce.
  *

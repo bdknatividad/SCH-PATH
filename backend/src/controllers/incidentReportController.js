@@ -3,7 +3,7 @@
  * @module controllers/incidentReportController
  * @description Digital version of Form 08 (Second Chance Home Incident Report).
  *              A Social Worker fills this out and saves it against a violation
- *              record; a Psychologist then reviews and verifies it, at which
+ *              record; a Psychological Staff then reviews and verifies it, at which
  *              point they can attach a Psycho-Social Activity intervention and
  *              a schedule date.
  */
@@ -333,7 +333,7 @@ async function create(req, res, next) {
 
     const [rows] = await pool.query('SELECT * FROM incidentReports WHERE id = ?', [newId]);
 
-    // Form 08 is filed by a Social Worker and verified by a Psychologist, so
+    // Form 08 is filed by a Social Worker and verified by a Psychological Staff, so
     // the verifier is the one who needs to be told it is waiting. Until now the
     // only signal was a status column on a page nobody had a reason to open.
     try {
@@ -508,7 +508,7 @@ async function getByResidentId(req, res, next) {
 
 /**
  * POST /api/incident-reports/:id/verify
- * Psychologist verifies the report and (optionally) selects the intervention.
+ * Psychological Staff verifies the report and (optionally) selects the intervention.
  * Body: { interventionType, interventionScheduleDate, verifiedBy }
  */
 async function verify(req, res, next) {
@@ -538,7 +538,7 @@ async function verify(req, res, next) {
     // Verification schedules the intervention, so the people who carry it out
     // (the case owner and the resident's Houseparents) need to be told.
     try {
-      const verifier = verifiedBy || req.user?.username || 'Psychologist';
+      const verifier = verifiedBy || req.user?.username || 'Psychological Staff';
       const childName = (await notifications.residentName(rows[0].residentId)) || rows[0].residentId;
       const schedule = interventionScheduleDate
         ? ` Scheduled for ${String(interventionScheduleDate).replace('T', ' ')}.`

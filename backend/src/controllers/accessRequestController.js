@@ -78,7 +78,7 @@ async function canReviewRequest(user, request, scope = null) {
   if (String(request.requesterId) === String(user?.id)) return false;
   if (hasRole(user, 'centerhead', 'admin')) return true;
   // A module/tab request has no document to reason about; only the roles above
-  // may decide those. The Psychologist is the one historical exception, kept
+  // may decide those. The Psychological Staff is the one historical exception, kept
   // because those requests are addressed to that role by the module itself.
   if (!request.documentId) {
     return hasRole(user, 'psychologist') && request.targetRole === 'psychologist';
@@ -92,7 +92,7 @@ async function canReviewRequest(user, request, scope = null) {
   // already means "is responsible for this child", so a request for one of their
   // own residents is theirs to decide. A caller with no caseload boundary can
   // read across the whole facility, so reading there is not authority — it needs
-  // the `approve` capability. Without this the Psychologist could approve a
+  // the `approve` capability. Without this the Psychological Staff could approve a
   // request for any document it happened to be able to read, which is the global
   // approval authority its specification withholds.
   //

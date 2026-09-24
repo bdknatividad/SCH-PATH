@@ -1,5 +1,5 @@
 
-// Psychologist forms for download
+// Psychological Staff forms for download
 const PSYCH_FORMS_DATA = [
   { name: 'CANS Assessment',            description: 'Child & Adolescent Needs & Strengths assessment tool',   file: '/forms/psych/cans.pdf' },
   { name: 'MBTI Personality Test',      description: 'Myers-Briggs Type Indicator personality assessment',     file: '/forms/psych/mbti.pdf' },
@@ -703,7 +703,7 @@ export function Assessments() {
           <div className="mt-3 border border-purple-200 rounded-2xl overflow-hidden bg-white shadow-sm">
             <div className="bg-purple-600 px-5 py-3 flex items-center gap-2">
               <span className="text-white text-lg">📋</span>
-              <h3 className="font-bold text-white">Psychologist Forms</h3>
+              <h3 className="font-bold text-white">Psychological Staff Forms</h3>
               <span className="text-purple-200 text-xs ml-1">— Click to download</span>
             </div>
             <div className="divide-y divide-gray-100">

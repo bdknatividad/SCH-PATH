@@ -125,7 +125,7 @@ export interface Activity {
   participants?: string[];
   selectedResidentIds: string[];
   recommendedResidentIds?: string[];    // Children recommended for this activity (from violations)
-  notRecommendedResidentIds?: string[]; // Children restricted by Psychologist
+  notRecommendedResidentIds?: string[]; // Children restricted by Psychological Staff
   notRecommendedReasons?: Record<string, string>; // childId → reason
   violationIds?: string[];              // Violation IDs that triggered recommendations
 }
@@ -921,7 +921,7 @@ export function DataProvider({ children: childrenProp }: { children: ReactNode }
       }
       // Auto-created alerts belong to whichever roles were addressed, which is
       // not necessarily this user — a Social Worker logging a violation gets an
-      // alert addressed to the Psychologist. Pushing the response array
+      // alert addressed to the Psychological Staff. Pushing the response array
       // straight into local state put another role's alert in this user's list;
       // re-reading the server's scoped list is both simpler and correct.
       if (Array.isArray(saved.autoCreatedAlerts) && saved.autoCreatedAlerts.length > 0) {

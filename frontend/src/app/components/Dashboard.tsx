@@ -376,7 +376,7 @@ interface PsychologistDashboardProps {
 }
 
 /**
- * The Psychologist's landing page.
+ * The Psychological Staff's landing page.
  *
  * The role's specification names six widgets and says to remove everything
  * else, so the role gets its own page rather than the shared dashboard with
@@ -387,12 +387,12 @@ interface PsychologistDashboardProps {
  * Two of the six names are defined here, because the specification names the
  * widgets without defining them:
  *
- *  - **Pending Reviews** is the Psychologist's verification queue — violations
+ *  - **Pending Reviews** is the Psychological Staff's verification queue — violations
  *    logged against a resident that no one has reviewed yet. It is the same set
  *    the Violations module's "For Verification" tab lists.
  *  - **Assigned Cases** is every resident with an open item in that queue: an
- *    assessment the Psychologist owns, or a violation to verify. There is no
- *    Psychologist assignment table in the schema — `residentAssignments` only
+ *    assessment the Psychological Staff owns, or a violation to verify. There is no
+ *    Psychological Staff assignment table in the schema — `residentAssignments` only
  *    carries `houseparent` rows — so the queue is the only assignment signal the
  *    system actually has. If a real caseload model is added later, this is the
  *    one derivation to replace.
@@ -411,7 +411,7 @@ function PsychologistDashboard({
   const dayOf = (assessment: Assessment) => String(assessment.date || '').slice(0, 10);
 
   /**
-   * Is this assessment the Psychologist's? The `assessor` column is free text,
+   * Is this assessment the Psychological Staff's? The `assessor` column is free text,
    * so it is matched against the signed-in user first and only then against the
    * role — an assessment assigned to a named colleague must not appear here.
    */
@@ -501,7 +501,7 @@ function PsychologistDashboard({
   return (
     <div className="space-y-6">
       <div className="bg-[#2F3E46] p-6 rounded-xl shadow-md border-b-4 border-[#FFD100]">
-        <h2 className="text-2xl font-bold mb-1 text-white">Psychologist Dashboard</h2>
+        <h2 className="text-2xl font-bold mb-1 text-white">Psychological Staff Dashboard</h2>
         <p className="text-gray-300">
           Welcome back, <span className="font-bold text-[#FFD100] uppercase">{displayRole}</span>
           <span className="text-gray-400 text-sm ml-2">— assessments, verification & assigned cases</span>
@@ -1482,7 +1482,7 @@ export function Dashboard() {
     nurse:        'NURSE',
     socialworker: 'SOCIAL WORKER',
     educator:     'EDUCATOR',
-    psychologist: 'PSYCHOLOGIST',
+    psychologist: 'PSYCHOLOGICAL STAFF',
     houseparent: 'HOUSEPARENT',
   };
 
@@ -1686,7 +1686,7 @@ export function Dashboard() {
   const roleTitle =
     userRole === 'centerhead' || userRole === 'admin' ? 'Center Head Dashboard' :
     userRole === 'socialworker' ? 'Social Worker Dashboard' :
-    userRole === 'psychologist' ? 'Psychologist Dashboard' :
+    userRole === 'psychologist' ? 'Psychological Staff Dashboard' :
     userRole === 'nurse' ? 'Nurse Dashboard' :
     userRole === 'educator' ? 'Educator Dashboard' :
     userRole === 'houseparent' ? 'Houseparent Dashboard' : 'Dashboard';
@@ -1724,7 +1724,7 @@ export function Dashboard() {
       : true)
   );
 
-  // The Psychologist's specification names its widgets and says to remove the
+  // The Psychological Staff's specification names its widgets and says to remove the
   // rest, so the role leaves the shared dashboard here. Every hook above has
   // already run, so returning early is safe.
   if (userRole === 'psychologist') {

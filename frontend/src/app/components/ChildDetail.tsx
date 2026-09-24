@@ -227,7 +227,7 @@ export function ChildDetail({ id: idProp, onBack }: ChildDetailProps = {}) {
    *
    * This replaced a hand-written list with an all-tabs fallback: a role whose
    * `childRecordTabs` was never set saw every tab, including ones its matrix
-   * withholds — a Psychologist was shown the Education tab, which its
+   * withholds — a Psychological Staff was shown the Education tab, which its
    * specification does not grant.
    */
   const rbacChildRecordTabs = useSubModuleTabs('Child Records');

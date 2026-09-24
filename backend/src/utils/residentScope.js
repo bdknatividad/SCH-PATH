@@ -21,7 +21,7 @@ const { normalizeRole } = require('./authorization');
  * policy choice: `residentAssignments.assignmentType` only ever holds
  * `houseparent` and `household`, and `children` has no per-staff column, so
  * Houseparent is the only role for which "my assigned child" is expressible.
- * Psychologists, Educators and Nurses have no per-child assignment anywhere in
+ * Psychological Staffs, Educators and Nurses have no per-child assignment anywhere in
  * the schema — their scope is expressed by document type/category and by
  * responsibility instead. Applying a caseload filter to them would lock them out
  * of everything.

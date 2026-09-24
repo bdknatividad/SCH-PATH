@@ -730,7 +730,7 @@ async function create(req, res, next) {
       await recordRevision(rows[0], { action: 'Submitted', actor: req.user, status: uploadStatus });
     }
 
-    // Auto-notify Social Workers when Psychologist uploads a Psychological Assessment
+    // Auto-notify Social Workers when Psychological Staff uploads a Psychological Assessment
     if (docTitle === 'Psychological Assessment' && uploaderRole === 'psychologist' && data.residentId) {
       try {
         const [childRows] = await pool.query('SELECT name FROM children WHERE id = ?', [data.residentId]);
@@ -739,7 +739,7 @@ async function create(req, res, next) {
           type: 'Assessment Completed',
           residentId: data.residentId,
           title: `Psychological Assessment Uploaded - ${childName}`,
-          message: `Psychologist has uploaded the Psychological Assessment for ${childName}. The document is pending review and approval.`,
+          message: `Psychological Staff has uploaded the Psychological Assessment for ${childName}. The document is pending review and approval.`,
           priority: 'Medium',
           actionRequired: 'Review and approve Psychological Assessment document',
           relatedRecordType: 'documents',

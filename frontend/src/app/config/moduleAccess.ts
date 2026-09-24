@@ -155,8 +155,8 @@ export const DEFAULT_SUBMODULE_ACCESS: Record<string, Record<string, string[]>> 
  *
  * The Quarterly Progress Report has no module of its own — it is a card inside
  * the Reports module. Roles that may be assigned a Developmental Aspect
- * therefore hold 'Reports'; the Psychologist does not, because its
- * specification grants no Reports access. A Psychologist who needs to work a
+ * therefore hold 'Reports'; the Psychological Staff does not, because its
+ * specification grants no Reports access. A Psychological Staff who needs to work a
  * QPR section is a workflow decision, not a default to be guessed at here.
  *
  * The module gate controls the *page*, not the data. What an assignee can

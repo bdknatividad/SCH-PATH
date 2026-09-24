@@ -59,7 +59,7 @@ router.post('/', authorize('socialworker', 'centerhead'), asyncHandler(violation
 
 /**
  * POST /api/violations/:id/review
- * Psychologist reviews a violation — confirm/adjust severity, change status to Reviewed
+ * Psychological Staff reviews a violation — confirm/adjust severity, change status to Reviewed
  */
 router.post('/:id/review', authorize('psychologist', 'centerhead'), asyncHandler(violationController.review));
 

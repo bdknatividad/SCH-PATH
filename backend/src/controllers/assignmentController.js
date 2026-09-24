@@ -16,7 +16,7 @@ async function canAccessResident(user, residentId) {
   if (canManage(user)) return true;
 
   // Houseparents are the only role with a resident-level caseload boundary.
-  // Other staff roles (Nurse, Educator, Psychologist, etc.) use their module
+  // Other staff roles (Nurse, Educator, Psychological Staff, etc.) use their module
   // permissions rather than a houseparent assignment to read resident records.
   if (roleOf(user) !== 'houseparent') return true;
 

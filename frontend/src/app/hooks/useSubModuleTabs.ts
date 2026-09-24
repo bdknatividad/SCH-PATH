@@ -5,7 +5,7 @@
  * may open each one. Components used to decide for themselves with hardcoded
  * role checks (`isCenterHead ? [...] : [...]`), which was wrong in both
  * directions at once: it hid "Manage Violations & Interventions" from a
- * Psychologist the matrix grants it to, and it offered the Documents "Pending
+ * Psychological Staff the matrix grants it to, and it offered the Documents "Pending
  * Review" tab to roles with no approval authority. Asking the definition means
  * the strip and the enforced matrix cannot disagree.
  *

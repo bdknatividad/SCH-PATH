@@ -353,7 +353,7 @@ async function createStaffAlert({
  * Turn a verified violation's intervention plan into staff notifications.
  *
  * Recipients follow who can actually discharge the requirement:
- *   - psychosocial activity / psychological checkup → Psychologist
+ *   - psychosocial activity / psychological checkup → Psychological Staff
  *   - case conference                               → Social Worker
  *
  * The case conference used to be addressed to `psychologist`, which told that

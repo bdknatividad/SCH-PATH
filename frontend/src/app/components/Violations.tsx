@@ -184,7 +184,7 @@ export function Violations() {
   // The strip used to be hand-written — `[list, interventions, verification]`
   // plus a `manage` tab gated on `isCenterHead`, plus a separate hardcoded pair
   // for the Houseparent. That withheld "Manage Violations & Interventions" from
-  // the Social Worker and the Psychologist even though the guide's own write
+  // the Social Worker and the Psychological Staff even though the guide's own write
   // routes authorize both, and it meant removing a role's access needed a UI
   // edit as well as a matrix edit. The Houseparent branch was worse: it listed
   // only Intervention Tracker and Anecdotal Reports, so "Violation List" — which
@@ -279,7 +279,7 @@ export function Violations() {
     String(v.reportedBy || '').trim().toLowerCase() === String(user?.username || '').trim().toLowerCase()
   );
 
-  // Newly logged violations are the records awaiting Psychologist verification.
+  // Newly logged violations are the records awaiting Psychological Staff verification.
   // Form 08 is deliberately excluded from this queue because it is a post-intervention
   // report and only becomes available after the intervention is marked Done.
   const forVerificationList = violations
@@ -455,7 +455,7 @@ export function Violations() {
     }
   };
 
-  // Opens the digital Incident Report (read-only, with Verify for Psychologist/Center Head)
+  // Opens the digital Incident Report (read-only, with Verify for Psychological Staff/Center Head)
   // for an existing violation record.
   const openIncidentReportView = async (violation: Violation) => {
     // Form 08 is isolated to this exact violation/resident. It is available
@@ -692,7 +692,7 @@ export function Violations() {
           <p className="text-gray-600">Track resident infractions and behavioral incidents</p>
         </div>
         {/* Logging an incident is a `create` capability on Violations. The
-            Psychologist's specification withholds it: they verify incidents,
+            Psychological Staff's specification withholds it: they verify incidents,
             they do not raise them. The backend already refuses the call, so the
             button is removed rather than left to fail. */}
         {can('Violations', 'create') && (
@@ -751,7 +751,7 @@ export function Violations() {
 
       {/* ── MANAGE VIOLATIONS TAB ── */}
       {/* Rendered whenever the tab is reachable, not on a role name: the guide's
-          write routes authorize the Social Worker and the Psychologist too, so a
+          write routes authorize the Social Worker and the Psychological Staff too, so a
           tab that appeared for the Center Head alone was hiding a feature those
           roles already had. */}
       {activeTab === 'manage' && (
@@ -978,7 +978,7 @@ export function Violations() {
         </>
       )}
 
-      {/* For Verification Tab — Violations awaiting Psychologist verification */}
+      {/* For Verification Tab — Violations awaiting Psychological Staff verification */}
       {activeTab === 'verification' && (
         <div>
           <Card className="border border-gray-200 shadow-sm">
@@ -1008,7 +1008,7 @@ export function Violations() {
             {forVerificationList.length === 0 ? (
               <CardContent className="p-12 text-center">
                 <AlertTriangle className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-                <p className="text-gray-500">No violations awaiting Psychologist verification.</p>
+                <p className="text-gray-500">No violations awaiting Psychological Staff verification.</p>
               </CardContent>
             ) : (
               <div className="overflow-x-auto">
@@ -1052,7 +1052,7 @@ export function Violations() {
               </div>
             )}
             <div className="px-4 py-2 bg-gray-50 border-t border-gray-200">
-              <p className="text-xs text-gray-400">Showing {forVerificationList.length} violation{forVerificationList.length !== 1 ? 's' : ''} awaiting Psychologist verification</p>
+              <p className="text-xs text-gray-400">Showing {forVerificationList.length} violation{forVerificationList.length !== 1 ? 's' : ''} awaiting Psychological Staff verification</p>
             </div>
           </Card>
         </div>
@@ -1247,7 +1247,7 @@ export function Violations() {
                   )}
                 </div>
 
-                {/* Review Notes captured during Psychologist verification. Shown
+                {/* Review Notes captured during Psychological Staff verification. Shown
                     here so the notes remain readable after the dialog closes and
                     the page is reloaded — they are persisted on the violation
                     itself (actionTaken / reviewedBy). */}
