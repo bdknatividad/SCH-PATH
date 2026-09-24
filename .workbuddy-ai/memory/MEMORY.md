@@ -155,3 +155,12 @@ creates the full houseparent × child cross product, so accepting it would hand
 every Houseparent every resident. `/violations` and `/phaseProgress` are
 deliberately **facility-wide** for Houseparents, so `tests/caseload-scope.test.js`
 no longer asserts those two controllers consult the scope.
+
+**That seed fix is forward-only.** `seedResidentAssignments` keys its
+idempotency check on `(userId, residentId)` and ignores `assignmentType`, so on
+an already-seeded database every pair is present (with the old value) and no
+corrected row is inserted — the change only lands on a fresh seed. The live demo
+still shows seeded Houseparents an empty caseload until those rows are rewritten,
+which is a deliberate access change awaiting a decision. Note also that the seed
+never writes `admissions.houseparentOnDuty`, so the legacy fallback in
+`residentScope.js` does not cover seeded Houseparents.
