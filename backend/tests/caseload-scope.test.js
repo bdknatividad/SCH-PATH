@@ -19,15 +19,35 @@
  * directions — houseparents see nothing where they should see their caseload,
  * and everything where they should see only their caseload.
  *
- * The three tests marked `skip` below assert the behaviour that should hold.
- * They are skipped, not deleted, because each needs a decision that is a matter
- * of policy rather than of code:
+ * The tests marked `skip` below each need a decision that is a matter of policy
+ * rather than of code:
  *
- *   1. Should the eleven seeded Houseparent accounts each see every resident?
- *      The seed creates the full houseparent x child cross product, so widening
- *      the reader to accept `'household'` grants all of them everything.
- *   2. Should a Houseparent's `/violations` and `/phaseProgress` be limited to
- *      their caseload? Narrowing changes what staff can see day to day.
+ *   1. Should a Houseparent's `/violations` and `/phaseProgress` be limited to
+ *      their caseload? They are not scoped at all today, so a Houseparent with
+ *      an empty caseload reads every resident's incidents. Narrowing changes
+ *      what staff can see day to day.
+ *
+ *   2. The `assignmentType` vocabulary. **Read this before "fixing" the seed.**
+ *      `seedDatabase` inserts `'household'`; every reader requires
+ *      `'houseparent'`. There are two readings and they lead to opposite code:
+ *
+ *      (a) Typo. The seed's own log line says "Created N resident assignments
+ *          (houseparent -> child)", so it meant to write `'houseparent'` and
+ *          the rows it creates are inert by accident.
+ *          Fix: make the seed write `'houseparent'`.
+ *
+ *      (b) Deliberate. `assignmentController` documents `'household'` as "the
+ *          shared whole-facility placeholder ... every Houseparent has one, so
+ *          notifying on them would be pure noise". The seed builds the full
+ *          houseparent x child cross product, which is what such a placeholder
+ *          looks like, and no reader accepts the value.
+ *          Fix: none — a placeholder is meant to grant nothing.
+ *
+ *      The readings are not equivalent in effect. Under (a) every seeded
+ *      Houseparent gains every resident, because the cross product becomes
+ *      live. That is why this is skipped rather than fixed: `'household'` is
+ *      produced in exactly one place (the seed) and read in none, so the code
+ *      cannot settle it — only the intended access model can.
  *
  * Un-skip them once those are answered; they are written to pass against the
  * corrected code.
@@ -40,7 +60,6 @@ const path = require('node:path');
 const read = (p) => fs.readFileSync(path.join(__dirname, '..', p), 'utf8');
 
 const RESIDENT_SCOPE = read('src/utils/residentScope.js');
-const ASSIGNMENT = read('src/controllers/assignmentController.js');
 const SEED = read('src/scripts/seedDatabase.js');
 
 const NEEDS_POLICY =
@@ -56,10 +75,10 @@ test('the scope reader accepts the assignment type its writer is documented to u
 });
 
 test('the seed writes the same assignment type the readers require', { skip: NEEDS_POLICY }, () => {
-  // The seed's own log line says "resident assignments (houseparent -> child)",
-  // but the INSERT hard-codes `'household'`. Every reader filters on
-  // `'houseparent'`, so the rows it creates are inert: the assignment exists in
-  // the table and grants nothing.
+  // This asserts reading (a) in the header — the typo interpretation. If reading
+  // (b) turns out to be correct, delete this test rather than making it pass:
+  // the point of (b) is that the seed is supposed to write a value no reader
+  // accepts.
   const insert = SEED.match(/INSERT INTO residentAssignments[\s\S]{0,400}?\)`/);
   assert.ok(insert, 'expected the residentAssignments seed INSERT');
 
@@ -88,16 +107,30 @@ test('caseload scoping is applied to every resident-scoped module, not just some
   }
 });
 
-test('the assignment type vocabulary is one value, not two', { skip: NEEDS_POLICY }, () => {
-  // `assignmentController` reads and writes `'houseparent'`. If a second
-  // spelling is legitimate, every reader has to agree on it in one place.
-  const spellings = new Set();
-  for (const m of ASSIGNMENT.matchAll(/assignmentType[^\n]*?'(\w+)'/g)) spellings.add(m[1]);
-  for (const m of RESIDENT_SCOPE.matchAll(/assignmentType[^\n]*?'(\w+)'/g)) spellings.add(m[1]);
+test('every reader that grants caseload scope agrees on one assignment type', () => {
+  // True under both readings in the header, which is why this one is not skipped.
+  // The placeholder value may or may not be deliberate, but whichever value
+  // grants scope has to be the same one everywhere — otherwise a Houseparent's
+  // caseload would depend on which module asked the question. In particular no
+  // reader may grant scope on `'household'`, because the seed gives every
+  // Houseparent one of those: accepting it would hand all of them every resident.
+  const granters = {
+    'utils/residentScope.js': read('src/utils/residentScope.js'),
+    'controllers/assignmentController.js': read('src/controllers/assignmentController.js'),
+    'services/notificationService.js': read('src/services/notificationService.js'),
+  };
 
-  assert.ok(
-    spellings.size <= 1,
-    `assignmentType is compared against ${[...spellings].join(' and ')}; ` +
-      'a value that only some readers accept is a silent no-op',
-  );
+  for (const [name, source] of Object.entries(granters)) {
+    assert.doesNotMatch(
+      source,
+      /assignmentType[^\n]*'household'/i,
+      `${name} grants caseload scope on 'household', the whole-facility ` +
+        'placeholder every Houseparent holds — that exposes every resident',
+    );
+    assert.match(
+      source,
+      /assignmentType[^\n]*'houseparent'/i,
+      `${name} must grant caseload scope on the value the writers actually produce`,
+    );
+  }
 });
