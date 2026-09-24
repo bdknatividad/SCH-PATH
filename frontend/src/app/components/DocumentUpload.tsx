@@ -21,6 +21,7 @@ import { formatShortDate, formatShortDateTime } from '@/utils/dateFormatter';
 import { DOCUMENT_FOLDERS, folderForDocument } from '@/utils/documentCategory';
 import { admissionPeriodKeyFor, admissionPeriodsFor } from '@/utils/admissionPeriods';
 import { downloadDocumentFile } from '@/utils/documentFile';
+import { isPendingReview } from '@/utils/pendingDocuments';
 import { describeError, request, apiUrl, authHeaders } from '@/services/api';
 
 /**
@@ -1340,7 +1341,22 @@ export function DocumentUpload() {
   // Psychological Staff, whose spec forbids deleting documents outright.
   const canApprove = can('Documents', 'approve');
   const canDeleteDocuments = can('Documents', 'delete');
-  const pendingDocs = documents.filter(d => d.status === 'Submitted' || d.status === 'Under Review');
+  const pendingDocs = documents.filter(isPendingReview);
+
+  /**
+   * The review queue as the Pending Review tab actually lists it.
+   *
+   * The tab applies the module's resident and resident-status filters, so the
+   * badge and the "N documents awaiting your review" alert have to apply them
+   * too. Counting the unfiltered set made the badge promise more than the tab
+   * showed whenever a filter was on — the same queue, two different numbers on
+   * the same screen. With the default filters the two are identical, so this only
+   * changes the case that was wrong.
+   */
+  const pendingApprovalQueue = pendingDocs.filter(d =>
+    (filterResident === 'all' || d.residentId === filterResident)
+    && matchesResidentStatusForDocument(d.residentId)
+  );
 
   // The module's tabs, as the RBAC definition declares them. `?tab=` remains a
   // deep link so a notification can open the right one directly, and a link to a
@@ -1489,10 +1505,10 @@ export function DocumentUpload() {
       </div>
       
       {/* Pending review alert for Center Head */}
-      {canApprove && pendingDocs.length > 0 && (
+      {canApprove && pendingApprovalQueue.length > 0 && (
         <div className="flex items-center gap-3 p-3 rounded-xl bg-blue-50 border border-blue-200 text-sm text-blue-800">
           <CheckCircle className="w-4 h-4 shrink-0 text-blue-500" />
-          <span><strong>{pendingDocs.length} document{pendingDocs.length > 1 ? 's' : ''}</strong> awaiting your review and approval.</span>
+          <span><strong>{pendingApprovalQueue.length} document{pendingApprovalQueue.length > 1 ? 's' : ''}</strong> awaiting your review and approval.</span>
         </div>
       )}
 
@@ -1524,8 +1540,8 @@ export function DocumentUpload() {
                 return (
                   <TabsTrigger key={tab.key} value="pending" className="relative shrink-0">
                     {tab.label}
-                    {pendingDocs.length > 0 && (
-                      <span className="ml-1.5 bg-blue-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">{pendingDocs.length}</span>
+                    {pendingApprovalQueue.length > 0 && (
+                      <span className="ml-1.5 bg-blue-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">{pendingApprovalQueue.length}</span>
                     )}
                   </TabsTrigger>
                 );
@@ -1945,10 +1961,7 @@ export function DocumentUpload() {
         {canApprove && (
           <TabsContent value="pending" className="mt-4">
             <DocumentList
-              docs={pendingDocs.filter(d =>
-                (filterResident === 'all' || d.residentId === filterResident)
-                && matchesResidentStatusForDocument(d.residentId)
-              )}
+              docs={pendingApprovalQueue}
               children={children}
               canApprove={canApprove}
               onApprove={handleApprove}

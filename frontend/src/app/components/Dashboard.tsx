@@ -16,6 +16,7 @@ import { useAuth } from '../state/AuthContext';
 import { request } from '@/services/api';
 import { canOpenModule } from '@/app/config/moduleAccess';
 import { formatShortDate } from '@/utils/dateFormatter';
+import { pendingReviewQueue } from '@/utils/pendingDocuments';
 
 // ── FORM CATALOGUE ──────────────────────────────────────────────────────────
 interface FormEntry {
@@ -1707,22 +1708,19 @@ export function Dashboard() {
       : String(a.facilitators || '').toLowerCase().includes(user?.username?.toLowerCase() || ''))
   );
 
-  // ── Pending doc approvals (socialworker) ─────────────────────────
+  // ── Pending doc approvals ────────────────────────────────────────
   // The Nurse branch was removed along with the role's shared-dashboard section:
   // a Nurse holds no document approval authority, so a list of documents
   // "awaiting your review" could never have been acted on. The Nurse's own page
   // reports health document *status* instead.
   //
-  // Both pre-decision statuses count. `Submitted` is a document waiting for a
-  // first look and `Under Review` is one a reviewer has opened but not decided —
-  // `GET /documents/pending` and the Documents module both treat the two as
-  // pending, so counting only `Submitted` made this tile under-report.
-  const pendingApprovals = documents.filter(d =>
-    (d.status === 'Submitted' || d.status === 'Under Review') &&
-    (userRole === 'socialworker'
-      ? !['Psychological Testing', 'Discernment Assessment', 'Mental Health Report'].includes(d.title || '')
-      : true)
-  );
+  // Both pre-decision statuses count, and the scope is the Documents module's
+  // default view — pending files for residents who are still active. That is what
+  // makes this tile and the module's "For Review" badge read the same number; the
+  // rule itself lives in one place now, because a second copy is how the two came
+  // apart. Which documents a role may see is the API's answer, not this tile's:
+  // the store load already filters the list through `canReadDocument`.
+  const pendingApprovals = pendingReviewQueue(documents, children);
 
   // The Psychological Staff's specification names its widgets and says to remove the
   // rest, so the role leaves the shared dashboard here. Every hook above has
