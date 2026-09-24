@@ -109,6 +109,7 @@ import 'react-pdf/dist/Page/TextLayer.css';
 
 import { useData } from '../state/DataContext';
 import { useAuth } from '../state/AuthContext';
+import { usePermissions } from '@/app/hooks/usePermissions';
 import { describeError, request } from '@/services/api';
 import { systemDialog } from '@/app/components/SystemDialog';
 import { formatPHDate } from '@/utils/dateFormatter';
@@ -1679,6 +1680,11 @@ export function ChildRecords() {
 
   const { user } =
     useAuth();
+
+  // Creating a resident is a `create` capability on Child Records. A role the
+  // definition withholds it from — the Psychological Staff, for one — must not be
+  // offered the button; the API refuses the call either way.
+  const { can } = usePermissions();
 
   const [
     searchTerm,
@@ -3958,7 +3964,7 @@ export function ChildRecords() {
           </p>
         </div>
 
-        {!isFormOpen && (
+        {!isFormOpen && can('Child Records', 'create') && (
         <Button
           style={{
             backgroundColor:

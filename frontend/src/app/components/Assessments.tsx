@@ -78,7 +78,7 @@ export function Assessments() {
     violations,
   } = useData();
   const { user } = useAuth();
-  const { canOpenModule } = usePermissions();
+  const { canOpenModule, can } = usePermissions();
   const isHouseparent = user?.role?.toLowerCase() === 'houseparent';
   /**
    * The resident names below link to `/children/:id`, which is guarded by the
@@ -444,7 +444,7 @@ export function Assessments() {
           <p className="text-sm text-gray-500">Manage resident assessments</p>
         </div>
 
-        {!isHouseparent && (
+        {can('Assessments', 'create') && (
           <Dialog open={isDialogOpen} onOpenChange={(open) => { if (!open) resetForm(); else setIsDialogOpen(true); }}>
             <DialogTrigger asChild>
               <Button
@@ -675,15 +675,21 @@ export function Assessments() {
         )}
       </div>
 
-      {/* Houseparent read-only notice.  Keep the existing assessment UI for
-          other roles; HPs may only inspect assessments that belong to their
-          assigned residents. */}
-      {isHouseparent && (
+      {/* Read-only notice. Shown to every role the definition withholds
+          `create` from — the Houseparent (who also sees only their assigned
+          residents) and the Social Worker, whose spec makes Assessments
+          view-only. A role test here would have to be revisited every time the
+          definition changes; the capability is the definition's own answer. */}
+      {!can('Assessments', 'create') && (
         <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 flex items-start gap-3">
           <Eye className="w-5 h-5 text-blue-600 mt-0.5 shrink-0" />
           <div>
             <p className="font-bold text-blue-900 text-sm">View-only access</p>
-            <p className="text-xs text-blue-700 mt-0.5">You can view assessments for your assigned residents only. Scheduling, editing, completing, and deleting assessments are not available.</p>
+            <p className="text-xs text-blue-700 mt-0.5">
+              {isHouseparent
+                ? 'You can view assessments for your assigned residents only. Scheduling, editing, completing, and deleting assessments are not available.'
+                : 'You can view assessments. Scheduling, editing, completing and deleting them are not available to your role.'}
+            </p>
           </div>
         </div>
       )}
@@ -901,7 +907,7 @@ export function Assessments() {
                             >
                               <Eye size={14} className="text-[#FFD100]" /> View
                             </Button>
-                            {!isHouseparent && (
+                            {can('Assessments', 'edit') && (
                               <>
                                 <Button
                                   variant="ghost" size="sm"
@@ -919,14 +925,16 @@ export function Assessments() {
                                     <CheckCircle2 size={14} /> Mark Complete
                                   </Button>
                                 )}
-                                <Button
-                                  variant="ghost" size="sm"
-                                  className="text-red-400 hover:text-red-300 hover:bg-red-500/10 gap-1.5 justify-start"
-                                  onClick={() => { setAssessmentToDelete(item); setIsDeleteDialogOpen(true); }}
-                                >
-                                  <Trash2 size={14} /> Delete
-                                </Button>
                               </>
+                            )}
+                            {can('Assessments', 'delete') && (
+                              <Button
+                                variant="ghost" size="sm"
+                                className="text-red-400 hover:text-red-300 hover:bg-red-500/10 gap-1.5 justify-start"
+                                onClick={() => { setAssessmentToDelete(item); setIsDeleteDialogOpen(true); }}
+                              >
+                                <Trash2 size={14} /> Delete
+                              </Button>
                             )}
                           </div>
                         </div>

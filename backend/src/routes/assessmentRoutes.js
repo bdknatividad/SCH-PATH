@@ -60,29 +60,29 @@ router.get('/:id', inAssessments, asyncHandler(assessmentController.getById));
 /**
  * POST /api/assessments
  * Create new assessment
- * Houseparents have view-only access to assessments.
+ * Houseparents and Social Workers have view-only access to assessments.
  */
-router.post('/', inAssessments, authorize('centerhead', 'admin', 'socialworker', 'psychologist', 'educator'), asyncHandler(assessmentController.create));
+router.post('/', inAssessments, authorize('centerhead', 'admin', 'psychologist', 'educator'), asyncHandler(assessmentController.create));
 
 /**
  * PUT /api/assessments/:id
  * Update assessment
- * Houseparents have view-only access to assessments.
+ * Houseparents and Social Workers have view-only access to assessments.
  */
-router.put('/:id', inAssessments, authorize('centerhead', 'admin', 'socialworker', 'psychologist', 'educator'), asyncHandler(assessmentController.update));
+router.put('/:id', inAssessments, authorize('centerhead', 'admin', 'psychologist', 'educator'), asyncHandler(assessmentController.update));
 
 /**
  * POST /api/assessments/:id/complete
  * Mark assessment as completed
- * Houseparents have view-only access to assessments.
+ * Houseparents and Social Workers have view-only access to assessments.
  */
-router.post('/:id/complete', inAssessments, authorize('centerhead', 'admin', 'socialworker', 'psychologist', 'educator'), asyncHandler(assessmentController.complete));
+router.post('/:id/complete', inAssessments, authorize('centerhead', 'admin', 'psychologist', 'educator'), asyncHandler(assessmentController.complete));
 
 /**
  * DELETE /api/assessments/:id
  * Delete assessment
- * Houseparents have view-only access to assessments.
+ * Houseparents and Social Workers have view-only access to assessments.
  */
-router.delete('/:id', inAssessments, authorize('centerhead', 'admin', 'socialworker', 'psychologist', 'educator'), asyncHandler(assessmentController.delete));
+router.delete('/:id', inAssessments, authorize('centerhead', 'admin', 'psychologist', 'educator'), asyncHandler(assessmentController.delete));
 
 module.exports = router;

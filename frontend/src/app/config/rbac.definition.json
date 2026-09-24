@@ -279,16 +279,12 @@
         ],
         "Activities": [
           "view",
-          "create",
           "edit",
           "delete",
           "export"
         ],
         "Assessments": [
           "view",
-          "create",
-          "edit",
-          "delete",
           "export"
         ],
         "Court Records": [

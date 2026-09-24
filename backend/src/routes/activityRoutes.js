@@ -8,7 +8,7 @@ const express = require('express');
 const router = express.Router();
 const activityController = require('../controllers/activityController');
 const { asyncHandler } = require('../middleware/errorHandler');
-const { authorizeNonHouseparent } = require('../middleware/auth');
+const { authorize, authorizeNonHouseparent } = require('../middleware/auth');
 
 /**
  * GET /api/activities
@@ -43,8 +43,12 @@ router.get('/:id', asyncHandler(activityController.getById));
 /**
  * POST /api/activities
  * Create new activity
+ *
+ * Scheduling is a `create` capability on Activities. The Social Worker holds
+ * view/edit/delete but not create — the role schedules nothing — so the write
+ * routes name their roles rather than excluding Houseparents alone.
  */
-router.post('/', authorizeNonHouseparent, asyncHandler(activityController.create));
+router.post('/', authorize('centerhead', 'admin', 'psychologist', 'educator'), asyncHandler(activityController.create));
 
 /**
  * PUT /api/activities/:id

@@ -226,6 +226,49 @@ test('the role rename reached the assessor value the system writes', () => {
   assert.match(constants, /assessor: 'Psychological Staff'/);
 });
 
+test('the Social Worker can neither add an activity nor add, edit or complete an assessment', () => {
+  // Requirement: view-only Assessments for the Social Worker, and no scheduling
+  // of Activities. The definition is one half of that rule and the route's role
+  // list is the other; a definition that says no while the route says yes is the
+  // exact drift this pins.
+  const definition = JSON.parse(read('backend/src/config/rbac.definition.json'));
+  const sw = definition.roles.socialworker.permissions;
+
+  for (const denied of ['create', 'edit', 'delete']) {
+    assert.ok(
+      !sw.Assessments.includes(denied),
+      `the Social Worker still holds "${denied}" on Assessments — the role is meant to be view-only`,
+    );
+  }
+  assert.ok(sw.Assessments.includes('view'), 'the Social Worker must still be able to read assessments');
+  assert.ok(
+    !sw.Activities.includes('create'),
+    'the Social Worker can still add an activity',
+  );
+
+  const assessmentRoutes = read('backend/src/routes/assessmentRoutes.js');
+  assert.doesNotMatch(
+    assessmentRoutes,
+    /authorize\([^)]*'socialworker'/,
+    'an assessment write route still authorizes the Social Worker',
+  );
+
+  const activityRoutes = read('backend/src/routes/activityRoutes.js');
+  assert.doesNotMatch(
+    activityRoutes,
+    /router\.post\('\/',\s*authorizeNonHouseparent/,
+    'creating an activity is still open to every role but the Houseparent',
+  );
+
+  // And the two surfaces follow the capability rather than a role test.
+  const assessments = read('frontend/src/app/components/Assessments.tsx');
+  assert.match(assessments, /can\('Assessments', 'create'\)/, 'the Schedule Assessment button is not capability-gated');
+  assert.match(assessments, /can\('Assessments', 'edit'\)/, 'the Edit / Mark Complete actions are not capability-gated');
+  assert.match(assessments, /can\('Assessments', 'delete'\)/, 'the Delete action is not capability-gated');
+  const activities = read('frontend/src/app/components/Activities.tsx');
+  assert.match(activities, /can\('Activities', 'create'\)/, 'the New Activity button is not capability-gated');
+});
+
 test('the storage-shaped module list still covers every module in the definition', () => {
   // `MODULE_ORDER` is the order `users.accessibleModules` is written in. It is
   // explicit (order is a storage decision) but must not silently miss a module

@@ -206,6 +206,18 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
   // affordance is checking/unchecking the Orientation Phase checklist; uploads,
   // phase transitions, demotion and discharge remain unavailable.
   const isHouseparent = user?.role?.toLowerCase() === 'houseparent';
+
+  /**
+   * Who may tick the Orientation Phase checklist. The requirement is explicit
+   * that the Psychological Staff must not be able to, and the rule belongs to
+   * the checklist rather than to one role: the Houseparent running the
+   * orientation owns it, and the Center Head / Admin oversee every phase. The
+   * API refuses the write for everyone else, so this only keeps the control from
+   * being offered where it would fail.
+   */
+  const ORIENTATION_PHASE_ROLES = ['houseparent', 'centerhead', 'admin'];
+  const normalizedRole = String(user?.role || '').toLowerCase().replace(/[\s_-]+/g, '');
+  const canToggleOrientationPhase = ORIENTATION_PHASE_ROLES.includes(normalizedRole);
   const uploadRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   const [history, setHistory] = useState<PhaseRecord[]>([]);
@@ -420,6 +432,9 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
   const handleToggleTask = async (task: string, done: boolean) => {
     // Houseparents may write checklist state only for Orientation Phase.
     if (isHouseparent && displayPhase !== 'Orientation Phase') return;
+    // And the Orientation Phase checklist itself is not open to every role — a
+    // Psychological Staff member toggling it must not even be attempted.
+    if (displayPhase === 'Orientation Phase' && !canToggleOrientationPhase) return;
 
     // Determine which phase record we're updating
     const targetRecord = viewingPhase ? displayRecord : currentRecord;
@@ -1607,7 +1622,10 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
                           checked={done}
                           onChange={(e) => handleToggleTask(task, e.target.checked)}
                           className="mt-0.5 accent-green-600"
-                          disabled={isHouseparent && displayPhase !== 'Orientation Phase'}
+                          disabled={
+                            (isHouseparent && displayPhase !== 'Orientation Phase') ||
+                            (displayPhase === 'Orientation Phase' && !canToggleOrientationPhase)
+                          }
                         />
                         <span className={done ? 'line-through text-gray-400' : 'text-gray-700'}>
                           {task} {isOptional && <span className="text-[10px] text-gray-400">(Optional)</span>}

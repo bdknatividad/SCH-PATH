@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useData, Activity } from '../state/DataContext';
 import { useAuth } from '../state/AuthContext';
+import { usePermissions } from '@/app/hooks/usePermissions';
 import { describeError } from '@/services/api';
 import { systemDialog } from '@/app/components/SystemDialog';
 import { formatShortDate } from '@/utils/dateFormatter';
@@ -46,6 +47,7 @@ export function Activities() {
   const { user } = useAuth();
   const isPsychologist = user?.role === 'psychologist' || user?.role === 'centerhead';
   const isHouseparent = user?.role?.toLowerCase() === 'houseparent';
+  const { can } = usePermissions();
   const liveResidents = useMemo(
     () => allChildren.map(c => ({ id: c.id, name: c.name, caseType: c.caseType, age: c.age })),
     [allChildren]
@@ -225,7 +227,10 @@ export function Activities() {
           <h2 className="text-2xl font-bold tracking-tight text-[#2F3E46]">Activities</h2>
           <p className="text-sm text-gray-500">Schedule and monitor community shelter activities</p>
         </div>
-        {!isHouseparent && (
+        {/* Scheduling is a `create` capability on Activities. The Social Worker
+            holds view/edit/delete but not create, so this button follows the
+            definition rather than a role test. */}
+        {can('Activities', 'create') && (
           <Dialog open={isDialogOpen} onOpenChange={(open) => { if(!open) resetForm(); setIsDialogOpen(open); }}>
             <DialogTrigger asChild>
               <Button 
@@ -514,7 +519,7 @@ export function Activities() {
                     <Eye size={16} className="text-[#FFD100]" /> View
                   </Button>
                   
-                  {!isHouseparent && (
+                  {can('Activities', 'edit') && (
                     <>
                   <Button 
                     variant="ghost" 

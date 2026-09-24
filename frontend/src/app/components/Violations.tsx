@@ -794,7 +794,7 @@ export function Violations() {
             });
             const verifiedResidents = new Set(verifiedFiltered.map((v) => v.residentId)).size;
             return (
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+              <div className={`grid grid-cols-1 gap-4 mb-4 ${can('Violations', 'verify') ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
                 <Card>
                   <CardContent className="p-4">
                     <div className="flex items-center gap-3">
@@ -806,17 +806,25 @@ export function Violations() {
                     </div>
                   </CardContent>
                 </Card>
-                <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => setActiveTab('verification')}>
-                  <CardContent className="p-4">
-                    <div className="flex items-center gap-3">
-                      <AlertTriangle className="w-8 h-8 text-orange-500" />
-                      <div>
-                        <p className="text-sm text-gray-500">For Verification</p>
-                        <p className="text-2xl font-bold">{verificationFiltered.length}</p>
+                {/* Verification is not a statistic every role may see. The
+                    requirement is explicit for the Houseparent, and the rule is
+                    about the capability rather than the role: the number and the
+                    queue behind it belong to whoever holds `verify`. The API
+                    withholds the rows themselves, so this only stops the tile
+                    from advertising a queue the caller cannot open. */}
+                {can('Violations', 'verify') && (
+                  <Card className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => setActiveTab('verification')}>
+                    <CardContent className="p-4">
+                      <div className="flex items-center gap-3">
+                        <AlertTriangle className="w-8 h-8 text-orange-500" />
+                        <div>
+                          <p className="text-sm text-gray-500">For Verification</p>
+                          <p className="text-2xl font-bold">{verificationFiltered.length}</p>
+                        </div>
                       </div>
-                    </div>
-                  </CardContent>
-                </Card>
+                    </CardContent>
+                  </Card>
+                )}
                 <Card>
                   <CardContent className="p-4">
                     <div className="flex items-center gap-3">
@@ -979,7 +987,7 @@ export function Violations() {
       )}
 
       {/* For Verification Tab — Violations awaiting Psychological Staff verification */}
-      {activeTab === 'verification' && (
+      {activeTab === 'verification' && can('Violations', 'verify') && (
         <div>
           <Card className="border border-gray-200 shadow-sm">
             <CardContent className="p-4">

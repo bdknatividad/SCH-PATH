@@ -54,6 +54,15 @@ router.get('/:id', canReadViolations, asyncHandler(violationController.getById))
  * grants it elsewhere — the incident logger is gone from the interface too,
  * because the Violations module now carries `view` alone. Leaving the role in
  * this list would have kept a direct-API path to a workflow with no screen.
+ *
+ * The role records what happens on the floor as an Anecdotal Report, which is
+ * the Houseparent module's own `create` grant — not as a violation.
+ *
+ * The "Log Incident" buttons are gated on this same `create` capability
+ * (`ChildDetail.tsx`, `Violations.tsx`) rather than on a role exclusion. They
+ * used to be hidden for the Houseparent by name and shown to everyone else,
+ * including the Nurse and the Educator, who hold no Violations module at all —
+ * so the button was visible to roles the route then refused.
  */
 router.post('/', authorize('socialworker', 'centerhead'), asyncHandler(violationController.create));
 

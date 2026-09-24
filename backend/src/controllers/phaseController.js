@@ -665,6 +665,23 @@ async function toggleTask(req, res, next) {
     // They cannot toggle requirements in any other phase, even if the
     // resident is in their assigned caseload.
     const normalizedRole = String(req.user?.role || '').toLowerCase().replace(/[\s_-]+/g, '');
+
+    // The Orientation Phase checklist belongs to the Houseparent who runs the
+    // resident's orientation. Every other staff role is refused it — the
+    // requirement names the Psychological Staff explicitly, but the rule is
+    // about the checklist, not about one role, so it is written as one.
+    //
+    // Enforced here rather than by the component's `disabled` attribute: a
+    // disabled checkbox is a hint, and this endpoint is reachable directly.
+    // Center Head and Admin keep it, since they oversee every phase.
+    const ORIENTATION_PHASE_ROLES = ['houseparent', 'centerhead', 'admin'];
+    if (rows[0].phaseName === 'Orientation Phase' && !ORIENTATION_PHASE_ROLES.includes(normalizedRole)) {
+      throw new ApiError(
+        403,
+        'Only the resident\'s Houseparent may complete the Orientation Phase checklist.',
+      );
+    }
+
     if (normalizedRole === 'houseparent') {
       if (rows[0].phaseName !== 'Orientation Phase') {
         throw new ApiError(403, 'Houseparents may only complete Orientation Phase checklist items.');

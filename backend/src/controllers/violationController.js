@@ -11,6 +11,8 @@ const { createController } = require('./baseController');
 const { mapRow } = require('../utils/helpers');
 const { RESOURCES } = require('../utils/constants');
 const { ApiError } = require('../middleware/errorHandler');
+const { snapshotFor } = require('../middleware/rbac');
+const { hasPermission } = require('../config/rbac');
 const {
   findGuideByViolationType,
   determineOffenseLevel,
@@ -20,6 +22,19 @@ const { canAccessResident } = require('./assignmentController');
 const { pointsForSeverity } = require('../utils/violationPoints');
 
 const baseController = createController('violations');
+
+/**
+ * Whether the caller may read the verification queue.
+ *
+ * Verification is a capability, not a role: the Social Worker, the Psychological
+ * Staff and the Center Head hold `Violations:verify`, and everybody else with the
+ * module (currently the Houseparent) holds `view` alone. Reading it off the
+ * access snapshot keeps the answer identical to the one the SPA gets from
+ * `usePermissions()`, so the tab and the API cannot disagree.
+ */
+function canVerify(req) {
+  return hasPermission(snapshotFor(req), 'Violations', 'verify');
+}
 
 /**
  * Get all violations, scoped for Houseparents to only their assigned
@@ -33,32 +48,57 @@ const baseController = createController('violations');
  * names, which would be ambiguous here: residentAssignments also has its
  * own status column, and an unprefixed "status = ?" against this two-table
  * join would fail or silently filter on the wrong table's column.
+ *
+ * The `Pending Review` rows are the verification queue, and they are withheld
+ * from any caller who does not hold `Violations:verify`. Hiding the "For
+ * Verification" tab and its tile in the SPA is not enough on its own: without
+ * this, a Houseparent could read the same queue straight off `GET /api/violations`
+ * — the route is gated on the module, which the role legitimately holds. The
+ * filter is applied here, in the query, so the withheld rows never leave the
+ * database rather than being trimmed out of the response afterwards.
  */
 async function getAll(req, res, next) {
   try {
     const isHouseparent = String(req.user?.role || '').toLowerCase() === 'houseparent';
+    const mayVerify = canVerify(req);
 
-    if (isHouseparent) {
-      const allowedFilters = new Set(RESOURCES.violations.columns);
-      const conditions = [];
-      const values = [req.user.id];
-      for (const [key, value] of Object.entries(req.query || {})) {
-        if (allowedFilters.has(key) && value !== undefined && value !== null && value !== '') {
-          conditions.push(`v.${key} = ?`);
-          values.push(value);
-        }
+    const allowedFilters = new Set(RESOURCES.violations.columns);
+    const conditions = [];
+    const values = isHouseparent ? [req.user.id] : [];
+
+    for (const [key, value] of Object.entries(req.query || {})) {
+      if (allowedFilters.has(key) && value !== undefined && value !== null && value !== '') {
+        conditions.push(`v.${key} = ?`);
+        values.push(value);
       }
-      const query = `
-        SELECT v.* FROM violations v
-        INNER JOIN residentAssignments ra ON ra.residentId = v.residentId
-        WHERE ra.userId = ? AND ra.status = 'Active'
-        ${conditions.length ? 'AND ' + conditions.join(' AND ') : ''}
-        ORDER BY v.${RESOURCES.violations.orderBy}`;
-      const [rows] = await pool.query(query, values);
-      return res.json({ success: true, data: rows.map(row => mapRow('violations', row)), count: rows.length });
     }
 
-    return baseController.getAll(req, res, next);
+    if (!mayVerify) {
+      conditions.push('v.status <> ?');
+      values.push('Pending Review');
+    }
+
+    // The Houseparent is scoped to its caseload; every other role reads the
+    // whole table, exactly as the base controller did.
+    const scope = isHouseparent
+      ? "INNER JOIN residentAssignments ra ON ra.residentId = v.residentId WHERE ra.userId = ? AND ra.status = 'Active'"
+      : '';
+    const where = conditions.length
+      ? `${isHouseparent ? 'AND' : 'WHERE'} ${conditions.join(' AND ')}`
+      : '';
+
+    const query = `
+      SELECT v.* FROM violations v
+      ${scope}
+      ${where}
+      ORDER BY v.${RESOURCES.violations.orderBy}`;
+
+    const [rows] = await pool.query(query, values);
+    return res.json({
+      success: true,
+      data: rows.map(row => mapRow('violations', row)),
+      count: rows.length,
+    });
   } catch (error) {
     next(error);
   }
@@ -67,13 +107,22 @@ async function getAll(req, res, next) {
 async function getById(req, res, next) {
   try {
     const { id } = req.params;
-    if (String(req.user?.role || '').toLowerCase() === 'houseparent') {
-      const [rows] = await pool.query('SELECT residentId FROM violations WHERE id = ?', [id]);
+    const isHouseparent = String(req.user?.role || '').toLowerCase() === 'houseparent';
+
+    if (isHouseparent || !canVerify(req)) {
+      const [rows] = await pool.query('SELECT residentId, status FROM violations WHERE id = ?', [id]);
       if (rows.length === 0) throw new ApiError(404, 'Violation not found');
-      if (!await canAccessResident(req.user, rows[0].residentId)) {
+      if (isHouseparent && !await canAccessResident(req.user, rows[0].residentId)) {
         throw new ApiError(403, 'You are not assigned to this resident');
       }
+      // Fetching one record by id is the other way round the list filter: the
+      // id is guessable from a notification or a shared link, so the same
+      // capability check has to stand in front of the single-record read.
+      if (!canVerify(req) && rows[0].status === 'Pending Review') {
+        throw new ApiError(403, 'This incident is awaiting verification and is not available to your account.');
+      }
     }
+
     return baseController.getById(req, res, next);
   } catch (error) {
     next(error);
