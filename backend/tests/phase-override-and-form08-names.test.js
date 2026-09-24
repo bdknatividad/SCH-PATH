@@ -146,3 +146,119 @@ test('the endorsement line is no longer typed', () => {
     'the endorsement line is neither typed nor shown',
   );
 });
+
+// ── What actually lands on the page ─────────────────────────────────────────
+
+const { PDFDocument, PDFArray, PDFRawStream, decodePDFRawStream } = require('pdf-lib');
+
+/**
+ * Every text run drawn on the page, with the `Tm` position it was drawn at.
+ *
+ * `pdf-lib` Flate-compresses its content streams, so a byte-level search for the
+ * names finds nothing even when they are on the page. This walks the streams
+ * through pdf-lib's own parser instead — same helper as
+ * `tests/tri-document-publish.test.js`.
+ */
+async function drawnText(buffer) {
+  const doc = await PDFDocument.load(buffer);
+  const runs = [];
+  doc.getPages().forEach((page, pageIndex) => {
+    const contents = page.node.Contents();
+    const refs = contents instanceof PDFArray ? contents.asArray() : [contents];
+    let source = '';
+    for (const ref of refs) {
+      const stream = doc.context.lookup(ref);
+      let bytes = null;
+      if (stream instanceof PDFRawStream) bytes = decodePDFRawStream(stream).decode();
+      else if (stream && typeof stream.getContents === 'function') bytes = stream.getContents();
+      if (bytes) source += Buffer.from(bytes).toString('latin1');
+    }
+    const re = /(-?[\d.]+)\s+(-?[\d.]+)\s+Tm\s*(?:<([0-9A-Fa-f]*)>|\(((?:[^()\\]|\\.)*)\))\s*Tj/g;
+    let m;
+    while ((m = re.exec(source))) {
+      runs.push({
+        page: pageIndex,
+        x: Number(m[1]),
+        y: Number(m[2]),
+        text: m[3] !== undefined
+          ? Buffer.from(m[3], 'hex').toString('latin1')
+          : m[4].replace(/\\(.)/g, '$1'),
+      });
+    }
+  });
+  return runs;
+}
+
+const SENTINEL = 'TYPED-VALUE-MUST-NOT-PRINT';
+
+async function form08Runs(overrides = {}) {
+  const { buildForm08Pdf } = require('../src/controllers/incidentReportController');
+  const buffer = await buildForm08Pdf({
+    childName: 'Test Resident',
+    incidentDateTime: '2026-09-24 10:30',
+    reportTypes: ['Quarrelling'],
+    othersSpecify: '',
+    summary: 'Summary of the incident.',
+    actionTaken: 'Action taken.',
+    result: 'Result.',
+    reportedBy: 'HP 1',
+    endorsedTo: SENTINEL,
+    checkedBy: null,
+    notedBy: null,
+    reportedBySignature: null,
+    endorsedToSignature: null,
+    checkedBySignature: null,
+    notedBySignature: null,
+    ...overrides,
+  });
+  return drawnText(buffer);
+}
+
+test('the printed names are on the page, and the typed endorsement is not', async () => {
+  const runs = await form08Runs();
+  const texts = runs.map((run) => run.text);
+
+  for (const name of ["Ma'am Joyce", 'Francis C. Patricio, RSW', 'Sir Francis']) {
+    assert.ok(
+      texts.some((text) => text.includes(name)),
+      `${name} is not drawn on Form 08, so the form prints without its signatory`,
+    );
+  }
+  assert.ok(
+    !texts.some((text) => text.includes(SENTINEL)),
+    'the typed endorsement value reached the page — the pre-printed name can be overwritten',
+  );
+  // "Reported by" is the one line that is still typed.
+  assert.ok(texts.includes('HP 1'), 'the typed Reported-by name is missing from the form');
+});
+
+test('the endorsement name sits on the top row and the noted-by name on the bottom', async () => {
+  // Placement, not just presence: both names exist somewhere on the form, so
+  // only the coordinates show that they landed on the lines the requirement
+  // names. `drawTextTop` takes a distance from the *top* of the page and converts
+  // it, so PDF y grows upwards and a larger `top` ends up at a *smaller* y —
+  // hence the noted-by line, which is lower on the page, has the smaller y.
+  const runs = await form08Runs();
+  const at = (needle) => runs.find((run) => run.text.includes(needle));
+  const endorsed = at("Ma'am Joyce");
+  const noted = at('Sir Francis');
+  const checked = at('Francis C. Patricio');
+
+  assert.ok(endorsed, 'the endorsement name was not drawn');
+  assert.ok(noted, 'the noted-by name was not drawn');
+  assert.ok(checked, 'the checked-by name was not drawn');
+
+  assert.ok(endorsed.x > 300, `the endorsement name was drawn at x=${endorsed.x}, which is the left column`);
+  assert.ok(noted.x > 300, `the noted-by name was drawn at x=${noted.x}, which is the left column`);
+  assert.ok(
+    noted.y < endorsed.y,
+    `the noted-by name (y=${noted.y}) is not below the endorsement name (y=${endorsed.y})`,
+  );
+  // And the two bottom-row names share a row, which is where the duplicate shows
+  // up: "Checked by" and "Noted by" are the same person on this form.
+  assert.ok(
+    Math.abs(checked.y - noted.y) < 5,
+    `the checked-by and noted-by names are not on the same row (y=${checked.y} vs ${noted.y})`,
+  );
+});
+

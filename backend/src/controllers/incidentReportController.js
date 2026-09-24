@@ -596,4 +596,12 @@ async function verify(req, res, next) {
   }
 }
 
-module.exports = { create, getByViolationId, getByResidentId, verify, resubmit };
+// `buildForm08Pdf` is exported so the form's layout can be asserted from the
+// drawn content streams in a test, and rendered for a visual check. Geometry
+// that reads correctly in code is regularly wrong on the page, and this is an
+// official form that gets printed and signed.
+module.exports = {
+  create, getByViolationId, getByResidentId, verify, resubmit, buildForm08Pdf,
+  FORM08_ENDORSED_TO_NAME, FORM08_CHECKED_BY_NAME, FORM08_CHECKED_BY_ROLE,
+  FORM08_NOTED_BY_NAME, FORM08_NOTED_BY_ROLE,
+};
