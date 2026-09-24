@@ -48,3 +48,6 @@ backend/data/store.json
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Scratch renders produced while checking generated PDFs.
+*-render.png
