@@ -483,7 +483,7 @@ export function CourtRecords() {
                   <SelectItem value="Pre-Trial">Pre-Trial</SelectItem>
                   <SelectItem value="Trial">Trial</SelectItem>
                   <SelectItem value="Disposition">Disposition</SelectItem>
-                  <SelectItem value="Sentencing">Sentencing</SelectItem>
+                  <SelectItem value="Promulgation of Judgement">Promulgation of Judgement</SelectItem>
                   <SelectItem value="Appeal">Appeal</SelectItem>
                 </SelectContent>
               </Select>
