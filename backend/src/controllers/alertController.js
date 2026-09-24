@@ -13,7 +13,8 @@
  */
 
 const { ApiError } = require('../middleware/errorHandler');
-const { hasRole } = require('../utils/authorization');
+const { hasRole, isSupportedRole } = require('../utils/authorization');
+const { ROLE_KEYS } = require('../config/rbac');
 const { loadResidentScope, residentInScope } = require('../utils/residentScope');
 const notifications = require('../services/notificationService');
 
@@ -136,11 +137,42 @@ async function create(req, res, next) {
     if (!hasRole(req.user, 'centerhead', 'admin')) {
       throw new ApiError(403, 'Only a Center Head or Administrator can create a notification directly');
     }
+
+    // Validate the body here rather than letting `notify()` reject it.
+    //
+    // `notify()` raises a plain Error when the title, message or addressee is
+    // missing. The error handler can only map a plain Error to 500, and in
+    // production the message is masked to "Internal server error" — so an
+    // incomplete request came back as a server fault with nothing the caller
+    // could act on. Measured against the deployed API before this change:
+    //   POST /alerts {}                        -> 500
+    //   POST /alerts {title, message}          -> 500  (no addressee)
+    //   POST /alerts {targetRole}              -> 500  (no title/message)
+    // Every one of those is the caller's mistake, so every one is a 400.
     const body = req.body || {};
+    const title = typeof body.title === 'string' ? body.title.trim() : '';
+    const message = typeof body.message === 'string' ? body.message.trim() : '';
+
+    if (!title) throw new ApiError(400, 'title is required');
+    if (!message) throw new ApiError(400, 'message is required');
+    if (!body.targetRole && !body.targetUserId) {
+      throw new ApiError(400, 'A notification needs a recipient: supply targetRole or targetUserId');
+    }
+
+    // An unrecognised role is stored verbatim and then read by nobody, which is
+    // the same unreadable-row shape the service documents as a bug (see the 13
+    // legacy addressee-less rows). Fail loudly instead of writing another one.
+    if (body.targetRole && !isSupportedRole(body.targetRole, ROLE_KEYS)) {
+      throw new ApiError(
+        400,
+        `Unknown targetRole "${body.targetRole}". Expected one of: ${ROLE_KEYS.join(', ')}`,
+      );
+    }
+
     const id = await notifications.notify({
       type: body.type || 'Announcement',
-      title: body.title,
-      message: body.message,
+      title,
+      message,
       priority: body.priority,
       actionRequired: body.actionRequired,
       residentId: body.residentId || null,

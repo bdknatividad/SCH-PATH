@@ -286,6 +286,51 @@ test('only the Center Head and Admin may forge an alert', () => {
     'POST /alerts must be role-gated — it was open to every authenticated user');
 });
 
+test('an incomplete create request answers 400, not 500', async () => {
+  // `notify()` raises a *plain* Error for a missing title, message or addressee.
+  // The error handler can only map a plain Error to 500, and in production it
+  // masks the message to "Internal server error" — so the caller got a server
+  // fault with nothing to act on. Measured against the deployed API before this
+  // change, every case below answered 500.
+  //
+  // Driven through the controller rather than read as source text, because the
+  // thing under test is the status code that comes back. Validation runs before
+  // any database access, so this needs no connection.
+  const alertController = require('../src/controllers/alertController');
+
+  const invoke = (user, body) => new Promise((resolve) => {
+    const res = {
+      status(code) { this.statusCode = code; return this; },
+      json(payload) { resolve({ status: this.statusCode, payload }); },
+    };
+    alertController.create({ user, body }, res, (error) => resolve({ error }));
+  });
+
+  const manager = { id: 'U001', username: 'centerhead', role: 'centerhead' };
+
+  for (const [label, body] of [
+    ['no title', { message: 'm', targetRole: 'nurse' }],
+    ['no message', { title: 't', targetRole: 'nurse' }],
+    ['no addressee', { title: 't', message: 'm' }],
+    ['whitespace-only title', { title: '   ', message: 'm', targetRole: 'nurse' }],
+    ['unknown targetRole', { title: 't', message: 'm', targetRole: 'not-a-role' }],
+  ]) {
+    const { error } = await invoke(manager, body);
+    assert.ok(error, `${label}: must be rejected`);
+    assert.equal(error.statusCode, 400, `${label}: must be a 400, not a 500`);
+  }
+
+  // An unrecognised role is the one that used to be accepted silently, writing a
+  // row addressed to a role nobody holds — the same unreadable shape as the
+  // legacy addressee-less rows. It has to be refused at the edge.
+  const { error: badRole } = await invoke(manager, { title: 't', message: 'm', targetRole: 'not-a-role' });
+  assert.match(badRole.message, /Unknown targetRole/, 'the message must name the problem');
+
+  // A non-manager is refused before validation, and that one genuinely is a 403.
+  const { error: forbidden } = await invoke({ id: 'U003', username: 'nurse', role: 'nurse' }, {});
+  assert.equal(forbidden.statusCode, 403, 'only a manager may forge an alert');
+});
+
 test('updating an alert cannot rewrite what it says or who it is for', () => {
   const body = functionBody(read(ALERT_CONTROLLER), 'update', 'delete');
   assert.match(body, /actionTaken/, 'actionTaken is the one editable field');
