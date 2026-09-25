@@ -1,6 +1,12 @@
 const { pool } = require('../config/database');
 const { ApiError } = require('../middleware/errorHandler');
-const { generateId, runInTransactionWithIdRetry, normalizeAge, mapRow } = require('../utils/helpers');
+const {
+  generateId,
+  runInTransactionWithIdRetry,
+  normalizeAge,
+  mapRow,
+  toMysqlDateTime,
+} = require('../utils/helpers');
 const {
   PHASE_REQUIREMENTS,
   ADMISSION_STATUSES,
@@ -522,7 +528,19 @@ async function create(req, res, next) {
             guardianName || null,
             guardianContact || null,
             admission.admissionDate,
-            new Date().toISOString(),
+            // The precise cutoff that lets the Documents module tell this
+            // admission's uploads from the previous one's. It must be written in
+            // MySQL's own shape: `new Date().toISOString()` is ISO 8601
+            // (2026-09-25T09:24:06.144Z) and MySQL refuses it for a DATETIME
+            // column under the default strict sql_mode —
+            //   Incorrect datetime value: '2026-09-25T09:24:06.144Z'
+            //   for column 'readmissionDatetime' at row 1
+            // which surfaced to the user as a masked "Database error occurred"
+            // when a discharged resident was re-intaken. `toMysqlDateTime`
+            // renders the local wall-clock, which is what the pool reads back
+            // (`dateStrings: true`) and what the frontend's boundary comparison
+            // expects.
+            toMysqlDateTime(new Date()),
             residentId,
           ]
         );

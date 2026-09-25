@@ -6,7 +6,13 @@
 
 const { pool } = require('../config/database');
 const { createController } = require('./baseController');
-const { calculateAge, generateId, insertWithGeneratedId, mapRow } = require('../utils/helpers');
+const {
+  calculateAge,
+  generateId,
+  insertWithGeneratedId,
+  mapRow,
+  toMysqlDateTime,
+} = require('../utils/helpers');
 const { ApiError } = require('../middleware/errorHandler');
 const { PHASE_REQUIREMENTS, RESOURCES } = require('../utils/constants');
 const { canAccessResident } = require('./assignmentController');
@@ -903,7 +909,13 @@ async function readmit(req, res, next) {
       previousCaseDetails: `Previous: ${child.caseType} (${formattedPrevDate})${prevDetailsText}`,
       admissionDate: reAdmissionDate,
       readmissionDate: reAdmissionDate,
-      readmissionDatetime: new Date().toISOString(), // Full datetime cutoff for precise doc splitting
+      // Full datetime cutoff for precise doc splitting. Must be MySQL's shape,
+      // not ISO 8601: `new Date().toISOString()` gives
+      // 2026-09-25T09:24:06.144Z and MySQL rejects it for a DATETIME column under
+      // the default strict sql_mode — "Incorrect datetime value: ... for column
+      // 'readmissionDatetime'" — which reached the user as a masked "Database
+      // error occurred". Same defect as admissionController's re-intake write.
+      readmissionDatetime: toMysqlDateTime(new Date()),
       documentsComplete: false,
       phaseTasksCompleted: {}, // Reset all task checkboxes for new admission cycle
     };
