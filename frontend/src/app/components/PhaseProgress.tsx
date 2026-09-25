@@ -8,7 +8,7 @@ import { Textarea } from '@/app/components/ui/textarea';
 import { Input } from '@/app/components/ui/input';
 import { Label } from '@/app/components/ui/label';
 import { SignaturePadModal } from '@/app/components/SignaturePad';
-import { describeError, request, apiUrl, authHeaders } from '@/services/api';
+import { describeError, request, fetchBinary } from '@/services/api';
 import { systemDialog } from '@/app/components/SystemDialog';
 import { useAuth } from '../state/AuthContext';
 import { useData } from '../state/DataContext';
@@ -1002,11 +1002,12 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
 
   /** Fetches a stored file through the same authorised endpoint the Documents module uses. */
   const fetchStoredFile = async (doc: { id: string; fileName?: string; title?: string }) => {
-    const res = await fetch(apiUrl(`/documents/${doc.id}/file`), {
-      headers: authHeaders(),
-    });
-    if (!res.ok) throw new Error('Could not load the file. You may not have access to it.');
-    return { blob: await res.blob(), fileName: doc.fileName || doc.title || 'document' };
+    try {
+      const { blob, fileName } = await fetchBinary(`/documents/${doc.id}/file`);
+      return { blob, fileName: fileName || doc.fileName || doc.title || 'document' };
+    } catch (error: any) {
+      throw new Error(error?.message || 'Could not load the file. You may not have access to it.');
+    }
   };
 
   const viewStoredDocument = async (doc: { id: string; fileName?: string; title?: string }) => {

@@ -52,6 +52,77 @@ export function authHeaders(extra?: Record<string, string>): Record<string, stri
   return { ...(token ? { Authorization: `Bearer ${token}` } : {}), ...extra };
 }
 
+/** What a binary endpoint hands back: the bytes, and the name the server chose. */
+export interface BinaryPayload {
+  blob: Blob;
+  fileName: string | null;
+}
+
+/** A web page, however it was spelled — `<!DOCTYPE html>` or a bare `<html>`. */
+const HTML_HEAD = /^\s*(?:<!doctype\s+html|<html[\s>])/i;
+
+/** The server's RFC 6266 filename, preferred over anything the client invents. */
+function fileNameFrom(disposition: string | null): string | null {
+  if (!disposition) return null;
+  const utf8 = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1];
+  if (utf8) {
+    try { return decodeURIComponent(utf8); } catch { /* malformed encoding */ }
+  }
+  return /filename="([^"]+)"/i.exec(disposition)?.[1] ?? null;
+}
+
+/** True when the body is the app's own HTML rather than the file that was asked for. */
+async function looksLikeHtml(blob: Blob): Promise<boolean> {
+  if (blob.size === 0) return false;
+  try {
+    return HTML_HEAD.test(await blob.slice(0, 64).text());
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * An API path that answers with a file — a stored document, a generated PDF, the
+ * bulk ZIP.
+ *
+ * `request()` parses JSON, so these endpoints fetch the bytes themselves. That
+ * raw `fetch` is exactly where the split deployment used to fail, and it failed
+ * *silently*: a path that never reached the API was answered by the frontend
+ * host's SPA rewrite with `index.html` and **status 200**, so `response.ok` was
+ * true and the "file" was a copy of the app's HTML. The caller then handed that
+ * HTML to pdf.js, which could not parse it and reported a *render* failure —
+ * naming the PDF viewer as the culprit when the real fault was a request that
+ * never left the frontend.
+ *
+ * So the status is checked, and then the shape: a file is never HTML. Both
+ * failures now say what actually happened.
+ */
+export async function fetchBinary(path: string, init: RequestInit = {}): Promise<BinaryPayload> {
+  const response = await fetch(apiUrl(path), {
+    ...init,
+    headers: { ...authHeaders(), ...(init.headers as Record<string, string> | undefined) },
+  });
+
+  if (!response.ok) {
+    let message = `The server could not provide the file (HTTP ${response.status}).`;
+    try {
+      const body = await response.json();
+      if (body?.message) message = body.message;
+    } catch { /* not a JSON error body */ }
+    throw new Error(message);
+  }
+
+  const blob = await response.blob();
+  const type = (blob.type || '').toLowerCase();
+  if (type.includes('text/html') || await looksLikeHtml(blob)) {
+    throw new Error(
+      'The file request did not reach the API — the server answered with a web page instead of the file.'
+    );
+  }
+
+  return { blob, fileName: fileNameFrom(response.headers.get('Content-Disposition')) };
+}
+
 // Hard cap so a stalled connection (backend down, DB hang, dropped proxy) cannot
 // leave "Submitting…" spinners stuck forever. The user gets a clear timeout error
 // and the action's `finally` block can run.

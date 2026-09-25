@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/app/components/ui/select';
 import { useAuth } from '../state/AuthContext';
 import { useData } from '../state/DataContext';
-import { describeError, request, apiUrl, authHeaders } from '@/services/api';
+import { describeError, request, fetchBinary } from '@/services/api';
 import { useSystemDialog } from '@/app/components/SystemDialog';
 import { SignaturePadModal } from '@/app/components/SignaturePad';
 import { Document as PdfDocument, Page as PdfPage, pdfjs } from 'react-pdf';
@@ -139,23 +139,21 @@ const HOUSEPARENT_SIGNATURE_BOX = { x: 58, top: 446, width: 220, height: 26 };
  * implementation, on the server, and this endpoint is the only consumer.
  */
 export async function downloadAnecdotalPdf(record: { id: string }): Promise<void> {
-  const res = await fetch(apiUrl(`/anecdotal-reports/${encodeURIComponent(record.id)}/pdf`), {
-    headers: authHeaders(),
-  });
-  if (!res.ok) {
-    const payload = await res.json().catch(() => null);
-    throw new Error(payload?.message || 'Unable to download the Anecdotal Report PDF.');
+  // `fetchBinary` reports the server's own message, reads its RFC 6266 filename
+  // for us, and refuses a response that is a web page rather than the PDF.
+  let blob: Blob;
+  let serverName: string | null;
+  try {
+    ({ blob, fileName: serverName } = await fetchBinary(
+      `/anecdotal-reports/${encodeURIComponent(record.id)}/pdf`
+    ));
+  } catch (error: any) {
+    throw new Error(error?.message || 'Unable to download the Anecdotal Report PDF.');
   }
-  const blob = await res.blob();
-  // The server names the file; prefer its RFC 6266 name over a guess.
-  const disposition = res.headers.get('Content-Disposition') || '';
-  const utf8Name = /filename\*=UTF-8''([^;]+)/i.exec(disposition)?.[1];
-  const asciiName = /filename="([^"]+)"/i.exec(disposition)?.[1];
-  const fileName = utf8Name ? decodeURIComponent(utf8Name) : (asciiName || `${record.id}.pdf`);
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
-  anchor.download = fileName;
+  anchor.download = serverName || `${record.id}.pdf`;
   document.body.appendChild(anchor);
   anchor.click();
   anchor.remove();

@@ -22,6 +22,12 @@
  * non-binary calls). These raw fetches were missed, so this test closes the gap
  * statically rather than relying on someone noticing at runtime.
  *
+ * The binary callers now go through `fetchBinary()` in `api.ts`, which joins the
+ * base URL and *also* refuses a body that is not a file — because a 200 carrying
+ * `index.html` satisfies `res.ok`, and the caller's next step was to hand those
+ * bytes to pdf.js and report a failure to *display* the document. That is why
+ * reading a response as a Blob is pinned to that one function below.
+ *
  * Run: node --test tests/api-base-url.test.js
  */
 
@@ -51,6 +57,11 @@ function withoutComments(code) {
   return code
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+}
+
+/** Escapes a literal string so it can be embedded in a RegExp. */
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 test('no source file builds a URL from a bare /api/ literal', () => {
@@ -87,9 +98,14 @@ test('no source file builds a URL from a bare /api/ literal', () => {
   );
 });
 
-test('the binary endpoints resolve through apiUrl', () => {
+test('the binary endpoints resolve through the configured API host', () => {
   // Pinned explicitly because these are the endpoints that were broken, and they
   // are the ones a person notices: View, Download, Print and the PDF generators.
+  //
+  // They go through `fetchBinary` now rather than `apiUrl` + a bare `fetch`. The
+  // invariant is unchanged — the path is still joined to the configured base in
+  // exactly one place — but it is checked one level down, in a form a bare
+  // `fetch` that merely *looks* right cannot satisfy.
   const expectations = [
     ['utils/documentFile.ts', '/documents/${doc.id}/file'],
     ['app/components/DocumentUpload.tsx', '/documents/${doc.id}/file'],
@@ -103,12 +119,82 @@ test('the binary endpoints resolve through apiUrl', () => {
     const file = path.join(SRC, ...relPath.split('/'));
     const code = withoutComments(fs.readFileSync(file, 'utf8'));
 
-    assert.ok(
-      code.includes(`apiUrl(\`${fragment}\`)`),
-      `${relPath} must call apiUrl(\`${fragment}\`) so the request reaches the ` +
-        'API host rather than the page origin',
+    // `\s*` because the call may be wrapped: a long path is usually put on its
+    // own line, and a pin that only matched the single-line spelling would fail
+    // on formatting rather than on behaviour.
+    const call = new RegExp(`fetchBinary\\(\\s*\`${escapeRegExp(fragment)}\``);
+
+    assert.match(
+      code,
+      call,
+      `${relPath} must fetch \`${fragment}\` through fetchBinary(), so the request ` +
+        'reaches the API host rather than the page origin and a response that is ' +
+        'not a file is reported as such',
     );
   }
+});
+
+test('fetchBinary is the only place a binary body is read', () => {
+  // The shape of the original bug was `fetch` -> `res.ok` -> `res.blob()`. Every
+  // clause of that is satisfied by a 200 carrying the app's own `index.html`,
+  // which is what an unrouted API path returns in the split deployment. Reading
+  // a body as a Blob is therefore only allowed inside `fetchBinary`, where the
+  // status *and* the shape are checked. A `/forms/*.pdf` asset is a static file
+  // served by the frontend itself and is unaffected — it is read as an
+  // ArrayBuffer and is not an API call.
+  const offenders = [];
+
+  for (const file of sourceFiles(SRC)) {
+    if (file.endsWith(path.join('services', 'api.ts'))) continue;
+    const code = withoutComments(fs.readFileSync(file, 'utf8'));
+    code.split('\n').forEach((line, index) => {
+      if (/\.blob\(\)/.test(line)) {
+        offenders.push(
+          `${path.relative(REPO_ROOT, file).replace(/\\/g, '/')}:${index + 1}  ${line.trim()}`,
+        );
+      }
+    });
+  }
+
+  assert.deepEqual(
+    offenders,
+    [],
+    'these read a fetch response as a Blob outside fetchBinary(), so a 200 that ' +
+      "is really the app's HTML would be handed on as if it were the file. Use " +
+      'fetchBinary() from services/api.ts:\n  ' + offenders.join('\n  '),
+  );
+});
+
+test('fetchBinary refuses a response that is not the file that was asked for', () => {
+  const api = withoutComments(fs.readFileSync(path.join(SRC, 'services', 'api.ts'), 'utf8'));
+
+  assert.match(
+    api,
+    /export async function fetchBinary\(/,
+    'fetchBinary() must be exported — it is the shared guard for the binary endpoints',
+  );
+  assert.match(
+    api,
+    /fetch\(apiUrl\(path\)/,
+    'fetchBinary() must resolve its path through apiUrl(), so the base URL is ' +
+      'still joined in one place',
+  );
+  assert.match(
+    // Flattened, so the pin does not depend on how the guard happens to be
+    // wrapped — and `[^;]` keeps it inside the one statement, rather than
+    // letting `.*` wander off to some later `throw`.
+    api.replace(/\s+/g, ' '),
+    /if \([^;]*text\/html[^;]*\) \{ throw new Error\(/,
+    'fetchBinary() must *throw* on an HTML body: the frontend host answers an ' +
+      'unrouted path with index.html and a 200, which passes an `ok` check, so ' +
+      'merely noticing the content type is not enough',
+  );
+  assert.match(
+    api,
+    /did not reach the API/,
+    'fetchBinary() must say the request never reached the API when the body is a ' +
+      'web page, rather than leaving the caller to report a parse failure',
+  );
 });
 
 test('the API base URL is exported for the callers that cannot use request()', () => {

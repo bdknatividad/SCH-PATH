@@ -19,7 +19,7 @@ import { SignaturePadModal } from '@/app/components/SignaturePad';
 import { downloadAnecdotalPdf } from '@/app/components/AnecdotalReports';
 import { useData } from '../state/DataContext';
 import { useAuth } from '../state/AuthContext';
-import { request, apiUrl, authHeaders } from '@/services/api';
+import { request, fetchBinary } from '@/services/api';
 import templateLayout from '@/shared/quarterlyReportTemplate.json';
 
 pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.mjs';
@@ -143,18 +143,12 @@ function StatusBadge({ status }: { status: string }) {
 
 /** Downloads the combined PDF for a saved report. */
 export async function downloadQuarterlyProgressPdf(report: { id: string }): Promise<void> {
-  const response = await fetch(apiUrl(`/quarterly-progress-reports/${encodeURIComponent(report.id)}/pdf`), {
-    headers: authHeaders(),
-  });
-  if (!response.ok) {
-    let message = 'Unable to download the Quarterly Progress Report.';
-    try {
-      const body = await response.json();
-      if (body?.message) message = body.message;
-    } catch { /* non-JSON error body */ }
-    throw new Error(message);
+  let blob: Blob;
+  try {
+    ({ blob } = await fetchBinary(`/quarterly-progress-reports/${encodeURIComponent(report.id)}/pdf`));
+  } catch (err: any) {
+    throw new Error(err?.message || 'Unable to download the Quarterly Progress Report.');
   }
-  const blob = await response.blob();
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
@@ -637,6 +631,18 @@ export function QuarterlyProgressReportEditor({
   const [narrativeDraft, setNarrativeDraft] = useState<string | null>(null);
   const [templateUrl, setTemplateUrl] = useState<string | null>(null);
   const [templateError, setTemplateError] = useState<string | null>(null);
+  /**
+   * The report whose form was already re-fetched after the viewer failed to
+   * render it.
+   *
+   * A render failure is usually the object URL going away under the worker — it
+   * is revoked by this effect's cleanup, and the worker may still be reading it
+   * when a re-render replaces it. A second attempt with a fresh URL costs
+   * nothing and fixes that outright. Keying the retry on the report rather than
+   * counting attempts means it happens once per report and cannot loop, while a
+   * report opened later still gets its own retry.
+   */
+  const [retriedReportId, setRetriedReportId] = useState<string | null>(null);
   const [renderWidth, setRenderWidth] = useState(900);
   const [anecdotalOpen, setAnecdotalOpen] = useState(false);
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -671,6 +677,12 @@ export function QuarterlyProgressReportEditor({
    *
    * It comes back through the authenticated API, hence a blob URL rather than a
    * plain `/forms/...` path like the TRI's pre-printed template.
+   *
+   * It is fetched with `fetchBinary` rather than a bare `fetch`, so a response
+   * that is not a PDF at all — the frontend host answering an unrouted path with
+   * its own `index.html` and a 200, which is what a misconfigured API base looks
+   * like — is reported as an unreachable API instead of surfacing later as a
+   * mysterious failure to *display* the form.
    */
   useEffect(() => {
     let objectUrl: string | null = null;
@@ -679,12 +691,9 @@ export function QuarterlyProgressReportEditor({
     setTemplateUrl(null);
     (async () => {
       try {
-        const response = await fetch(
-          apiUrl(`/quarterly-progress-reports/${encodeURIComponent(reportId)}/template`),
-          { headers: authHeaders() }
+        const { blob } = await fetchBinary(
+          `/quarterly-progress-reports/${encodeURIComponent(reportId)}/template`
         );
-        if (!response.ok) throw new Error('Unable to load the report form.');
-        const blob = await response.blob();
         objectUrl = URL.createObjectURL(blob);
         if (cancelled) { URL.revokeObjectURL(objectUrl); return; }
         setTemplateUrl(objectUrl);
@@ -696,7 +705,26 @@ export function QuarterlyProgressReportEditor({
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [reportId]);
+  }, [reportId, retriedReportId]);
+
+  /**
+   * What to do when the viewer cannot render the form it was given.
+   *
+   * The first failure is retried once, because the usual cause is the object URL
+   * being revoked under the worker rather than anything wrong with the document.
+   * If the second attempt fails too, the underlying reason is reported: the
+   * fixed sentence this used to show ("Unable to display the report form.") named
+   * the symptom and left nothing to act on, which is how a request that never
+   * reached the API came to look like a broken PDF viewer.
+   */
+  const handleFormLoadError = useCallback((err?: { message?: string }) => {
+    if (retriedReportId !== reportId) {
+      setRetriedReportId(reportId);
+      return;
+    }
+    const reason = err?.message ? ` (${err.message})` : '';
+    setTemplateError(`Unable to display the report form${reason}.`);
+  }, [reportId, retriedReportId]);
 
   /**
    * Renders the PDF at the width of its host, capped so a wide screen does not
@@ -911,7 +939,9 @@ export function QuarterlyProgressReportEditor({
               <PdfDocument
                 file={templateUrl}
                 loading={<div className="rounded-lg bg-white p-8 text-center text-sm text-gray-500">Loading the report form…</div>}
-                error={<div className="rounded-lg bg-white p-8 text-center text-sm text-red-600">Unable to display the report form.</div>}
+                error={<div className="rounded-lg bg-white p-8 text-center text-sm text-red-600">{templateError || 'Unable to display the report form.'}</div>}
+                onLoadError={handleFormLoadError}
+                onSourceError={handleFormLoadError}
               >
                 {Array.from({ length: pageCount }, (_, pageIndex) => (
                   <div

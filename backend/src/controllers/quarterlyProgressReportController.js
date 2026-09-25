@@ -1367,6 +1367,27 @@ async function finalize(req, res, next) {
   }
 }
 
+/**
+ * Sends a generated PDF, refusing to send anything that is not one.
+ *
+ * The client renders these bytes with pdf.js, and a body that is not a PDF
+ * arrives there as a failure to *display* the form — a message about the viewer
+ * rather than about the document, which is the least actionable way for a
+ * generator fault to surface. Checking the signature here turns that into an
+ * honest 500 while the fault is still on the side that caused it.
+ */
+function sendPdf(res, buffer, fileName) {
+  const signature = Buffer.isBuffer(buffer) && buffer.length >= 5
+    ? buffer.subarray(0, 5).toString('latin1')
+    : '';
+  if (signature !== '%PDF-') {
+    throw new ApiError(500, 'The report could not be generated as a PDF.');
+  }
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `inline; filename="${String(fileName).replace(/"/g, '')}"`);
+  res.send(buffer);
+}
+
 /** GET /quarterly-progress-reports/:id/pdf — the combined PDF on demand. */
 async function getPdf(req, res, next) {
   try {
@@ -1376,9 +1397,7 @@ async function getPdf(req, res, next) {
 
     const [[child]] = await pool.query('SELECT name FROM children WHERE id = ?', [report.residentId]);
     const { buffer, fileName } = await buildQuarterlyReportDocument(report, all, child?.name);
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="${fileName.replace(/"/g, '')}"`);
-    res.send(buffer);
+    sendPdf(res, buffer, fileName);
   } catch (error) {
     next(error);
   }
@@ -1407,10 +1426,8 @@ async function getTemplate(req, res, next) {
     const preparedByName = text(report.preparedByName) || await actorDisplayName(req);
     const buffer = await buildQuarterlyReportTemplatePdf({ ...report, preparedByName }, child?.name);
 
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', 'inline; filename="Quarterly Progress Report (form).pdf"');
     res.setHeader('Cache-Control', 'no-store');
-    res.send(buffer);
+    sendPdf(res, buffer, 'Quarterly Progress Report (form).pdf');
   } catch (error) {
     next(error);
   }
@@ -1431,6 +1448,7 @@ module.exports = {
   getPdf,
   getTemplate,
   // exported for tests
+  sendPdf,
   ASPECTS,
   ASPECT_SOURCES,
   REPORT_STATUSES,
