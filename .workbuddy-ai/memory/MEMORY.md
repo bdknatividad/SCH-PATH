@@ -7,9 +7,8 @@ history live in the daily logs; this file is rules only.
 
 No reachable MySQL here, so a local run cannot exercise the system — verify on the
 live pair instead: the **served artifact** (a lazy route's fix lands in a *route
-chunk*, not the entry chunk — grep every chunk first), the **real UI** (Playwright
-on Vercel, real login, assert rendered output not HTTP 200s), the **API** with a
-bearer token.
+chunk*, not the entry chunk), the **real UI** (Playwright on Vercel, real login,
+assert rendered output not HTTP 200s), the **API** with a bearer token.
 
 ## Conventions that are easy to break
 
@@ -138,10 +137,10 @@ zone**, and the database holds **UTC**. JS parses a zone-less date-time as
 
 SSE via `services/alertStream.js` + `GET /api/alerts/stream` (30s poll is the
 fallback). The frame carries no data, so `GET /api/alerts` stays the single
-visibility implementation; use `fetch` + `ReadableStream`, **not `EventSource`** (no
-`Authorization` header). **`targetRole` is one column, so a role-addressed row
-reaches exactly one role** — address **one row per user** (`usersWithAnyRole` +
-`notifyUsers`), deriving gate and notification from **one constant**.
+visibility implementation; use `fetch` + `ReadableStream`, **not `EventSource`**.
+**`targetRole` is one column, so a role-addressed row reaches exactly one role** —
+address **one row per user** (`usersWithAnyRole` + `notifyUsers`), deriving gate
+and notification from **one constant**.
 
 ## Access model
 
@@ -181,8 +180,8 @@ Roles: `centerhead` (fullAccess), `admin`, `nurse`, `psychologist`, `educator`,
 (fixed `5b68857`; watch for `Seeding step failed (...)` in the boot log); `/store`
 swallows per-table errors into `[]`, so a broken table and an empty one look alike;
 a literal route after a `/:param` sibling 404s for its whole life (Express
-declaration order). **`GET /api/health/db`** is *readiness*; `/api/health` is a
-dependency-free *liveness* check.
+declaration order). **`GET /api/health/db`** is *readiness*, `/api/health` a
+*liveness* check.
 
 ## Inspecting Railway
 
@@ -196,10 +195,9 @@ Project `fabulous-radiance` `840f2fbc-7579-4294-9715-8c0cfd7d06a7`; services
 `350dae90-e97f-497d-939b-14e25e3500e3`; environment `production`
 `655addcf-10cf-4feb-b720-b2b5775790d1`. `C:/tmp/railway-deploy.js` /
 `railway-build.js` list deployments and dump the runtime / build logs
-(`RAILWAY_TOKEN` from the environment — pass it inline, never write a file).
-**`deploymentLogs` carries request-time errors** — a controller's `next(error)`
-appears with its stack and the request path. Token `84e36095-…` was valid
-2026-09-25.
+(`RAILWAY_TOKEN` from the environment). **`deploymentLogs` carries request-time
+errors** — a controller's `next(error)` appears with its stack and the request
+path. Token `84e36095-…` was valid 2026-09-25.
 
 ## Tooling and test infrastructure
 
