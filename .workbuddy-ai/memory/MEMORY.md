@@ -245,6 +245,36 @@ restart-loop the service (`tests/health-readiness.test.js` pins the separation).
 `railway.toml`'s `healthcheckPath` is still `/api/health`; moving it is a
 deliberate restart-on-DB-loss choice that has not been made.
 
+## The live deployment is the system under test (standing rule, 2026-09-25)
+
+The user's instruction: *"this is already deployed we should always look at that
+side railway + vercel."* Do not treat a local run as evidence. There is **no
+reachable MySQL** from this machine, so a local start cannot exercise the real
+system anyway — the deployed pair is the only end-to-end environment that exists.
+
+Verify against, in this order:
+
+1. **The served artifact.** `curl` the SPA, take the entry chunk hash out of
+   `index.html`, then fetch the chunks it references. A fix in a lazily-loaded
+   route lands in a **route chunk**, not the entry chunk — grep every chunk
+   before concluding a fix did not ship.
+2. **The real UI.** Playwright against `https://sch-path.vercel.app` with a real
+   login (`centerhead`). Assert on rendered output, not on HTTP 200s.
+3. **The API.** `https://sch-path-production.up.railway.app/api/health`, plus the
+   affected endpoints with a real bearer token.
+
+Access is **asymmetric** — know which half you can actually inspect:
+
+| Surface | What I can reach | What I cannot |
+| --- | --- | --- |
+| Vercel | The deployed site over public HTTP: bundle hashes, headers, the live UI. Enough to verify a frontend fix. | The Vercel dashboard/API — **no Vercel token**. |
+| Railway | The public API only (`/api/health`, endpoints with a user bearer token). | Deploy status and build logs — **no Railway token on disk**; it was deleted after use, per the note below. |
+
+So a Railway deploy can be *inferred* (health + behaviour) but not *read*. When
+that distinction matters, say so rather than implying the log was checked. Ask
+the user for a fresh token if build logs are genuinely needed — and have them
+revoke it afterwards.
+
 ## Inspecting the Railway deployment (read the log, don't guess)
 
 Endpoint `https://backboard.railway.com/graphql/v2`. A **workspace** token uses
@@ -268,6 +298,11 @@ Helpers are `C:/tmp/railway*.js`, reading the token from `C:/tmp/.railway-token`
 **Delete that file and revoke the token when finished.** A deployment list shows
 only the newest as live; older entries read `REMOVED` (superseded), which looks
 like a stall but is not.
+
+**As of 2026-09-25 the token file does not exist** and no `RAILWAY_*` env var is
+set, so the GraphQL helpers will fail. The token used earlier
+(`84e36095-…`) was deleted from disk and the user was asked to revoke it in the
+UI. Request a fresh one before reaching for these helpers.
 
 ## Local tooling
 
