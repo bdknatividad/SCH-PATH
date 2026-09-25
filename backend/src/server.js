@@ -317,6 +317,33 @@ async function runMigrations() {
   }
 
   /**
+   * Widen a text column when the code can write more than it holds.
+   *
+   * A `VARCHAR` that is too small does not fail at the call site: MySQL raises
+   * ER_DATA_TOO_LONG ("Data too long for column 'x' at row 1") and `errorHandler`
+   * masks that to the generic "Database error occurred", so the column name never
+   * reaches the user. The width therefore has to be compared against what the code
+   * actually produces — a sample row will not reveal it.
+   *
+   * Idempotent: it reads the current width first and only alters when it is short,
+   * so it is cheap on every later boot.
+   */
+  async function ensureColumnLength(table, column, minLength, definition) {
+    const [rows] = await pool.query(
+      `SELECT CHARACTER_MAXIMUM_LENGTH AS len FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE()
+         AND LOWER(TABLE_NAME) = LOWER(?) AND LOWER(COLUMN_NAME) = LOWER(?)`,
+      [table, column]
+    );
+    if (rows.length === 0) return false;
+    const current = Number(rows[0].len);
+    if (Number.isFinite(current) && current >= minLength) return false;
+    await pool.query(`ALTER TABLE \`${table}\` MODIFY COLUMN \`${column}\` ${definition}`);
+    console.log(`Migration: ${table}.${column} widened to ${definition} (was ${rows[0].len}).`);
+    return true;
+  }
+
+  /**
    * Adds a unique index only when it is absent AND no duplicate values exist.
    *
    * Makes "at most one row per <column>" a database guarantee instead of
@@ -691,7 +718,7 @@ async function runMigrations() {
       id VARCHAR(40) PRIMARY KEY,
       residentId VARCHAR(40) NOT NULL,
       date DATE NOT NULL,
-      type VARCHAR(100) NOT NULL,
+      type VARCHAR(500) NOT NULL,
       description TEXT NULL,
       severity ENUM('Minor', 'Major', 'Critical') NOT NULL DEFAULT 'Minor',
       points INT NOT NULL DEFAULT 1,
@@ -726,6 +753,14 @@ async function runMigrations() {
   // violation's own wording is "sa anumang bahagi ng katawan" — "on any part of
   // the body" — so the record needs somewhere to say *which* part.
   await ensureColumn('violations', 'bodyLocation', 'VARCHAR(100) NULL', 'location');
+
+  // `type` holds `guide.name`, so it has to be as wide as the guide name it
+  // copies: violationController.create() writes `type: guide.name` straight
+  // through buildInsertPayload. violation_guide.name is VARCHAR(500) and 10 of
+  // the 33 official names exceed 100 characters (the longest is 189), so at
+  // VARCHAR(100) logging any of those violations failed with ER_DATA_TOO_LONG —
+  // which the user sees as "Database error occurred" with no column named.
+  await ensureColumnLength('violations', 'type', 500, 'VARCHAR(500) NOT NULL');
 
   console.log('Migration: violations table ensured.');
 
@@ -774,16 +809,16 @@ async function runMigrations() {
 
     await pool.query(`CREATE TABLE IF NOT EXISTS assessments (
       id VARCHAR(40) PRIMARY KEY,
-      title VARCHAR(150) NOT NULL,
+      title VARCHAR(300) NOT NULL,
       date DATE NULL,
       time VARCHAR(50) NULL,
-      type VARCHAR(100) NULL,
+      type VARCHAR(255) NULL,
       assessor VARCHAR(150) NULL,
       status ENUM('Scheduled', 'Completed') NOT NULL DEFAULT 'Scheduled',
       forResidents JSON NULL,
       description TEXT NULL,
       results TEXT NULL,
-      triggeredBy VARCHAR(100) NULL,
+      triggeredBy VARCHAR(600) NULL,
       violationIds JSON NULL,
       createdBy VARCHAR(100) NULL,
       modifiedBy VARCHAR(100) NULL,
@@ -1288,6 +1323,23 @@ async function runMigrations() {
     await ensureColumn('assessments', 'interventionTrackerId', 'VARCHAR(40) NULL', 'violationIds');
     await ensureColumn('assessments', 'interventionRequirementId', 'VARCHAR(40) NULL', 'interventionTrackerId');
     await ensureColumn('assessments', 'schedulingMode', "VARCHAR(30) NULL", 'interventionRequirementId');
+
+    // review() writes values that outgrow the original widths, and MySQL answers
+    // ER_DATA_TOO_LONG — which reaches the user as "Database error occurred":
+    //   type        = the selected Psychosocial Activities joined with ', ' —
+    //                 111 characters when all six are chosen, declared VARCHAR(100)
+    //   title       = `${type} — ${residentName}` — 264 at the declared bounds
+    //                 (111 activities + " — " + children.name VARCHAR(150)),
+    //                 declared VARCHAR(150)
+    //   triggeredBy = `Violation: ${guide.name} (${n}th offense)` — 525 at the
+    //                 declared bounds (violation_guide.name VARCHAR(500) plus the
+    //                 25-character frame), declared VARCHAR(100) — and 214 on the
+    //                 official guide data alone, so it overflowed on *every*
+    //                 verification of a long-named violation.
+    await ensureColumnLength('assessments', 'type', 255, 'VARCHAR(255) NULL');
+    await ensureColumnLength('assessments', 'title', 300, 'VARCHAR(300) NOT NULL');
+    await ensureColumnLength('assessments', 'triggeredBy', 600, 'VARCHAR(600) NULL');
+
     const [violationColumns] = await pool.query(
       `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'violations'`

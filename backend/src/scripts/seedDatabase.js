@@ -1303,5 +1303,5 @@ async function seedDatabase() {
   console.log('Database seeding complete!');
 }
 
-module.exports = { seedDatabase, reconcileSeededAccessGrants, DEFAULT_USERS };
+module.exports = { seedDatabase, reconcileSeededAccessGrants, DEFAULT_USERS, OFFICIAL_VIOLATION_GUIDE };
 

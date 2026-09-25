@@ -5,10 +5,10 @@ MySQL-only. Repo `bdknatividad/SCH-PATH`, branch `master`. Live pair:
 `sch-path-production.up.railway.app` (API) + `sch-path.vercel.app`. Detail and
 history live in the daily logs; this file is rules only.
 
-No reachable MySQL here, so a local run cannot exercise the system — verify on the
-live pair instead: the **served artifact** (a lazy route's fix lands in a *route
-chunk*, not the entry chunk), the **real UI** (Playwright on Vercel, real login,
-assert rendered output not HTTP 200s), the **API** with a bearer token.
+No reachable MySQL here, so verify on the live pair: the **served artifact** (a
+lazy route's fix lands in a *route chunk*, not the entry chunk), the **real UI**
+(Playwright on Vercel, real login, assert rendered output not HTTP 200s), the
+**API** with a bearer token.
 
 ## Conventions that are easy to break
 
@@ -202,10 +202,9 @@ appears with its stack and the request path. Token `84e36095-…` was valid
 ## Tooling and test infrastructure
 
 - Playwright lives in the managed node workspace (`channel: 'msedge'` = installed
-  Edge).
-- **Never re-login in a loop.** The login route rate-limits (429); a poll that
-  fetches a token per attempt then sends `Bearer undefined` → a burst of `401
-  Invalid token` at `auth.js`. Cache the token.
+  Edge). **Never re-login in a loop** — the login route rate-limits (429), and a poll
+  that fetches a token per attempt then sends `Bearer undefined` → a burst of
+  `401 Invalid token` at `auth.js`. Cache the token.
 - **6 tests fail in this sandbox and fail identically at HEAD** (5 in
   `jwt-secret.test.js`, 1 dialog-guard): `spawnSync … node.exe EBUSY` — prove it by
   stashing and running clean first. **Sandbox read-blocks on `node_modules/*` corrupt
