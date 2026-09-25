@@ -20,39 +20,18 @@ against the live pair. Rationale for every rule below is in the daily logs; this
 - **`res.ok` is not proof a file endpoint returned a file.** `fetchBinary` checks status then shape; a
   path that misses the API gets the SPA rewrite's `index.html` at 200. `.blob()` only inside
   `fetchBinary` (pinned). `/forms/*.pdf` are same-origin `arrayBuffer()`, not `apiUrl`.
-- **A NOT NULL column is a silent feature blocker.** `CREATE TABLE IF NOT EXISTS` does nothing to a
-  deployed table — add a guarded boot migration (read `IS_NULLABLE`, then `ALTER … MODIFY COLUMN`,
-  try/catch + `console.warn`). Normalize nulls at every boundary that puts a row into state; a nullable
-  text column needs `blankToNull`.
-- **`ensureColumn` vs `Object.entries`.** `schema-contract.test.js`'s `parseEnsureColumns` sees
-  `ensureColumn('t','c',…)` and `for (…of [...])`, but NOT an object literal iterated with
-  `Object.entries`. A column the app writes that no parsed migration creates is missing on every
-  deployed DB.
-- **`manilaToday` lives in `utils/triPeriod.js`** — calling it without the require fails
-  `manila-today-in-queries.test.js`.
-- **A resident-scoped filter must know how the resource is keyed.** `rowResidentIds()` reads
-  `residentId`; a `children` row is keyed by `id`, so the Houseparent filter in `/store` matched nothing
-  and dropped **every** resident while `GET /children` returned the real caseload. Fixed in `ab3fc51`,
-  pinned by `tests/store-houseparent-caseload.test.js`. Hidden because `DataContext` overwrites the
-  Houseparent list from `/resident-assignments/my-residents`.
-- **Keying a link on a display name (recurring class).** Add an id column beside the name, read the id
-  first, gate the name comparison on `<idColumn> IS NULL`, backfill only where the name resolves to
-  exactly one account, 400 on an unknown id, and declare the column in `ensureTable`, the boot migration
-  and `schema.sql`.
-- **No API path back from `Absconded`** without fabricating an admission cycle: `PUT /children/:id` is
-  refused by `assertResidentNotAbsconded`, and only `readmit` and the admissions create path write
-  `children.status = 'Active'` — both insert an `admissions` row.
-- **One implementation, not two.** `ChildRecords.tsx` and `ChildDetail.tsx` each carry a copy of the
-  Admission Slip drawing code; the slip opened from `/children` comes from **ChildDetail**. Shared helper
-  `utils/admissionSlipMarkings.ts`.
+- **A new column needs a guarded boot migration**, declared in a shape `schema-contract.test.js` can
+  parse (it does not see an `Object.entries` literal). `mapRow` emits only `col in row`, so a
+  `constants.js` column is load-bearing for the read path — and a key absent from every row proves the
+  column is missing from the deployed DB.
+- **A resident-scoped filter must know how the resource is keyed** — `rowResidentIds()` reads
+  `residentId`, but a `children` row is keyed by `id`, so the Houseparent filter in `/store` dropped
+  every resident. Fixed in `ab3fc51`, pinned by `tests/store-houseparent-caseload.test.js`.
 - **`rbac.definition.json` is duplicated byte-for-byte** (`backend/src/config/` ↔
   `frontend/src/app/config/`) — edit one, copy over the other.
-- **No backticks** in print-HTML template literals (`Reports.tsx`, `PhaseProgress.tsx`, `Tri.tsx`) —
-  ends the string → `TS1005`.
-- **PDF geometry has three y conventions** (`pdfPercentTop` centres on a bottom-left centre, `pdfTop`
-  takes a lower edge, `HOUSEPARENT_SIGNATURE_BOX.top` a top-left upper edge); a rule's ink sits below its
-  baseline. Crop the render — text extraction cannot tell whether a stamp landed on blank template. And
-  **a label is not a value**: a renamed option keeps its stored value.
+- The module-authoring traps — the NOT NULL column rule, `manilaToday`, the display-name keying class,
+  the duplicated Admission Slip code, the print-HTML backtick rule, the three PDF y conventions, and the
+  one-way door out of `Absconded` — are in the **`sch-path-module`** skill.
 
 ## Time on the wire
 
