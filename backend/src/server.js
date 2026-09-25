@@ -15,6 +15,7 @@ const { pool, testConnection } = require('./config/database');
 const routes = require('./routes');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 const { normalizeRequestDates } = require('./middleware/normalizeDates');
+const { isoResponseTimestamps } = require('./middleware/isoTimestamps');
 const { securityHeaders } = require('./middleware/securityHeaders');
 const { seedDatabase } = require('./scripts/seedDatabase');
 const {
@@ -131,6 +132,19 @@ app.use(express.json({ limit: '16mb' }));
 // Normalising centrally means a new controller, or a new field on an existing
 // one, is covered the moment it exists.
 app.use(normalizeRequestDates);
+
+// Give every datetime on the way *out* an explicit UTC offset.
+//
+// The mirror of the middleware above. The pool sets `dateStrings: true`, so a
+// DATETIME comes back from MySQL as the literal string stored —
+// `2026-09-25 06:32:02` — with no zone on it, and the database holds UTC. A
+// date-time with no offset is parsed as *local* time by `new Date()`, so a
+// Manila browser read every timestamp in the system eight hours early: a report
+// submitted at 2:32 PM displayed as "9/25/2026, 6:32:02 AM".
+//
+// Mounted before the routes so `res.json` is already wrapped by the time any
+// handler answers, and it covers the error handler too.
+app.use(isoResponseTimestamps);
 
 // API Routes
 app.use('/api', routes);

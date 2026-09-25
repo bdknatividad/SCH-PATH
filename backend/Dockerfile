@@ -33,6 +33,26 @@ RUN apk add --no-cache --virtual .build-deps build-base python3 \
 # ── Stage 2: runtime ─────────────────────────────────────────────────────
 FROM node:22-alpine AS runtime
 ENV NODE_ENV=production
+
+# Pin the container's timezone.
+#
+# Two clocks fill the datetime columns. `helpers.toMysqlDateTime` converts a
+# client-supplied value using the *process's* local time, while `NOW()` uses the
+# *database's* — so the two only agree while the container and MySQL are in the
+# same zone. This image was UTC only because `node:22-alpine` happens to ship no
+# local timezone: an accident of the base image, not a decision, and one that
+# `TZ` in the service's environment variables would silently overturn.
+#
+# The managed MySQL is UTC, so the container is pinned to UTC. Setting this to
+# Asia/Manila instead would store client-supplied datetimes eight hours away from
+# every `NOW()`-filled column on the same row. `detectDatabaseZone()` in
+# `config/database.js` measures the database's real offset at boot and warns if
+# the two ever disagree.
+#
+# Timestamps are stored in UTC and given an explicit offset on the way out
+# (`middleware/isoTimestamps`), so the browser renders them in Philippine time
+# without the database having to hold Philippine time.
+ENV TZ=UTC
 WORKDIR /app
 
 # The backend, with the runtime assets it reaches into the frontend for.

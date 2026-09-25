@@ -6,6 +6,14 @@
 
 const mysql = require('mysql2/promise');
 const { resolveDatabaseEnv } = require('./databaseEnv');
+const {
+  setDatabaseZone,
+  getDatabaseZoneLabel,
+  offsetSuffix,
+  parseTimeDiff,
+  processZoneName,
+  processOffsetMinutes,
+} = require('../utils/serverTime');
 require('dotenv').config();
 
 /**
@@ -69,6 +77,50 @@ const dbConfig = {
 const pool = mysql.createPool(dbConfig);
 
 /**
+ * Ask MySQL what its `NOW()` is relative to UTC, and record it for the response
+ * serialiser.
+ *
+ * Two different clocks fill these columns. `helpers.toMysqlDateTime` converts a
+ * client-supplied value using the **process's** local time, while `NOW()` uses
+ * the **database's** — so the application is only self-consistent while those
+ * two agree. Nothing enforced that: the container is UTC because
+ * `node:22-alpine` ships no local timezone, which is an accident of the base
+ * image rather than a decision, and the managed MySQL is UTC for its own
+ * reasons.
+ *
+ * So it is measured rather than assumed, and reported either way. A mismatch
+ * means client-supplied datetimes are stored at one offset and `NOW()`-filled
+ * columns at another, on the same row — a skew that is invisible until somebody
+ * compares two timestamps that ought to be equal. The response serialiser needs
+ * the database's offset, not the process's, because the values it converts are
+ * the ones MySQL stored.
+ */
+async function detectDatabaseZone(connection) {
+  try {
+    const [rows] = await connection.query(
+      'SELECT @@session.time_zone AS zone, TIMEDIFF(NOW(), UTC_TIMESTAMP()) AS diff'
+    );
+    const row = rows[0] || {};
+    const minutes = parseTimeDiff(row.diff);
+    setDatabaseZone({ offsetMinutes: minutes, label: row.zone || 'SYSTEM' });
+
+    console.log(
+      `🕐 Database timezone: ${getDatabaseZoneLabel()} (${offsetSuffix(minutes)}) · process timezone: ${processZoneName()}`
+    );
+
+    if (minutes !== processOffsetMinutes()) {
+      console.warn(
+        `⚠️ Database and process timezones disagree (${offsetSuffix(minutes)} vs ${offsetSuffix(processOffsetMinutes())}). `
+        + 'Client-supplied datetimes are converted with the process zone while NOW() uses the database zone, '
+        + 'so timestamps on the same row will not agree. Set TZ on the container to match the database.'
+      );
+    }
+  } catch (error) {
+    console.warn('⚠️ Could not read the database timezone; assuming UTC:', error.message);
+  }
+}
+
+/**
  * Test database connection
  * @async
  * @returns {Promise<boolean>} Connection status
@@ -82,6 +134,7 @@ async function testConnection() {
     // so startup still works for MySQL users without SUPER/SYSTEM_VARIABLES_ADMIN.
     const connection = await pool.getConnection();
     try {
+      await detectDatabaseZone(connection);
       await connection.query('SET SESSION max_allowed_packet = 67108864');
     } catch (sessionErr) {
       console.warn('⚠️ Could not raise SESSION max_allowed_packet:', sessionErr.message);
@@ -112,4 +165,5 @@ module.exports = {
   pool,
   dbConfig,
   testConnection,
+  detectDatabaseZone,
 };
