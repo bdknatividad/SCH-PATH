@@ -6,8 +6,9 @@ each one, check it against the deployed pair, implement what is missing, and add
 anything already done.
 
 Status so far: **4, 5, 6, 7, 8 done** (and the force-discharge → re-intake bug found while testing 4).
-Item 8 was answered, built and guarded. **Item 9 is a do-not-touch item** (leave open for the user).
-Next: 10+.
+Item 8 was answered, then **corrected by the user** and rebuilt — the block is five lines and the
+template's own second-row names are the right people, so the cover band is gone. **Item 9 is a
+do-not-touch item** (leave open for the user). Next: 10+.
 
 ## GENERAL / SCH
 
@@ -27,21 +28,31 @@ Next: 10+.
 7. **Court Records – Hearing Type.** ✅ Already implemented — "Sentencing" appears nowhere and the
    dropdown offers "Promulgation of Judgement"; `hearingType` is free-text `VARCHAR(100)` and live
    `courtRecords` is empty, so nothing to migrate. **Guard added:** `backend/tests/court-hearing-type.test.js`.
-8. **TRI – Signatures.** ✅ Built. Draw *and* upload already worked for the Houseparent; the two
-   designated officials now have their own lines. Answers the user gave: leave the Administrative
-   Officer and SWO I / Case Manager lines alone; the template's two printed example names may be
-   covered; **add** the missing fifth line (SWO III / Section Chief); each designated person signs
-   their own line; signing roles are for me to decide (→ `canReview` = socialworker / centerhead /
-   admin, the same reviewer predicate the module already uses); print **full name plus credentials**.
-   Implemented as a separate route over separate columns (`/:id/signature/:line`) so it can never
-   reach the Houseparent's line. The cover band that hides the template's example names is
-   `{ y: 646.5, height: 12 }`, derived from the form's own ink, and it has to be painted **in the
-   on-screen form too** — page 8 is the template rendered as a background, so an overlay alone
-   prints the two names over each other. **Guard added:**
-   `backend/tests/tri-designated-signatures.test.js` (18 tests). Shipped in `2d28847` + `a8762e3`.
-   See the daily log for the page-8 coordinate table and the live verification. **Still open:** the
-   SWO III / Section Chief's real full name — currently `Ma'am HCKSBD` (the user's own wording) at
-   `triLayout.json` → `designatedPersonnel.sectionchief.name`.
+8. **TRI – Signatures.** ✅ Built and corrected. The user's first answer was **wrong** and they
+   retracted it: `Ma'am HCKSBD` is not a person, Francis C. Patricio is SWO I (**not** SWO II), and
+   the two names the template prints on the block's second row are the **correct** people — so the
+   white cover band was hiding the right names. The real block is five lines:
+
+   | row | line | printed name | who prints it |
+   |---|---|---|---|
+   | 1 | Houseparent | whoever prepared/signed | the app |
+   | 1 | Administrative Officer | `PERCILA S. VILLA` | the app (template is blank) |
+   | 1 | SWO I / Case Manager | `FRANCIS C. PATRICIO, RSW` | the app (template is blank) |
+   | 2 | SWO II / Center Head | `MARICOR C. NAVARRO, MSSW, RSW` | **the template itself** |
+   | 2 | SWO III / Section Chief | `NICOLAS Q. REGALARIO, MSSW, RSW` | **the template itself** |
+
+   All four official lines are signable, each on its own column triple. The keys name the **line**,
+   not the office-holder; `swo2`/`swo3` keep the columns they shipped with
+   (`centerhead*`/`sectionchief*`) so the signatures already on live records are not moved — only the
+   six new `adminOfficer*`/`swo1*` columns are added. **No cover band anywhere.** Row 2 draws no name
+   at all, only a signature. Two alignment fixes the user asked for in the same message: the printed
+   name goes **below** the signature on the TRI's Houseparent line, and every signature is **centred
+   over the printed name** rather than over its box (both forms). Shipped in `d4e5a01`.
+   **Guards:** `tri-designated-signatures.test.js` rewritten for four lines,
+   `tri-houseparent-signature.test.js` and `anecdotal-report-pdf.test.js` updated; 9 mutations, all
+   caught. Verified live: the four new keys answer 409 on a Finalized record, the old keys 400, all
+   15 signature columns exist, TRI006's stored drawings survived, and page 8 renders correctly.
+   See the daily log for the coordinate table.
 9. **Anecdotal Report.** Leave open for further details the user will supply. Do not assume or modify
    beyond the explicitly requested changes.
 10. **Admission – Piercing/Tattoo Form.** Add a form/section at admission for documenting piercings and
