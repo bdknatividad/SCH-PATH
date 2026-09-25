@@ -1303,6 +1303,11 @@ async function runMigrations() {
     await ensureColumn('assessments', 'violationIds', 'JSON NULL', 'triggeredBy');
     await ensureColumn('assessments', 'interventionTrackerId', 'VARCHAR(40) NULL', 'violationIds');
     await ensureColumn('assessments', 'interventionRequirementId', 'VARCHAR(40) NULL', 'interventionTrackerId');
+    // Written when verifying a violation schedules a Psychosocial Activity /
+    // Dialogue (violationController.review). It was declared only in
+    // schema.sql, so a database the server built itself never had it and that
+    // verification failed with "Unknown column 'psychosocialActivities'".
+    await ensureColumn('assessments', 'psychosocialActivities', 'JSON NULL', 'type');
     await ensureColumn('assessments', 'schedulingMode', "VARCHAR(30) NULL", 'interventionRequirementId');
     const [violationColumns] = await pool.query(
       `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
