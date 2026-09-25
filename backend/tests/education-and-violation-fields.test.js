@@ -22,6 +22,8 @@
  *
  *   - The one-month warning is advisory and reads the caseload endpoint's own
  *     answer for who is assigned, so it cannot disagree with the cards beside it.
+ *     Two residents must never appear on it: a discharged resident, and one who
+ *     already has a Case Load Manager.
  */
 
 const test = require('node:test');
@@ -187,6 +189,27 @@ test('the Case Load screen warns about residents a month without a manager', () 
   // than guessed at.
   assert.match(CASELOAD_UI, /const admitted = c\.admissionDate \|\| c\.createdAt;/);
   assert.match(CASELOAD_UI, /return Number\.isFinite\(at\) && at <= cutoff;/);
+});
+
+test('the one-month warning excludes discharged and already-managed residents', () => {
+  // Two ways a resident must NOT be chased, and both are silent if dropped:
+  // the banner would simply name people it has no business naming.
+  //
+  //  - A discharged resident has no case left to manage.
+  //  - A resident who already has a Case Load Manager is the entire point of the
+  //    list; counting them would make the banner permanently wrong, and it would
+  //    be wrong in the direction that matters — it would look like work is
+  //    outstanding when it is not.
+  assert.match(
+    CASELOAD_UI,
+    /if \(String\(c\.status \|\| ''\) === 'Discharged'\) return false;/,
+    'a discharged resident must not be reported as missing a Case Load Manager'
+  );
+  assert.match(
+    CASELOAD_UI,
+    /if \(assignedResidentIds\.has\(String\(c\.id\)\)\) return false;/,
+    'a resident who already has a Case Load Manager must not be reported'
+  );
 });
 
 // ── The resident writes are gated at the route ───────────────────────────────
