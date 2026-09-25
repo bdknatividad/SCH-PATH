@@ -453,6 +453,17 @@ test('a half-filled row is caught in the form, not by the API', () => {
     'the new-admission path does not use the shared rule',
   );
 
+  // Building the error is not the same as showing it. The card sits on Part 1
+  // while the save button sits on Part 2, so the only thing that reaches the
+  // user is the form's error summary, which reads `formErrors`. A validator that
+  // returns false without publishing leaves the save button looking dead —
+  // verified in the live UI, where the refusal appears in that banner.
+  assert.match(
+    validator,
+    /setFormErrors\(\s*errors\s*\)/,
+    'validatePartTwo builds the errors without publishing them, so a refusal is never shown',
+  );
+
   // And the edit path applies the same rule, or an edited slip reaches the API
   // with a row it will refuse.
   const editPath = RECORDS.slice(
@@ -463,6 +474,11 @@ test('a half-filled row is caught in the form, not by the API', () => {
     editPath,
     /unfinishedBodyMarkings\(form\.bodyMarkings\)/,
     'the edit path does not check the markings',
+  );
+  assert.match(
+    editPath,
+    /setFormErrors\(\{\s*bodyMarkings: UNFINISHED_MARKING_MESSAGE\s*\}\)/,
+    'the edit path detects an unfinished row but never shows the message',
   );
 
   // The message is shown, or the save button would appear to do nothing.
