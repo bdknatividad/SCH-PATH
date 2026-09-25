@@ -888,6 +888,13 @@
     "nullable": false,
     "default": "CURRENT_TIMESTAMP",
     "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+   },
+   {
+    "name": "psychosocialActivities",
+    "type": "json",
+    "nullable": true,
+    "default": null,
+    "extra": ""
    }
   ],
   "children": [
