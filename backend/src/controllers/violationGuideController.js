@@ -9,6 +9,14 @@ const { insertWithGeneratedId } = require('../utils/helpers');
 const { ApiError } = require('../middleware/errorHandler');
 const { canAccessResident } = require('./assignmentController');
 const { loadResidentScope } = require('../utils/residentScope');
+// `normalizeRole` is called by the scheduling guard below. It was referenced
+// without ever being imported, so `PUT /intervention-tracker/:id` threw
+// `ReferenceError: normalizeRole is not defined` for any body carrying
+// `scheduledAt` — and only for those, since the guard is the first thing that
+// touches it. Scheduling an intervention was therefore impossible from the
+// Intervention Tracker, and the failure surfaced as a bare 500 because a
+// ReferenceError is not an `ApiError`.
+const { normalizeRole } = require('../utils/authorization');
 
 function isSchedulingInterventionType(value) {
   const type = String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
