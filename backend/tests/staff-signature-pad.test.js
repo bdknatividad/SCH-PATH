@@ -8,8 +8,9 @@
  *
  * Most assertions read the source rather than run it. The defects these guard
  * against — a pad wired to the wrong field, an overlay and a PDF stamp drifting
- * apart, a typed name creeping back into a signature column — all type-check,
- * build, and are invisible without a browser.
+ * apart, a typed name creeping back into a signature column, a malformed
+ * signature taking the whole document down with it — all type-check, build, and
+ * are invisible without a browser.
  */
 
 const test = require('node:test');
@@ -239,6 +240,43 @@ test('toPdfBox flips the vertical axis for pdf-lib', () => {
     /y:\s*pageHeight\s*-\s*box\.y\s*-\s*box\.height/,
     'the PDF stamp would be mirrored vertically'
   );
+});
+
+test('a missing or corrupt signature is skipped, never fatal to the document', () => {
+  // The stamp runs while a document is being built. If it threw, one malformed
+  // signature would cost the whole PDF — the Admission Slip, the TRI report, the
+  // QPR — rather than just the mark on the line. Both tolerances are documented
+  // in signaturePdf.ts and neither was pinned.
+  const utils = read(SIGNATURE_PDF);
+  const start = utils.indexOf('export async function drawSignatureImageOnPage');
+  assert.ok(start > 0, 'drawSignatureImageOnPage is gone, so the stamp has no shared implementation');
+  const body = utils.slice(start).replace(/\s+/g, ' ');
+
+  // Only a PNG/JPEG data URL is embedded. Anything else — a typed name that
+  // crept back in, a stale value from another field, null — is skipped so the
+  // printed name stays the only mark on the line.
+  assert.ok(
+    body.includes('^data:image\\/(png|jpeg|jpg);base64,'),
+    'the value is not checked for a PNG/JPEG data URL before being embedded'
+  );
+  assert.ok(
+    body.includes('if (!match) return false;'),
+    'a value that is not a signature image must be skipped, not embedded'
+  );
+
+  // The embed itself is guarded, and the failure is reported rather than thrown.
+  assert.ok(body.includes('try {'), 'the embed is not wrapped in a try');
+  assert.ok(
+    /catch \{[^}]*return false;/.test(body),
+    'a corrupt data URL must be swallowed and reported as "not stamped"'
+  );
+
+  // The boolean is the caller's only signal — Education branches on it.
+  assert.ok(body.includes('return true;'), 'the stamp no longer reports success');
+
+  // The pad emits PNG, but an uploaded signature may legitimately be a JPEG.
+  assert.ok(body.includes('embedPng'), 'PNG signatures are no longer embedded');
+  assert.ok(body.includes('embedJpg'), 'JPEG signatures are no longer embedded');
 });
 
 /** Parses `{ x: n, y: n, width: n, height: n }` out of a literal. */
