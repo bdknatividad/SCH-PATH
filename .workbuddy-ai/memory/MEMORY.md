@@ -127,6 +127,27 @@ wrong list comes back — so it needs tests, not a smoke test.
   runtime (`../../../frontend/public/forms`, `frontend/src/assets/sch-logo.png`).
   The Docker build context must be the **repository root**. Do not "fix" it to
   `backend/`.
+- **Every frontend file the backend resolves at request time must be in a
+  `COPY` line — the build will not tell you.** The image copies only the assets
+  that are read, so adding a runtime read means adding a COPY, and forgetting one
+  fails *only when the feature is used*. `frontend/src/shared/triLayout.json` was
+  omitted for two days: `loadLayout()` reads it unconditionally, so every TRI
+  approval threw ENOENT inside a non-fatal catch, and the reviewer was told the
+  TRI was approved while nothing was filed. Pinned by
+  `backend/tests/tri-docker-assets.test.js`, which matches every
+  `path.resolve(…'frontend/…')` in `backend/src` against the COPY list, grouped by
+  basename (each helper tries a candidate list; only one needs to survive).
+  **Keep the Dockerfile's header inventory in step too** — an incomplete list of
+  runtime reads reads as a complete one.
+- **A publisher with a non-fatal catch needs a retry path.** `finalize` for a TRI
+  swallows a render failure so an approval is never rolled back — correct, but it
+  leaves the record Finalized with no document and nothing that retries it.
+  `publishMissingTriDocuments()` (run at boot) is that path. The Anecdotal Report
+  solves it the other way: it publishes *before* flipping the status, so a failure
+  leaves the report reviewable. Whichever a module picks, the other half is
+  mandatory. And a publish fault must be **reported** — `finalize` returns
+  `documentError` and `Tri.tsx` warns; a silent `documentId: null` is how this went
+  unnoticed.
 - `frontend/vercel.json`'s SPA rewrite excludes a whitelist of root paths. Any
   new file in `frontend/public/` **must** be added to that exclusion or it is
   served as `index.html`. `pdf.worker.mjs` is the one that breaks everything.
