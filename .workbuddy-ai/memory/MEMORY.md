@@ -130,12 +130,23 @@ wrong list comes back — so it needs tests, not a smoke test.
 - `frontend/vercel.json`'s SPA rewrite excludes a whitelist of root paths. Any
   new file in `frontend/public/` **must** be added to that exclusion or it is
   served as `index.html`. `pdf.worker.mjs` is the one that breaks everything.
-- **`/pdf.worker.mjs` must NOT be cached `immutable`.** It sits at an unhashed
-  URL, so a long cache means the next pdfjs upgrade leaves every returning
-  visitor with a worker that does not match the library — which presents as
-  "Unable to display the report form." for everyone who had visited before. It
-  is `max-age=0, must-revalidate` now; the file has an ETag, so the cost is a
-  304. `vercel.json` is JSON and cannot carry this comment, hence this entry.
+- **`/pdf.worker.mjs` must NOT be cached `immutable`, and its URL must carry a
+  version query.** Two separate traps, both proven in production on 2026-09-25:
+  1. It sits at an **unhashed** URL, so `immutable` is a one-way door. The worker
+     was once served `application/octet-stream` (two Content-Type rules in
+     `c5d95f1`, and Vercel's **last match wins**) plus `nosniff`, and because it
+     was `max-age=31536000, immutable` every browser that loaded the app in that
+     2h23m window kept the broken copy **for a year, without revalidating**. The
+     header was fixed in `2437e39` and it changed nothing for those browsers —
+     hence a **new URL** is the only cure. Now `max-age=0, must-revalidate` (the
+     file has an ETag, so the cost is a 304).
+  2. Every `GlobalWorkerOptions.workerSrc` must be
+     `` `/pdf.worker.mjs?v=${pdfjs.version}` `` — the version comes from `pdfjs`
+     itself, so a library bump changes the cache key and the worker cannot drift
+     out of step with the API that loads it. A bare path is the poisoned URL.
+  Pinned by `backend/tests/pdf-worker-cache-key.test.js`. `vercel.json` is JSON
+  and cannot carry this comment, hence this entry. General rule: **hashed paths
+  may be `immutable`; unhashed paths must revalidate.**
 - PDF form templates live in `frontend/public/forms/` (18 referenced, 20 on
   disk). If a generated PDF is blank in production, check the Docker context
   first.
