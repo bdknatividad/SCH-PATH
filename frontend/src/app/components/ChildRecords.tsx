@@ -114,6 +114,10 @@ import { describeError, request } from '@/services/api';
 import { systemDialog } from '@/app/components/SystemDialog';
 import { formatPHDate } from '@/utils/dateFormatter';
 import bodyMarkingsConfig from '@/app/config/bodyMarkings.json';
+import {
+  BodyMarkingEntry,
+  drawBodyMarkingsOnSlip,
+} from '@/app/utils/admissionSlipMarkings';
 
 // The body parts a piercing or tattoo can be recorded against. Read from the
 // same file `admissionController` validates against, so the dropdown and the API
@@ -138,18 +142,11 @@ type FormStep =
   | 2;
 
 /*
- * One piercing or tattoo recorded on the admission.
- *
- * `location` is one of BODY_MARKING_LOCATIONS and `type` one of
- * BODY_MARKING_TYPES; both are chosen from a dropdown so a stored marking can
- * be read back and compared. `description` is the free-text note — the design,
- * the size, anything the two dropdowns cannot say.
+ * One piercing or tattoo recorded on the admission — the type lives in
+ * `admissionSlipMarkings.ts` beside the code that prints it, because the slip a
+ * user opens from a resident's own page is drawn by a second writer and both
+ * have to describe the same shape.
  */
-interface BodyMarkingEntry {
-  type: string;
-  location: string;
-  description: string;
-}
 
 interface ChildFormState {
   firstName: string;
@@ -300,73 +297,6 @@ const PDF_HEIGHT = 612;
 
 const PRINT_FONT_SIZE = 11;
 const PRINT_LINE_HEIGHT = 13;
-
-/*
- * The official Admission Slip template has no body-marking area, so the
- * piercings and tattoos are printed into the free band that sits between the
- * "Houseparent on Duty" block and the "Attested by / Checked by / Noted by" row.
- *
- * Measured on the template (ink-free from y_top 492.3 to 531.4, full width), so
- * the four lines below occupy y_top 495.75..528 and clear both neighbours.
- * Changing any of these without re-measuring can collide with the Houseparent
- * label above or the Attested-by row below. See `bodyMarkingsSlipText`.
- */
-const MARKINGS_FONT_SIZE = 7;
-const MARKINGS_LINE_HEIGHT = 8.5;
-const MARKINGS_SLIP_MAX_LINES = 4;
-// 72 + 636 = 708, the right edge of the template's own widest line, so the block
-// lines up with the rest of the form instead of running past it.
-const MARKINGS_SLIP_WIDTH = 636;
-const MARKINGS_SLIP_BASELINE = 111;
-
-/**
- * The recorded piercings and tattoos as the single string the slip prints.
- *
- * Grouped by type so each kind's body parts read together, with a marking's note
- * following it in parentheses. `dropped` is the number of markings that did not
- * fit the band — it is printed rather than silently omitted, because a slip that
- * looks like a complete list when it is not is worse than one that says so.
- * `noteLimit` shortens the notes when even one marking will not fit.
- */
-function bodyMarkingsSlipText(
-  entries: BodyMarkingEntry[] | null | undefined,
-  dropped = 0,
-  noteLimit = BODY_MARKING_MAX_DESCRIPTION
-): string {
-  const list = (Array.isArray(entries) ? entries : []).filter(
-    (entry) => entry && String(entry.location || '').trim() !== ''
-  );
-
-  const parts: string[] = [];
-
-  for (const type of BODY_MARKING_TYPES) {
-    const inType = list.filter((entry) => entry.type === type);
-
-    if (inType.length === 0) continue;
-
-    const listed = inType
-      .map((entry) => {
-        const note = String(entry.description || '').trim();
-
-        if (!note) return entry.location;
-
-        const clipped =
-          note.length > noteLimit
-            ? `${note.slice(0, Math.max(1, noteLimit - 1)).trimEnd()}…`
-            : note;
-
-        return `${entry.location} (${clipped})`;
-      })
-      .join(', ');
-
-    parts.push(`${type}: ${listed}`);
-  }
-
-  const body = parts.join('; ');
-  const suffix = dropped > 0 ? `${body ? ' ' : ''}(+${dropped} more)` : '';
-
-  return `Piercings / Tattoos: ${body}${suffix}`;
-}
 
 const EMPTY_FORM: ChildFormState = {
   firstName: '',
@@ -3668,75 +3598,16 @@ export function ChildRecords() {
        * own. Nothing is drawn when nothing is on record, so a slip for a
        * resident with no markings is byte-for-byte what it was before.
        *
-       * The band holds MARKINGS_SLIP_MAX_LINES lines. When the whole list will
-       * not fit, whole markings are dropped from the end and the number dropped
-       * is printed; when even one will not fit, its note is shortened instead of
-       * the marking being lost.
+       * The drawing lives in `admissionSlipMarkings.ts` rather than here: the
+       * slip a user opens from a resident's own page is drawn by a second writer
+       * in ChildDetail.tsx, and a block added to one of them only prints on the
+       * slips that writer produces.
        */
-      const recordedMarkings = (
-        Array.isArray(admission.bodyMarkings)
-          ? admission.bodyMarkings
-          : []
-      ).filter(
-        (entry) => entry && String(entry.location || '').trim() !== ''
+      drawBodyMarkingsOnSlip(
+        page,
+        font,
+        admission.bodyMarkings
       );
-
-      if (recordedMarkings.length > 0) {
-        const markingFits = (
-          text: string
-        ) =>
-          wrapText(
-            text,
-            font,
-            MARKINGS_FONT_SIZE,
-            MARKINGS_SLIP_WIDTH,
-            MARKINGS_SLIP_MAX_LINES + 1
-          ).length <= MARKINGS_SLIP_MAX_LINES;
-
-        let kept =
-          recordedMarkings.length;
-
-        let noteLimit =
-          BODY_MARKING_MAX_DESCRIPTION;
-
-        let slipMarkings =
-          bodyMarkingsSlipText(
-            recordedMarkings
-          );
-
-        while (
-          !markingFits(slipMarkings)
-        ) {
-          if (kept > 1) {
-            kept -= 1;
-          } else if (noteLimit > 8) {
-            noteLimit =
-              Math.max(
-                8,
-                Math.floor(noteLimit / 2)
-              );
-          } else {
-            break;
-          }
-
-          slipMarkings =
-            bodyMarkingsSlipText(
-              recordedMarkings.slice(0, kept),
-              recordedMarkings.length - kept,
-              noteLimit
-            );
-        }
-
-        drawWrappedText(
-          slipMarkings,
-          72.0,
-          MARKINGS_SLIP_BASELINE,
-          MARKINGS_FONT_SIZE,
-          MARKINGS_SLIP_WIDTH,
-          MARKINGS_LINE_HEIGHT,
-          MARKINGS_SLIP_MAX_LINES
-        );
-      }
 
       /* ==========================================================
          RESIDENT PHOTO

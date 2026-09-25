@@ -35,6 +35,10 @@ import {
   drawSignatureImage,
   toPdfBox,
 } from '@/app/utils/signaturePdf';
+import {
+  BodyMarkingEntry,
+  drawBodyMarkingsOnSlip,
+} from '@/app/utils/admissionSlipMarkings';
 import { Document as PdfDocument, Page as PdfPage, pdfjs } from 'react-pdf';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
@@ -205,6 +209,13 @@ interface AdmissionRecord {
   legalCategory: string;
   specificOffense: string;
   residentImage?: string | null;
+  /*
+   * The piercings and tattoos recorded at this admission. `GET
+   * /admissions/resident/:id` selects the column and the `admissions` resource
+   * declares it as a jsonField, so this arrives as a list rather than as the
+   * raw JSON text — and as NULL when nothing was recorded.
+   */
+  bodyMarkings?: BodyMarkingEntry[] | null;
   status?: string;
 }
 
@@ -577,6 +588,22 @@ export function ChildDetail({ id: idProp, onBack }: ChildDetailProps = {}) {
         pdfDoc,
         admission.houseparentSignature,
         toPdfBox(ADMISSION_HOUSEPARENT_SIGNATURE_BOX, PDF_HEIGHT)
+      );
+
+      /*
+       * The piercings and tattoos recorded at admission, printed into the free
+       * band between the Houseparent block and the Attested-by row.
+       *
+       * This is the writer a user actually reaches: the View button on
+       * /children navigates to /children/:id, so the slip opened from a
+       * resident's own page is this one, not Child Records' copy. The block was
+       * first added to that other copy only, and the generated PDF printed
+       * without it — hence one shared helper rather than a second drawing.
+       */
+      drawBodyMarkingsOnSlip(
+        page,
+        font,
+        admission.bodyMarkings
       );
 
       if (admission.residentImage) {

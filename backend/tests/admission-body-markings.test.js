@@ -22,6 +22,12 @@
  * the `admissions` resource as a jsonField. A column that is in the table but not
  * in `RESOURCES[].columns` never reaches the browser: `mapRow` copies only the
  * declared columns, so the feature would save and then read back empty.
+ *
+ * The printed slip is a second surface with a trap of its own: the app draws the
+ * same slip from two writers, and the one a user reaches from a resident's page
+ * is not the one on the admission editor. Both now call one shared helper, and
+ * `frontend/src/app/utils/admissionSlipMarkings.ts` is where its geometry is
+ * pinned.
  */
 
 process.env.JWT_SECRET = process.env.JWT_SECRET || 'test-secret';
@@ -44,6 +50,8 @@ const CONSTANTS = read('backend/src/utils/constants.js');
 const SERVER = read('backend/src/server.js');
 const SCHEMA = read('backend/src/database/schema.sql');
 const RECORDS = read('frontend/src/app/components/ChildRecords.tsx');
+const DETAIL = read('frontend/src/app/components/ChildDetail.tsx');
+const SLIP_MARKINGS = read('frontend/src/app/utils/admissionSlipMarkings.ts');
 
 const { normalizeBodyMarkings } = require('../src/controllers/admissionController');
 
@@ -550,29 +558,96 @@ test('the printed Admission Slip carries the markings', () => {
     RECORDS.indexOf('const generateAdmissionSlipPdf =') + 12000,
   );
   assert.ok(generator.length > 5000, 'the slip generator sliced to nothing');
-  assert.match(generator, /Array\.isArray\(admission\.bodyMarkings\)/, 'the generator ignores the markings');
-  assert.match(generator, /bodyMarkingsSlipText\(/, 'the generator never builds the markings text');
-  assert.match(generator, /drawWrappedText\(\s*slipMarkings/, 'the markings text is built but never drawn');
-
-  // Only when there is something to print: a resident with no markings must
-  // produce the same slip it produced before this feature existed.
   assert.match(
     generator,
-    /if \(recordedMarkings\.length > 0\) \{/,
-    'the block would draw even with nothing on record',
+    /drawBodyMarkingsOnSlip\(\s*page,\s*font,\s*admission\.bodyMarkings\s*\)/,
+    'the generator does not draw the markings onto the slip',
   );
 });
 
+test('the two slip writers share one drawing, and both call it', () => {
+  // There are two writers of the same slip and they are not identical —
+  // ChildRecords.tsx's `generateAdmissionSlipPdf` and ChildDetail.tsx's
+  // `handlePrintAdmission` carry their own coordinates. The markings were first
+  // added to the Child Records writer alone, and the slip a user opens from a
+  // resident's own page printed without them: the View button on /children
+  // navigates to /children/:id, so it is ChildDetail's copy that gets used.
+  //
+  // The live check found it by reading the generated PDF's text layer, which is
+  // the only place the omission is visible — both writers produce a PDF, and the
+  // one without the markings looks perfectly correct on its own.
+  const callIn = (source, label) => {
+    const match = source.match(/drawBodyMarkingsOnSlip\(([^;]*?)\)/);
+    assert.ok(match, `${label} never draws the markings onto the slip`);
+    assert.match(match[1], /page/, `${label} does not pass the page`);
+    assert.match(match[1], /font/, `${label} does not pass the font`);
+    assert.match(
+      match[1],
+      /bodyMarkings/,
+      `${label} does not pass the recorded markings`,
+    );
+  };
+
+  callIn(RECORDS, 'Child Records');
+  callIn(DETAIL, 'the resident page');
+
+  // And one implementation, so the two cannot drift apart again. A second copy
+  // of the geometry would be the same defect with a different coordinate.
+  const copies = [RECORDS, DETAIL].filter((source) =>
+    /function bodyMarkingsSlipText\(/.test(source),
+  );
+  assert.equal(
+    copies.length,
+    0,
+    'a slip writer carries its own copy of the markings text builder instead of the shared one',
+  );
+
+  // The helper is imported, not re-implemented: the type comes from the same
+  // module, so the two writers cannot describe the marking shape differently.
+  for (const [label, source] of [['Child Records', RECORDS], ['the resident page', DETAIL]]) {
+    assert.match(
+      source,
+      /from '@\/app\/utils\/admissionSlipMarkings'/,
+      `${label} does not import the shared markings helper`,
+    );
+    assert.match(
+      source,
+      /BodyMarkingEntry,/,
+      `${label} does not take the marking type from the shared module`,
+    );
+  }
+});
+
+test('the resident page reads the markings off the admission it was given', () => {
+  // The resident page's admission list comes from `GET /admissions/resident/:id`.
+  // The column has to survive that read, or the writer is handed `undefined` and
+  // prints nothing however correct its drawing is — the failure mode is a
+  // silently blank band, not an error.
+  const record = DETAIL.slice(
+    DETAIL.indexOf('interface AdmissionRecord {'),
+    DETAIL.indexOf('interface AdmissionRecord {') + 1500,
+  );
+  assert.ok(record.length > 500, 'AdmissionRecord sliced to nothing');
+  assert.match(
+    record,
+    /bodyMarkings\?: BodyMarkingEntry\[\] \| null;/,
+    'the resident page does not carry the markings on its admission type',
+  );
+
+  // And the endpoint it reads them from still selects the column as a jsonField.
+  assert.match(CONTROLLER, /SELECT \*\s*FROM admissions\s*WHERE residentId = \?/);
+});
+
 test('the slip text names the type, keeps the note, and admits what it dropped', () => {
-  const helper = RECORDS.slice(
-    RECORDS.indexOf('function bodyMarkingsSlipText('),
-    RECORDS.indexOf('const EMPTY_FORM'),
+  const helper = SLIP_MARKINGS.slice(
+    SLIP_MARKINGS.indexOf('export function bodyMarkingsSlipText('),
+    SLIP_MARKINGS.indexOf('/** How many lines'),
   );
   assert.ok(helper.length > 400, 'the helper sliced to nothing');
 
   // The vocabulary is iterated, not restated, so the printed grouping cannot
   // drift from the dropdown's list.
-  assert.ok(helper.includes('for (const type of BODY_MARKING_TYPES)'), 'the list is not grouped by type');
+  assert.ok(helper.includes('for (const type of MARKING_TYPES)'), 'the list is not grouped by type');
   // The note follows its own marking, so a note can never be read as belonging
   // to the next body part in the list.
   assert.ok(helper.includes('entry.location} (${clipped})'), 'a note is not printed with its marking');
@@ -594,16 +669,17 @@ test('the printed block stays inside the free band on the template', () => {
   // adding a line can collide with either neighbour, and no other test would
   // notice — the PDF would simply print on top of a signature line.
   const num = (name) => {
-    const m = RECORDS.match(new RegExp(`const ${name} = ([0-9.]+);`));
-    assert.ok(m, `${name} is gone from the component`);
+    const m = SLIP_MARKINGS.match(new RegExp(`const ${name} = ([0-9.]+);`));
+    assert.ok(m, `${name} is gone from the shared helper`);
     return Number(m[1]);
   };
 
-  const size = num('MARKINGS_FONT_SIZE');
-  const leading = num('MARKINGS_LINE_HEIGHT');
-  const lines = num('MARKINGS_SLIP_MAX_LINES');
-  const baseline = num('MARKINGS_SLIP_BASELINE');
-  const width = num('MARKINGS_SLIP_WIDTH');
+  const size = num('FONT_SIZE');
+  const leading = num('LINE_HEIGHT');
+  const lines = num('MAX_LINES');
+  const baseline = num('BASELINE');
+  const width = num('WIDTH');
+  const left = num('LEFT');
 
   assert.ok(leading > size, `line height ${leading} is not greater than font size ${size}`);
   assert.ok(lines >= 1 && lines <= 6, `the block claims ${lines} lines`);
@@ -613,8 +689,8 @@ test('the printed block stays inside the free band on the template', () => {
   const houseparentEdge = PAGE_HEIGHT - 492.3; // 119.7
   const attestedEdge = PAGE_HEIGHT - 531.4; // 80.6
 
-  // `drawWrappedText` draws line `index` at `y - index * lineHeight`, so the
-  // first line is the highest and the last is the lowest.
+  // `drawBodyMarkingsOnSlip` draws line `index` at `y - index * lineHeight`, so
+  // the first line is the highest and the last is the lowest.
   const highest = baseline + size * 0.75;
   const lowest = baseline - (lines - 1) * leading - size * 0.25;
 
@@ -627,7 +703,7 @@ test('the printed block stays inside the free band on the template', () => {
     `the block drops to y=${lowest.toFixed(2)}, into the Attested-by row at ${attestedEdge}`,
   );
 
-  // It is drawn at x=72 with this width, and must stay on the page and within
+  // It is drawn at this x with this width, and must stay on the page and within
   // the template's own right margin (its widest line ends at 708.3).
-  assert.equal(72 + width <= 708, true, `the block runs to x=${72 + width}, past the form's right margin`);
+  assert.equal(left + width <= 708, true, `the block runs to x=${left + width}, past the form's right margin`);
 });
