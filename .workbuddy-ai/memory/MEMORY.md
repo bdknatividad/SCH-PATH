@@ -193,7 +193,20 @@ which is a deliberate access change awaiting a decision. Note also that the seed
 never writes `admissions.houseparentOnDuty`, so the legacy fallback in
 `residentScope.js` does not cover seeded Houseparents.
 
-## Two traps that make a failure look like a non-failure
+## Traps that make a failure look like a non-failure
+
+**One shared try/catch in `seedDatabase()` made the whole seed skippable.** The
+steps used to run inside a single try/catch, so the first failure silently
+skipped every later step. Measured on production: `seedDefaultUsers` threw
+`Duplicate entry 'UHP01'` because the seed looks users up *by username* but
+inserts *by id*, and an operator had renamed `HP 1` → `HP1` (freeing the
+username, keeping the id). That one error meant `reconcileSeededAccessGrants`,
+`seedResidentAssignments` and the violation-guide sync **never ran on any boot**
+— shipped, deployed, and inert. Fixed in `5b68857`: `runSeedStep` isolates each
+step, the id is treated as the account's identity (a rename is reported, not
+thrown), and the reconciliation runs **first**. If a seed step's effect is ever
+missing again, check the boot log for `Seeding step failed (...)` before
+suspecting the deploy.
 
 **`/store` swallows per-table errors.** Each table in the bulk load is wrapped in
 try/catch and assigned `[]` on error, logged only server-side. So a *broken*
@@ -221,3 +234,33 @@ restart-loop the service, and `tests/health-readiness.test.js` pins the
 separation. `railway.toml`'s `healthcheckPath` is still `/api/health`; changing it
 to `/api/health/db` is a deliberate choice (restart-on-DB-loss) that has not been
 made.
+
+## Inspecting the Railway deployment (read the build log, don't guess)
+
+The deploy state is **not** inferrable from the live API. "The behaviour did not
+change after my push" is consistent with *both* "the deploy failed" and "the code
+ran and did nothing" — and on 2026-09-25 I picked the wrong one and told the user
+the deploy was stuck for 17 hours when it had been building fine all along. What
+settled it was the **runtime log**, which is only reachable through Railway's API.
+
+Endpoint `https://backboard.railway.com/graphql/v2`. A **workspace** token uses
+`Authorization: Bearer <t>`; a project token uses `Project-Access-Token` instead.
+`me` is unavailable to a workspace token by design, so start from
+`projects(first: 20)` rather than `me`.
+
+Project `fabulous-radiance` `840f2fbc-7579-4294-9715-8c0cfd7d06a7`, service
+`SCH-PATH` `b5fb305f-e348-4f2f-982b-49fbd38e929f`, environment `production`
+`655addcf-10cf-4feb-b720-b2b5775790d1`. (`MySQL` is a second service in the same
+project.)
+
+```
+deployments(input: {projectId, environmentId, serviceId}, first: N)
+  { edges { node { id status createdAt meta } } }        # meta.commitHash
+deploymentLogs(deploymentId: $id, limit: 1000) { timestamp message severity }
+buildLogs(deploymentId: $id) { ... }
+```
+
+The helpers are `C:/tmp/railway*.js`; they read the token from
+`C:/tmp/.railway-token`. **Delete that file and revoke the token when finished.**
+Note a deployment list shows only the newest as live — older entries read
+`REMOVED`, which looks like a stall but is just supersession.
