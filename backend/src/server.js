@@ -2522,6 +2522,47 @@ async function startServer() {
       console.error('   Accepted Anecdotal Reports cannot be published until it is restored.');
     }
 
+    // ── Fail fast on a missing TRI template or layout ──
+    // Approving a TRI publishes the official form into the resident's Documents,
+    // and that publish is deliberately non-fatal so an approval is never rolled
+    // back. The two together hide a missing asset completely: the TRI is approved,
+    // no document is filed, and nothing anywhere says so. That is exactly how the
+    // Dockerfile came to omit `frontend/src/shared/triLayout.json` — the build
+    // succeeded and only publishing failed. Report both here, where a deploy log
+    // shows it.
+    const { triTemplatePath, loadLayout, LAYOUT_PATH } = require('./utils/triReportPdf');
+    const triTemplate = triTemplatePath();
+    if (triTemplate) {
+      console.log(`TRI template: ${triTemplate}`);
+    } else {
+      console.error('❌ The official TRI template could not be found.');
+      console.error('   Expected at frontend/public/forms/tri.pdf');
+      console.error('   Approved TRIs cannot be published until it is restored.');
+    }
+    try {
+      loadLayout();
+      console.log(`TRI layout: ${LAYOUT_PATH}`);
+    } catch (layoutError) {
+      console.error(`❌ The TRI layout could not be read: ${layoutError.message}`);
+      console.error(`   Expected at ${LAYOUT_PATH}`);
+      console.error('   Approved TRIs cannot be published until it is restored.');
+    }
+
+    // ── File any TRI approved while publishing was broken ──
+    // `finalize` publishes inside a non-fatal catch, so a failed publish leaves a
+    // Finalized record with no document and no way to re-run it. This is that way.
+    // Idempotent — it selects only Finalized TRIs with no linked document — so it
+    // is a no-op once the backlog is clear.
+    try {
+      const { publishMissingTriDocuments } = require('./controllers/triController');
+      const repaired = await publishMissingTriDocuments();
+      if (repaired.filed > 0) {
+        console.log(`Repaired ${repaired.filed} of ${repaired.missing} approved TRI record(s) missing their document.`);
+      }
+    } catch (repairError) {
+      console.warn('TRI document backfill skipped:', repairError.message);
+    }
+
     // Seed default users
     await seedDatabase();
     

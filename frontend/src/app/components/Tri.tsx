@@ -1615,14 +1615,35 @@ export function Tri() {
     // whole round trip and the outcome dialog would open underneath it.
     setShowFinalizeDialog(false);
     try {
-      const result = await request<{ success: boolean; data: TriRecord }>('/tri/' + selectedRecord.id + '/finalize', { method: 'POST' });
+      const result = await request<{
+        success: boolean;
+        data: TriRecord;
+        documentId?: string | null;
+        documentError?: string | null;
+      }>('/tri/' + selectedRecord.id + '/finalize', { method: 'POST' });
       setRecords(prev => prev.map(r => r.id === result.data.id ? result.data : r));
       setSelectedRecord(result.data);
       await fetchRecords();
-      await dialog.success(
-        'TRI approved.',
-        'The rating is now the resident\'s official monthly result and the record can no longer be edited.',
-      );
+      if (result.documentId) {
+        await dialog.success(
+          'TRI approved.',
+          'The rating is now the resident\'s official monthly result, the record can no longer be edited, and the official form is in the resident\'s Documents.',
+        );
+      } else {
+        // The approval stands — publishing is deliberately non-fatal so a rendering
+        // fault can never roll back a reviewer's decision — but the official form
+        // did not reach the resident's Documents. Reporting only "approved" would
+        // leave the reviewer believing it had, which is how a broken publish went
+        // unnoticed. The server files anything still missing on its next restart.
+        await dialog.notify({
+          tone: 'warning',
+          title: 'TRI approved, but the form was not filed.',
+          description:
+            'The rating is the resident\'s official monthly result and the record is locked, but the official form could not be added to their Documents.'
+            + (result.documentError ? ` Reason: ${result.documentError}` : '')
+            + ' The system will file it automatically the next time the server restarts.',
+        });
+      }
     } catch (err: any) {
       setError(describeError(err, 'Failed to approve the TRI.'));
       await dialog.failure('Could not approve the TRI', describeError(err, 'The TRI was not approved. Please try again.'));

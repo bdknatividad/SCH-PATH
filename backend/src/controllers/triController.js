@@ -549,10 +549,18 @@ async function finalize(req, res, next) {
 
     // Publish the official form into the resident's Documents folder. Done before
     // the notification so the alert can say whether the file actually landed.
+    //
+    // The failure is reported rather than only logged. Swallowing it silently is
+    // what let a missing Docker asset go unnoticed for a week: every approval
+    // answered 200 with `documentId: null`, and both the reviewer and the client
+    // treated that as success. The reviewer is told the TRI was approved and has no
+    // reason to look for the file — so the caller gets `documentError` to show.
     let documentId = null;
+    let documentError = null;
     try {
       documentId = await publishDocumentForTri(finalized, req.user.username);
     } catch (perr) {
+      documentError = perr.message;
       console.error(`[TRI Controller] Publishing the TRI PDF for ${record.id} failed (non-fatal):`, perr.message);
     }
 
@@ -566,7 +574,7 @@ async function finalize(req, res, next) {
         + (documentId ? ' The official form is now in the resident\u2019s Documents.' : ''),
       dedupeKey: `tri:${record.id}:approved:${finalized.finalizedAt}`,
     });
-    res.json({ success: true, data: mapRecord(finalized), documentId });
+    res.json({ success: true, data: mapRecord(finalized), documentId, documentError });
   } catch (error) { next(error); }
 }
 
@@ -732,7 +740,65 @@ async function monitor(req, res, next) {
   } catch (error) { next(error); }
 }
 
+/**
+ * Files the published document for every Finalized TRI that does not have one.
+ *
+ * `finalize` publishes inside a non-fatal `catch`, so that a render failure can
+ * never roll back a reviewer's approval. The price of that choice is that the
+ * failure is invisible: the record ends up Finalized, no document is written, and
+ * the reviewer is told the TRI was approved. Nothing retries it.
+ *
+ * That is not hypothetical. `backend/Dockerfile` did not copy
+ * `frontend/src/shared/triLayout.json`, which `loadLayout()` reads
+ * unconditionally, so every approval on the deployed backend threw `ENOENT` and
+ * filed nothing — TRI001, TRI002 and TRI003 were all in that state when it was
+ * found on 2026-09-25. The Anecdotal Report's `finalize` avoids the trap by
+ * publishing *before* it flips the status; the TRI deliberately does not, because
+ * an approval must not be lost to a rendering fault. This is the retry path that
+ * decision requires.
+ *
+ * Idempotent, so it is safe on every boot: a TRI that already has a document is
+ * never selected, and `documents.triRecordId` carries a unique index as well. Once
+ * the backlog is clear it is a no-op. A per-record failure is logged and skipped —
+ * one unrenderable record must not strand the rest.
+ *
+ * @param {{ limit?: number }} [options]
+ * @returns {Promise<{ missing: number, filed: number }>}
+ */
+async function publishMissingTriDocuments({ limit = 50 } = {}) {
+  // Inlined rather than bound: MySQL does not accept a placeholder for LIMIT in
+  // every form, and this value is never caller-supplied.
+  const capped = Math.max(1, Math.min(Number(limit) || 50, 500));
+
+  let rows;
+  try {
+    [rows] = await pool.query(
+      `SELECT t.* FROM triRecords t
+         LEFT JOIN documents d ON d.triRecordId = t.id
+        WHERE t.status = 'Finalized' AND d.id IS NULL
+        ORDER BY t.finalizedAt ASC
+        LIMIT ${capped}`
+    );
+  } catch {
+    // `triRecords` is created lazily by `ensureTable()`; a database that has never
+    // used the module has nothing to repair, and that is not an error.
+    return { missing: 0, filed: 0 };
+  }
+  if (!rows.length) return { missing: 0, filed: 0 };
+
+  let filed = 0;
+  for (const row of rows) {
+    try {
+      await publishDocumentForTri(mapRecord(row), row.finalizedBy || row.reviewedBy || 'system');
+      filed += 1;
+    } catch (error) {
+      console.error(`[TRI Controller] Backfill: could not file the document for ${row.id}: ${error.message}`);
+    }
+  }
+  return { missing: rows.length, filed };
+}
+
 // `publishDocumentForTri` is exported for the idempotency test: approving the same
 // record twice must update one Documents entry, and finalize() refuses the second
 // attempt before it can be observed over HTTP.
-module.exports = { list, getById, create, update, submit, review, returnForRevision, finalize, sign, referenceViolations, summary, residentHistory, offenseDeductions, monitor, publishDocumentForTri };
+module.exports = { list, getById, create, update, submit, review, returnForRevision, finalize, sign, referenceViolations, summary, residentHistory, offenseDeductions, monitor, publishDocumentForTri, publishMissingTriDocuments };

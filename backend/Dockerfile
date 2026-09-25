@@ -8,6 +8,7 @@
 #   frontend/public/forms/Anecdotal Report.pdf   → published Anecdotal Reports
 #   frontend/public/forms/tri.pdf               → published TRI records
 #   frontend/public/forms/incident-report.pdf   → published Incident Reports
+#   frontend/src/shared/triLayout.json          → published TRI records (field geometry)
 #   frontend/src/assets/sch-logo.png            → Health + Quarterly PDF headers
 #
 # A backend-only build context would omit these and every one of those
@@ -53,6 +54,15 @@ COPY backend/src ./backend/src
 # are covered by the one file below.
 COPY frontend/public/forms ./frontend/public/forms
 COPY frontend/src/assets/sch-logo.png ./frontend/src/assets/sch-logo.png
+# `frontend/src/shared/` is the convention for a rule both runtimes read (the
+# frontend positions the overlay inputs from this file; the backend draws the
+# fields at the same coordinates). The TRI publisher reads it at request time, so
+# omitting it does not fail the build — it fails *publishing*, silently, because
+# `publishDocumentForTri` treats a render failure as non-fatal so an approval is
+# never rolled back. The result was an approved TRI filed nowhere in the
+# resident's Documents. `tri-docker-assets.test.js` now pins every runtime read
+# against these COPY lines.
+COPY frontend/src/shared/triLayout.json ./frontend/src/shared/triLayout.json
 
 # Run as the non-root user the base image provides.
 RUN chown -R node:node /app
