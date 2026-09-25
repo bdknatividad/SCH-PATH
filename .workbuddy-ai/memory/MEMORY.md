@@ -146,6 +146,11 @@ created (`ensureTable`, `server.js` boot migration, `schema.sql`). Applied to
   must survive; the regex requires a file extension so `frontend/dist` is
   excluded). **Keep the Dockerfile's header inventory in step too** — an
   incomplete list of runtime reads reads as a complete one.
+  *Scope note:* only the **frontend tree** is copied file-by-file. Backend code is
+  `COPY backend/src ./backend/src` — a directory copy — so a new controller,
+  service or route needs **no** Dockerfile change. Confirmed in the build log on
+  2026-09-25 (`[runtime 5/10] COPY backend/src`), which is why `alertStream.js`
+  shipped with no Dockerfile edit.
 - **A publisher with a non-fatal catch needs a retry path.** `finalize` for a TRI
   swallows a render failure so an approval is never rolled back — correct, but it
   leaves the record Finalized with no document and nothing retries it.
@@ -306,8 +311,14 @@ deliberate restart-on-DB-loss choice not yet made.
 ## Inspecting the Railway deployment (read the log, don't guess)
 
 Endpoint `https://backboard.railway.com/graphql/v2`. A **workspace** token uses
-`Authorization: Bearer <t>`; a project token uses `Project-Access-Token`. `me` is
-unavailable to a workspace token by design, so start from `projects(first: 20)`.
+`Authorization: Bearer <t>`; a project token uses `Project-Access-Token`.
+
+**Never probe a workspace token with `me` or `projectToken`.** Railway refuses both
+for a workspace token, and because **one unauthorised field invalidates the whole
+GraphQL selection set**, a probe that includes them makes queries that would
+otherwise work report `Not Authorized`. That produced a wrong conclusion on
+2026-09-25 — "the token has been revoked" — when the token was fine. Go straight
+to the known ids instead: `{ projects(first: 20) { edges { node { id name } } } }`.
 
 Project `fabulous-radiance` `840f2fbc-7579-4294-9715-8c0cfd7d06a7`; services
 `SCH-PATH` `b5fb305f-e348-4f2f-982b-49fbd38e929f` and `MySQL`
@@ -316,21 +327,24 @@ Project `fabulous-radiance` `840f2fbc-7579-4294-9715-8c0cfd7d06a7`; services
 `fabulous-radiance`, not "SCH-PATH".)
 
 ```
-deployments(input: {projectId, environmentId, serviceId}, first: N)
-  { edges { node { id status createdAt meta } } }        # meta.commitHash
-deploymentLogs(deploymentId: $id, limit: 1000) { timestamp message severity }
-buildLogs(deploymentId: $id) { ... }
+deployments(first: N, input: {projectId, environmentId, serviceId})
+  { edges { node { id status createdAt updatedAt meta } } }   # meta.commitHash
+deploymentLogs(deploymentId: $id, limit: 400) { timestamp message severity }
+buildLogs(deploymentId: $id) { timestamp message severity }
 ```
 
-Helpers are `C:/tmp/railway*.js`, reading the token from `C:/tmp/.railway-token`.
-**Delete that file and revoke the token when finished.** A deployment list shows
-only the newest as live; older entries read `REMOVED` (superseded), which looks
-like a stall but is not.
+`C:/tmp/railway-deploy.js` lists deployments and dumps the runtime log;
+`C:/tmp/railway-build.js` dumps the build log and filters error-severity lines
+from both. Both read `RAILWAY_TOKEN` from the environment — pass it inline rather
+than writing a file, so the secret is never persisted.
 
-**As of 2026-09-25 the token file does not exist** and no `RAILWAY_*` env var is
-set, so the GraphQL helpers will fail. The token used earlier (`84e36095-…`) was
-deleted from disk and the user was asked to revoke it in the UI. Request a fresh
-one before reaching for these helpers.
+Only the newest deployment is live; older entries read `REMOVED` (superseded),
+which looks like a stall but is not. `meta.commitHash` is how you tell which
+commit is actually serving.
+
+**The workspace token supplied 2026-09-25 (`84e36095-…`) was still valid at
+14:37 that day.** Prefer it over asking the user for a new one; if it does stop
+working the failure is `Not Authorized` on `projects`, which is unambiguous.
 
 ## Local tooling
 
