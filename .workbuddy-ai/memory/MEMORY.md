@@ -97,14 +97,14 @@ zone**, and the database holds **UTC**. JS parses a zone-less date-time as
   **142 kB gzip** (currently 110.85 / 32.76 kB).
 - `vite build` does **not** run `tsc`; 9 long-standing type errors
   (`AssessmentDetail.tsx` 4, `ChildDetail.tsx` 3, `Assessments.tsx` 1,
-  `ChildRecords.tsx` 1) do not block the build. Do not "fix" them casually.
+  `ChildRecords.tsx` 1) do not block the build.
 - **`vite build` cannot finish in this sandbox** — the safe-delete shim refuses to
   empty `dist/assets` (`SAFE_DELETE_BULK_CONFIRM_REQUIRED`). Every module is
   transformed first, so the code is verified; for a real artifact build use a
   throwaway dir: `vite build --outDir /c/tmp/dist-verify --emptyOutDir`.
 - Uploads are **base64 inside MySQL `LONGTEXT`** — no filesystem or S3 layer, so DB
   size is the free-tier constraint. MySQL is mandatory (`ON DUPLICATE KEY UPDATE`,
-  `INFORMATION_SCHEMA`, `max_allowed_packet`).
+  `INFORMATION_SCHEMA`).
 - The backend reads PDF templates and the logo from the **frontend tree** at
   runtime, so the Docker context is the **repository root**, not `backend/`.
   `COPY backend/src ./backend/src` is a **directory** copy — a new
@@ -114,9 +114,9 @@ zone**, and the database holds **UTC**. JS parses a zone-less date-time as
   every TRI approval throw ENOENT silently — `tests/tri-docker-assets.test.js`).
 - **A publisher with a non-fatal catch needs a retry path.** TRI `finalize` swallows
   a render failure so an approval is never rolled back, so
-  `publishMissingTriDocuments()` (at boot) exists to finish the job; the Anecdotal
-  Report publishes *before* flipping status instead. A publish fault must be
-  **reported** — a silent `documentId: null` is how this went unnoticed.
+  `publishMissingTriDocuments()` (at boot) finishes the job; the Anecdotal Report
+  publishes *before* flipping status instead. A publish fault must be **reported** —
+  a silent `documentId: null` hides it.
 - `frontend/vercel.json`'s SPA rewrite excludes a whitelist of root paths; a new
   file in `frontend/public/` **must** be added or it is served as `index.html`.
 - **`/pdf.worker.mjs` must not be `immutable`, and its URL must carry a version
@@ -131,6 +131,8 @@ zone**, and the database holds **UTC**. JS parses a zone-less date-time as
   exports `API_BASE_URL`/`apiUrl` for callers that cannot use `request()`.
   Consequence: **a local build's entry-chunk hash can never equal the deployed
   one** — compare the chunk's *content*, not its filename.
+- **Railway redeploys on every push to `master`** — a docs-only commit restarts
+  production. Batch memory/comment commits; do not push one per edit.
 
 ## Notifications
 
