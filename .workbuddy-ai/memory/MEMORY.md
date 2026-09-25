@@ -28,8 +28,8 @@ assert rendered output not HTTP 200s), the **API** with a bearer token.
   `toIsoInstant`'s length check returns before its regex runs.
 - **The harness must not run the suite.** A node process cannot spawn the managed
   node binary — `execFileSync` returns `status: null` and *throws*, so a harness
-  treating "threw" as failure marks every mutation caught. `mut.js` edits files
-  only; `mutate.sh` runs the suite from **bash**.
+  treating "threw" as failure marks every mutation caught. `mutate.sh` runs the
+  suite from **bash**.
 - **A bare identifier not in scope is a live 500, not a load error.**
   `violationGuideController` called `normalizeRole` without importing it, so every
   `PUT /intervention-tracker/:id` carrying `scheduledAt` threw `ReferenceError` →
@@ -120,11 +120,11 @@ zone**, and the database holds **UTC**. JS parses a zone-less date-time as
   file in `frontend/public/` **must** be added or it is served as `index.html`.
 - **`/pdf.worker.mjs` must not be `immutable`, and its URL must carry a version
   query.** It sits at an **unhashed** URL, so `immutable` is a one-way door — served
-  once with a bad Content-Type it stayed broken in every browser for a year, and
-  fixing the header changed nothing, so a **new URL** is the only cure. Every
+  once with a bad Content-Type it stayed broken for a year, and fixing the header
+  changed nothing, so a **new URL** is the only cure. Every
   `GlobalWorkerOptions.workerSrc` must be `` `/pdf.worker.mjs?v=${pdfjs.version}` ``
-  (`tests/pdf-worker-cache-key.test.js`). **Hashed paths may be `immutable`; unhashed
-  paths must revalidate.**
+  (`tests/pdf-worker-cache-key.test.js`). **Unhashed paths must revalidate; hashed
+  ones may be `immutable`.**
 - `VITE_API_URL` is baked at build time and **must** be set on Vercel; the baseline
   hardcoded `'/api'`, breaking every request on the split deployment. `api.ts`
   exports `API_BASE_URL`/`apiUrl` for callers that cannot use `request()`.
@@ -139,8 +139,7 @@ SSE via `services/alertStream.js` + `GET /api/alerts/stream` (30s poll is the
 fallback). The frame carries no data, so `GET /api/alerts` stays the single
 visibility implementation; use `fetch` + `ReadableStream`, **not `EventSource`**.
 **`targetRole` is one column, so a role-addressed row reaches exactly one role** —
-address **one row per user** (`usersWithAnyRole` + `notifyUsers`), deriving gate
-and notification from **one constant**.
+address **one row per user** (`usersWithAnyRole` + `notifyUsers`).
 
 ## Access model
 
@@ -155,9 +154,8 @@ Roles: `centerhead` (fullAccess), `admin`, `nurse`, `psychologist`, `educator`,
   `roleCanReachMedicalTab` / `roleCanReachHealth`.
 - **The write path for `accessibleModules` is `accessDefaults.canonicalizeModules`**
   (`userController` 209/366/544/666, `server.js:1324`): delegate to
-  `rbac.normalizeModuleKey` (the one place that knows every legacy spelling), then
-  order by `MODULE_ORDER`. Being the write path, a dropped alias is a **silent
-  revocation**.
+  `rbac.normalizeModuleKey`, then order by `MODULE_ORDER`. Being the write path, a
+  dropped alias is a **silent revocation**.
 - **Read `[]` carefully.** The boot migration refills `accessibleModules` only for
   `nurse`/`educator`/`houseparent`, so a `[]` on `centerhead`/`socialworker`/
   `psychologist` is the original seed, *not* evidence a repair ran.
@@ -168,20 +166,22 @@ Roles: `centerhead` (fullAccess), `admin`, `nurse`, `psychologist`, `educator`,
   `/phaseProgress` are likewise mounted without a guard.
 - **Caseload scope:** only `houseparent` is scoped (`utils/residentScope.js`), and
   the seed writes `assignmentType = 'houseparent'`. Never widen a reader to accept
-  the old `'household'` typo (fixed `effd62d`): the seed creates the full houseparent
-  × child cross product, so accepting it would hand every Houseparent every resident.
-  `/violations` and `/phaseProgress` are deliberately **facility-wide** for
-  Houseparents. The fix is **forward-only** (idempotency keyed on
-  `(userId, residentId)`).
+  the old `'household'` typo (fixed `effd62d`): the seed creates the full
+  houseparent × child cross product, so accepting it would hand every Houseparent
+  every resident. `/violations` and `/phaseProgress` are deliberately
+  **facility-wide** for Houseparents. The fix is **forward-only**.
 
 ## Failure modes that hide
 
-`seedDatabase()`'s one shared try/catch made the first failure skip every later step
-(fixed `5b68857`; watch for `Seeding step failed (...)` in the boot log); `/store`
-swallows per-table errors into `[]`, so a broken table and an empty one look alike;
-a literal route after a `/:param` sibling 404s for its whole life (Express
-declaration order). **`GET /api/health/db`** is *readiness*, `/api/health` a
-*liveness* check.
+**`schema.sql` is never executed.** Only the boot migrations in `server.js` (and a
+controller's own lazy `CREATE TABLE`) shape a deployed database, so a column
+declared only in schema.sql exists on a fresh install and nowhere else — that is how
+`assessments.psychosocialActivities` broke violation verification. The contract test
+now checks the runtime set separately. `seedDatabase()`'s one shared try/catch made
+the first failure skip every later step (fixed `5b68857`); `/store` swallows
+per-table errors into `[]`; a literal route after a `/:param` sibling 404s for its
+whole life. **`GET /api/health/db`** is *readiness*, `/api/health` a *liveness*
+check.
 
 ## Inspecting Railway
 
@@ -194,10 +194,10 @@ Project `fabulous-radiance` `840f2fbc-7579-4294-9715-8c0cfd7d06a7`; services
 `SCH-PATH` `b5fb305f-e348-4f2f-982b-49fbd38e929f`, `MySQL`
 `350dae90-e97f-497d-939b-14e25e3500e3`; environment `production`
 `655addcf-10cf-4feb-b720-b2b5775790d1`. `C:/tmp/railway-deploy.js` /
-`railway-build.js` list deployments and dump the runtime / build logs
-(`RAILWAY_TOKEN` from the environment). **`deploymentLogs` carries request-time
-errors** — a controller's `next(error)` appears with its stack and the request
-path. Token `84e36095-…` was valid 2026-09-25.
+`railway-build.js` list deployments and dump the runtime / build logs.
+**`deploymentLogs` carries request-time errors** — a controller's `next(error)`
+appears with its stack and the request path. Token `84e36095-…` was valid
+2026-09-25.
 
 ## Tooling and test infrastructure
 
