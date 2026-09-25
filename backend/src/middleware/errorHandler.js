@@ -52,9 +52,14 @@ function errorHandler(err, req, res, next) {
 
   // Handle MySQL errors
   if (err.code && err.code.startsWith('ER_')) {
+    // The MySQL error code and its one-line message go back with the response
+    // so a failure can be diagnosed from the screen (e.g. "ER_BAD_FIELD_ERROR:
+    // Unknown column ..."). Values and the SQL text itself are never included.
+    const reason = String(err.sqlMessage || '').slice(0, 200);
     return res.status(400).json({
       success: false,
-      message: 'Database error occurred',
+      message: reason ? `Database error occurred (${err.code}: ${reason})` : `Database error occurred (${err.code})`,
+      code: err.code,
       error: process.env.NODE_ENV !== 'production' ? err.message : undefined,
     });
   }
