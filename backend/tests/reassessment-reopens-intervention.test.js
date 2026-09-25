@@ -38,6 +38,7 @@ const VIOLATION_CONTROLLER = read('backend/src/controllers/violationController.j
 const INCIDENT_CONTROLLER = read('backend/src/controllers/incidentReportController.js');
 const TRACKER_UI = read('frontend/src/app/components/InterventionTracker.tsx');
 const ASSESSMENTS_UI = read('frontend/src/app/components/Assessments.tsx');
+const INCIDENT_MODAL = read('frontend/src/app/components/IncidentReportModal.tsx');
 
 /** Slice a block by explicit markers, asserting both were actually found. */
 function between(source, startMarker, endMarker, label) {
@@ -276,5 +277,122 @@ test('a failure to reopen does not lose the reassessment decision', () => {
     DOC_CONTROLLER,
     /UPDATE incidentReports\s+SET status = \?, updatedAt = CURRENT_TIMESTAMP\s+WHERE pdfDocumentId = \?/,
     'the incident report status is no longer written',
+  );
+});
+
+// ── The tracker has to keep showing, and offering, the returned report ──────
+//
+// The backend half above reopens the intervention. That alone is not enough: the
+// Tracker's Form 08 section was gated on `every(row => row.status === 'Completed')`,
+// and reopening sets every row back to 'In Progress'. So the reassessment closed
+// the very gate that revealed it — the "For Reassessment" badge and the "Fill Out
+// Again" button both disappeared, and the report came back with no way to answer
+// it. That is the reported symptom: the report "does not return to the Tracker".
+//
+// A 'Failed' report never showed the symptom, because failure deliberately does
+// not reopen the checklist. The asymmetry is what identifies the cause.
+
+test('the Form 08 section is not gated on the checklist alone', () => {
+  const helper = between(
+    TRACKER_UI,
+    'const form8Section = (track: any) => {',
+    'const loadTrackerRecords = async () => {',
+    'the Form 08 visibility helper',
+  );
+  assert.match(
+    helper,
+    /report\.status === 'Reassessment'/,
+    'a reassessment no longer keeps the Form 08 section visible — it will vanish again',
+  );
+  assert.match(helper, /report\.status === 'Failed'/, 'a failed report no longer keeps the section visible');
+  assert.match(
+    helper,
+    /visible: checklistComplete \|\| needsRework/,
+    'the section is gated on the checklist alone, so reopening the intervention hides it',
+  );
+
+  // The gate itself must go through the helper. Asserting the helper's body
+  // without this would leave the old expression free to be restored above it.
+  assert.match(
+    TRACKER_UI,
+    /\{form8Section\(track\)\.visible && \(/,
+    'the Form 08 section is no longer rendered through the helper',
+  );
+  assert.doesNotMatch(
+    TRACKER_UI,
+    /every\(\(s: any\) => s\.status === 'Completed'\)\)\s*&&\s*\(/,
+    'the Form 08 section is gated on completion again, so a reassessment hides it',
+  );
+});
+
+test('the returned report stays actionable, not just visible', () => {
+  // A badge with no control is the bug, not the fix. The section has to carry
+  // the button that opens the report in edit mode, and edit mode is what
+  // resubmits it.
+  const section = between(
+    TRACKER_UI,
+    '{form8Section(track).visible && (',
+    '{track.violation.actionTaken &&',
+    'the Form 08 section',
+  );
+  assert.match(section, /For Reassessment/, 'the returned report no longer says it is for reassessment');
+  assert.match(section, /Fill Out Again/, 'the returned report can no longer be filled out again');
+  assert.match(
+    section,
+    /setForm8Mode\('edit'\)/,
+    'the Fill Out Again button no longer opens the report in edit mode',
+  );
+
+  // And edit mode has to reach the resubmit endpoint rather than filing a second
+  // report — a new Form 08 would leave the reopened intervention with two.
+  assert.match(
+    INCIDENT_MODAL,
+    /request\(`\/incident-reports\/\$\{report\.id\}\/resubmit`/,
+    'edit mode no longer resubmits the existing report',
+  );
+  assert.match(
+    INCIDENT_CONTROLLER,
+    /if \(!\['Failed', 'Reassessment'\]\.includes\(existing\.status\)\)/,
+    'the resubmit endpoint no longer accepts a reassessment report',
+  );
+});
+
+test('the caption names the returned state instead of the checklist rule', () => {
+  const section = between(
+    TRACKER_UI,
+    '{form8Section(track).visible && (',
+    'setForm8Mode',
+    'the Form 08 section header',
+  );
+  assert.match(
+    section,
+    /form8Section\(track\)\.needsRework\s*\?/,
+    'the caption is unconditional, so a returned report still reads as "not yet available"',
+  );
+  assert.match(
+    section,
+    /stays pending until this report is approved/,
+    'the caption no longer says the intervention stays pending until the report is approved',
+  );
+});
+
+test('the intervention cannot be marked Done until the report is approved again', () => {
+  // This is the "remains pending" half of the requirement, and it is what makes
+  // the reopened checklist meaningful: Mark Done stays disabled while any row is
+  // pending, and again while the Form 08 is not approved.
+  //
+  // The assertion is scoped to the `disabled` attribute itself. A slice that ran
+  // on to `onClick` would also swallow the neighbouring `title={...}`, which
+  // repeats both conditions for its tooltip — so dropping a condition from
+  // `disabled` would still pass on the strength of the tooltip. That was the
+  // first version of this test, and a mutation proved it vacuous.
+  const disabledAttrs = TRACKER_UI.match(/disabled=\{[^}]*\}/g) || [];
+  const markDoneDisabled = disabledAttrs.find((attr) => attr.includes('markingDone === track.violation.id'));
+  assert.ok(markDoneDisabled, 'the Mark Done button no longer disables while it is saving');
+  assert.match(markDoneDisabled, /!allComplete/, 'Mark Done is no longer blocked by an incomplete checklist');
+  assert.match(
+    markDoneDisabled,
+    /!hasApprovedForm8/,
+    'Mark Done is no longer blocked by an unapproved Form 08 — a reassessment could be finalised without resubmitting',
   );
 });
