@@ -415,3 +415,36 @@ test('the two official lines have a pad each, on the signature page', () => {
   assert.match(source, /'\/tri\/' \+ selectedRecord\.id \+ '\/signature\/' \+ line/, 'the handler does not post to the per-line route');
   assert.match(source, /record\?\.status === 'Finalized'/, 'the official pads stay editable on a finalized TRI');
 });
+
+test('the on-screen form paints the example names out before drawing the real ones', () => {
+  const source = read(TRI_UI);
+
+  // The form renders page 8 of the template underneath itself, and the template
+  // already prints an example name on this row. An overlay on its own prints the
+  // two names on top of each other — seen on the deployed form, where "Francis C.
+  // Patricio, RSW" sat straight over "MARICOR C. NAVARRO, RSW, MSSW". The band has
+  // to go down first, from the same constant the writer uses, or the on-screen form
+  // and the exported PDF stop agreeing.
+  const mapAt = source.indexOf('canSignOfficial && TRI_DESIGNATED_LINES.map(');
+  const nameAt = source.indexOf('data-tri-designated-name', mapAt);
+  assert.ok(mapAt !== -1 && nameAt > mapAt, 'the designated name block was not found on the form');
+
+  const block = source.slice(mapAt, nameAt);
+  assert.match(
+    block,
+    /TRI_DESIGNATED_NAME_COVER\.y \+ TRI_DESIGNATED_NAME_COVER\.height \/ 2/,
+    'the on-screen cover does not use the shared band, so it can drift from the PDF',
+  );
+  // A white div with no height paints nothing, so the height has to be derived from
+  // the band too — not hard-coded and not zero.
+  assert.ok(
+    block.includes('(TRI_DESIGNATED_NAME_COVER.height / 936) * 100'),
+    'the on-screen cover has no height from the shared band, so it would paint nothing',
+  );
+  // The band must come before the name in the source, or it paints over the name it
+  // was meant to reveal. `coverAt` and `nameAt` are both offsets into the same
+  // source, so this is a genuine ordering check.
+  const coverAt = source.indexOf('bg-white', mapAt);
+  assert.ok(coverAt !== -1, 'the on-screen cover is not an opaque white band');
+  assert.ok(coverAt < nameAt, 'the on-screen cover is painted after the name');
+});

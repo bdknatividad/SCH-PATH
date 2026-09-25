@@ -932,6 +932,29 @@ function OfficialTriEditor({
               const box = line.signatureBox;
               return (
                 <React.Fragment key={line.key}>
+                  {/*
+                    Page 8 is the template PDF rendered underneath, and the template
+                    already prints an example name on this row (MARICOR C. NAVARRO for
+                    the Center Head, NICOLAS Q. REGALARIO for the Section Chief). The
+                    real name has to be painted over it, so the band goes down first —
+                    same rectangle, same coordinates and same order as the writer in
+                    `drawTriDesignatedSignatures` and `triReportPdf.js`. Without it the
+                    two names print on top of each other and neither can be read.
+                    Unconditional, because the writer paints it unconditionally too.
+                  */}
+                  <div
+                    aria-hidden="true"
+                    className="pointer-events-none absolute z-[9] bg-white"
+                    style={{
+                      left: pdfPercentX(line.namePos.x),
+                      top: pdfPercentTop(
+                        TRI_DESIGNATED_NAME_COVER.y + TRI_DESIGNATED_NAME_COVER.height / 2,
+                        TRI_DESIGNATED_NAME_COVER.height,
+                      ),
+                      width: pdfPercentX(line.namePos.width),
+                      height: `${(TRI_DESIGNATED_NAME_COVER.height / 936) * 100}%`,
+                    }}
+                  />
                   {designatedLineName(line.key) && (
                     <span
                       aria-label={`${line.label} name`}
