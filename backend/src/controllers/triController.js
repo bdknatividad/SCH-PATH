@@ -98,6 +98,41 @@ function canReview(user) {
   return ['socialworker', 'centerhead', 'admin'].includes(roleOf(user));
 }
 
+/**
+ * The two official signature lines on the TRI's "Assessed by" block, and where
+ * each one's drawing is stored.
+ *
+ * The block has five lines. Two are never signed here — "Administrative Officer"
+ * and "SWO I/Case Manager" stay blank on every export. The other three carry the
+ * people the facility designated: the Houseparent who prepared the report, and
+ * the two officials on the block's second row, the SWO II/Center Head and the
+ * SWO III/Section Chief.
+ *
+ * These two are kept out of the Houseparent's handler on purpose. That one is
+ * gated to `houseparent` alone, because a reviewer who could write it would be
+ * signing the document they are reviewing. Here the reviewing roles *are* the
+ * signers — there is no separate Section Chief account to hold the third line —
+ * so the gate is `canReview`, and the two lines are separate routes rather than
+ * a wider one.
+ *
+ * Column names are read from this map and never from the request, so a caller
+ * cannot name a column to write.
+ */
+const OFFICIAL_SIGNATURE_LINES = {
+  centerhead: {
+    label: 'SWO II / Center Head',
+    signature: 'centerheadSignature',
+    signedBy: 'centerheadSignedBy',
+    signedAt: 'centerheadSignedAt',
+  },
+  sectionchief: {
+    label: 'SWO III / Section Chief',
+    signature: 'sectionchiefSignature',
+    signedBy: 'sectionchiefSignedBy',
+    signedAt: 'sectionchiefSignedAt',
+  },
+};
+
 function manilaDateParts(date = new Date()) {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit', weekday: 'short',
@@ -637,6 +672,67 @@ async function sign(req, res, next) {
   } catch (error) { next(error); }
 }
 
+/**
+ * POST /:id/signature/:line — sign one of the two official lines on the TRI.
+ *
+ * Separate from `sign()` above rather than a `line` parameter on it, so the
+ * Houseparent's line keeps its `houseparent`-only gate and this handler can never
+ * touch it. `line` is a path segment validated against `OFFICIAL_SIGNATURE_LINES`
+ * — an unknown one is a 400, not a fallback — so it selects a row in a fixed map
+ * and cannot reach the SQL text as anything else.
+ *
+ * Same contract as the Houseparent's line otherwise: a PNG/JPEG data URL or an
+ * explicit clear, capped at 2,000,000 characters, refused on a Finalized record.
+ * Signing here never submits or advances the record — the officials sign a TRI
+ * that is already in front of them, and auto-submitting on their signature would
+ * let a reviewer push a record through on their own signature.
+ */
+async function signOfficialLine(req, res, next) {
+  try {
+    const key = String(req.params.line || '').toLowerCase();
+    const line = OFFICIAL_SIGNATURE_LINES[key];
+    if (!line) {
+      throw new ApiError(400, `line must be one of ${Object.keys(OFFICIAL_SIGNATURE_LINES).join(', ')}`);
+    }
+    if (!canReview(req.user)) {
+      throw new ApiError(403, `Only a Social Worker or Center Head can sign the ${line.label} line.`);
+    }
+
+    const record = await getRecord(req.params.id);
+    if (!await canAccessResident(req.user, record.residentId)) throw new ApiError(403, 'You are not assigned to this resident');
+    if (record.status === 'Finalized') throw new ApiError(409, 'A finalized TRI cannot be changed.');
+
+    const raw = req.body ? req.body.signature : undefined;
+    if (raw === undefined) throw new ApiError(400, 'signature is required');
+    const signature = raw === null ? '' : String(raw);
+
+    if (signature && !/^data:image\/(png|jpeg|jpg);base64,/i.test(signature)) {
+      throw new ApiError(400, 'signature must be a PNG or JPEG data URL');
+    }
+    if (signature.length > 2_000_000) throw new ApiError(413, 'signature image is too large');
+
+    await pool.query(
+      `UPDATE triRecords
+         SET ${line.signature} = ?, ${line.signedBy} = ?, ${line.signedAt} = ?,
+             updatedBy = ?
+       WHERE id = ?`,
+      [
+        signature || null,
+        signature ? req.user.username : null,
+        signature ? new Date() : null,
+        req.user.username,
+        record.id,
+      ]
+    );
+
+    res.json({
+      success: true,
+      data: mapRecord(await getRecord(record.id)),
+      message: signature ? `${line.label} signature saved.` : `${line.label} signature removed.`,
+    });
+  } catch (error) { next(error); }
+}
+
 async function referenceViolations(req, res, next) {
   try {
     const { residentId } = req.params;
@@ -801,4 +897,4 @@ async function publishMissingTriDocuments({ limit = 50 } = {}) {
 // `publishDocumentForTri` is exported for the idempotency test: approving the same
 // record twice must update one Documents entry, and finalize() refuses the second
 // attempt before it can be observed over HTTP.
-module.exports = { list, getById, create, update, submit, review, returnForRevision, finalize, sign, referenceViolations, summary, residentHistory, offenseDeductions, monitor, publishDocumentForTri, publishMissingTriDocuments };
+module.exports = { list, getById, create, update, submit, review, returnForRevision, finalize, sign, signOfficialLine, referenceViolations, summary, residentHistory, offenseDeductions, monitor, publishDocumentForTri, publishMissingTriDocuments, OFFICIAL_SIGNATURE_LINES };

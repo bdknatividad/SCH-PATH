@@ -1220,6 +1220,12 @@ async function runMigrations() {
         houseparentSignature LONGTEXT NULL,
         houseparentSignedBy VARCHAR(100) NULL,
         houseparentSignedAt DATETIME NULL,
+        centerheadSignature LONGTEXT NULL,
+        centerheadSignedBy VARCHAR(100) NULL,
+        centerheadSignedAt DATETIME NULL,
+        sectionchiefSignature LONGTEXT NULL,
+        sectionchiefSignedBy VARCHAR(100) NULL,
+        sectionchiefSignedAt DATETIME NULL,
         createdBy VARCHAR(100) NULL,
         updatedBy VARCHAR(100) NULL,
         createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -2010,13 +2016,23 @@ async function runMigrations() {
     console.warn('Migration warning (triRecords.status):', err.message);
   }
 
-  // The Houseparent's drawn signature on the TRI. Added so an existing database
-  // gets the columns on boot instead of failing the first signature save with
-  // ER_BAD_FIELD_ERROR.
+  // The signature lines on the TRI. Added so an existing database gets the columns
+  // on boot instead of failing the first signature save with ER_BAD_FIELD_ERROR.
+  //
+  // The Houseparent's own line was the first one; the two official lines below it
+  // ("SWO II/Center Head" and "SWO III/Section Chief") carry the designated
+  // personnel, who sign their own lines. Each signer keeps their own triple so a
+  // signature can never be attributed to the wrong official.
   for (const [column, definition] of [
     ['houseparentSignature', 'LONGTEXT NULL'],
     ['houseparentSignedBy', 'VARCHAR(100) NULL'],
     ['houseparentSignedAt', 'DATETIME NULL'],
+    ['centerheadSignature', 'LONGTEXT NULL'],
+    ['centerheadSignedBy', 'VARCHAR(100) NULL'],
+    ['centerheadSignedAt', 'DATETIME NULL'],
+    ['sectionchiefSignature', 'LONGTEXT NULL'],
+    ['sectionchiefSignedBy', 'VARCHAR(100) NULL'],
+    ['sectionchiefSignedAt', 'DATETIME NULL'],
   ]) {
     try {
       await pool.query(`ALTER TABLE triRecords ADD COLUMN ${column} ${definition}`);

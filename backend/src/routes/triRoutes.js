@@ -42,6 +42,13 @@ router.post('/:id/submit', authorize('socialworker', 'centerhead', 'admin', 'hou
 // signature. Kept narrow on purpose: widening this list would let a reviewer sign
 // the very document they are reviewing.
 router.post('/:id/signature', authorize('houseparent'), asyncHandler(triController.sign));
+// The other two lines of the same "Assessed by" block — SWO II/Center Head and
+// SWO III/Section Chief — carry the facility's designated personnel, and those
+// are the reviewing roles. A separate path rather than a wider gate on the line
+// above: the Houseparent's line stays Houseparent-only, and this one only ever
+// reaches the two official columns (the controller matches `:line` against a
+// fixed map). Two segments after the id, so it cannot collide with the line above.
+router.post('/:id/signature/:line', authorize('socialworker', 'centerhead', 'admin'), asyncHandler(triController.signOfficialLine));
 router.post('/:id/review', authorize('socialworker', 'centerhead', 'admin'), asyncHandler(triController.review));
 router.post('/:id/return', authorize('socialworker', 'centerhead', 'admin'), asyncHandler(triController.returnForRevision));
 router.post('/:id/finalize', authorize('socialworker', 'centerhead', 'admin'), asyncHandler(triController.finalize));

@@ -289,20 +289,33 @@ test('the stamp lands on the last page, where the signature block is printed', (
   );
 });
 
-test('the exported document says whether it carries a signature', () => {
+test('the exported document says which lines carry a signature', () => {
   const source = read(PDF);
 
-  // The "system copy" wording has to change once a real signature is on the page,
-  // otherwise the document misdescribes itself.
+  // The subject has to describe the page it is attached to. It used to be a fixed
+  // sentence naming the Houseparent's line and calling the rest blank; that stopped
+  // being true once the two designated officials could sign as well, so the wording
+  // is now built from what was actually drawn.
+  assert.match(source, /pdf\.setSubject\(/, 'the PDF subject is gone');
   assert.match(
     source,
-    /signed\s*\?/,
-    'the PDF subject does not distinguish a signed copy from a blank one'
+    /signedRoles\.length[\s\S]*?Left blank:[\s\S]*?blankRoles\.join/,
+    'the subject no longer says which lines are signed and which are still blank',
   );
   assert.match(
     source,
-    /remaining signature lines are blank/,
-    'the signed subject line does not say the other lines are still blank'
+    /const blankRoles = \['Administrative Officer', 'SWO I\/Case Manager', \.\.\.blankDesignated\]/,
+    'the two lines that are never signed are no longer named as blank',
+  );
+  assert.match(
+    source,
+    /const signedDesignated = \[\][\s\S]*?const blankDesignated = \[\]/,
+    'the subject is not derived from which signatures were actually drawn',
+  );
+  assert.match(
+    source,
+    /stamped \? signedDesignated : blankDesignated/,
+    'a stamped line is not being recorded as signed',
   );
 });
 
@@ -400,22 +413,37 @@ test('the pad locks once the TRI is finalized', () => {
   );
 });
 
-test('only the Houseparent is offered a signing surface', () => {
+test('the signing surfaces are one per signable line, each gated to its own role', () => {
   const source = read(TRI_UI);
 
-  // Exactly one pad in the whole form, so a reviewer has no second way in.
+  // Two literal pads in the source: the Houseparent's own, and one rendered inside
+  // `TRI_DESIGNATED_LINES.map(...)` for the two official lines. Not more — a third
+  // literal pad would be a line nothing ever writes to.
   assert.equal(
     (source.match(/<SignaturePadModal/g) || []).length,
-    1,
-    'the TRI form renders more than one signing surface'
+    2,
+    'the TRI form does not render exactly one signing surface per signable line'
   );
-  assert.match(source, /canSignHouseparent && \(/, 'the pad is not gated at all');
+  // The Houseparent's own line stays Houseparent-only...
+  assert.match(source, /canSignHouseparent && \(/, 'the Houseparent pad is not gated at all');
   assert.match(
     source,
     /canSignHouseparent=\{isHouseparent\}/,
-    'the pad is not limited to a Houseparent'
+    'the Houseparent pad is not limited to a Houseparent'
   );
-  // Center Head and Social Worker get approve / send-for-reassessment only.
+  // ...and the two official lines are gated to the reviewing roles instead, which is
+  // a separate switch — one gate cannot express both rules.
+  assert.match(
+    source,
+    /canSignOfficial && TRI_DESIGNATED_LINES\.map\(/,
+    'the two official lines are not gated separately from the Houseparent line'
+  );
+  assert.match(
+    source,
+    /canSignOfficial=\{canReview\}/,
+    'the official lines are not limited to the reviewing roles'
+  );
+  // Center Head and Social Worker still get approve / send-for-reassessment.
   assert.match(source, /Send for reassessment/, 'the reviewer lost the return action');
 });
 

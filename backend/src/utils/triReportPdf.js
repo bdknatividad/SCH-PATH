@@ -17,11 +17,12 @@
  *
  * NOTE ON SIGNATURES: the official TRI carries five signature lines (Houseparent,
  * Administrative Officer, SWO I/Case Manager, SWO II/Center Head, SWO III/Section
- * Chief). Only the Houseparent's line is filled in: their printed name goes just
- * above the rule and their drawn signature is stamped onto it. The other four stay
- * blank, so the published document is still titled as a system copy — it reproduces
- * the recorded answers, it is not the fully executed instrument, and it does not
- * pretend to be.
+ * Chief). Three of them are filled in: the Houseparent's, whose printed name and
+ * drawn signature are placed above its rule, and the two designated personnel on
+ * the block's second row. The remaining two — Administrative Officer and SWO
+ * I/Case Manager — stay blank on every export, and the published document is
+ * still titled as a system copy: it reproduces the recorded answers, it is not
+ * the fully executed instrument, and it does not pretend to be.
  */
 
 const fs = require('fs');
@@ -81,6 +82,63 @@ const HOUSEPARENT_SIGNATURE_BOX = { page: 7, x: 72.02, y: 774, width: 90.24, hei
  */
 const HOUSEPARENT_NAME_POS = { page: 7, x: 72.02, y: 800, size: 8, width: 90.24 };
 
+/**
+ * The block's second row — "SWO II/Center Head" and "SWO III/Section Chief" —
+ * which carries the facility's two designated personnel.
+ *
+ * Measured against the template, same method as the box above. This row is laid
+ * out differently from the Houseparent's: the underscore rules sit at baseline
+ * y 670.25 and the typed names are printed *below* them, at baseline y 649.61,
+ * with the role captions at y 638.09. So the signature goes just above its rule
+ * and the printed name goes on the template's own name baseline underneath it —
+ * which is also what the requirement asks for, the signature above the name it
+ * belongs to.
+ *
+ * The name widths are deliberately wider than the rules: the template already
+ * prints a filled-in example name on each line ("MARICOR C. NAVARRO, RSW, MSSW"
+ * spans x 72.02-251.34; "NICOLAS Q. REGALARIO, RSW, MSSW," spans x 329.88-518.0),
+ * and the writer paints that rectangle out before printing the real name. A box
+ * narrower than the example would leave the stale name showing.
+ */
+const CENTERHEAD_SIGNATURE_BOX = { page: 7, x: 72.02, y: 672, width: 90.24, height: 20 };
+const CENTERHEAD_NAME_POS = { page: 7, x: 72.02, y: 650, size: 8, width: 185 };
+const SECTIONCHIEF_SIGNATURE_BOX = { page: 7, x: 326.76, y: 672, width: 90.24, height: 20 };
+const SECTIONCHIEF_NAME_POS = { page: 7, x: 326.76, y: 650, size: 8, width: 200 };
+
+/**
+ * The band painted white before a designated name is printed, so the template's
+ * example name underneath does not show through.
+ *
+ * Measured from the template's text layer rather than guessed: the example names
+ * sit on baseline y 649.61 and their ink reaches down to about y 647.5 (the commas
+ * and the tail of the Q in "NICOLAS Q. REGALARIO"), while the caption below them
+ * has its ink top at about y 644. This band clears the caption by ~2.5pt and the
+ * underscore rule above by ~11.7pt.
+ */
+const DESIGNATED_NAME_COVER = { y: 646.5, height: 12 };
+
+/**
+ * The two designated lines, in the order they appear across the page. One list, so
+ * the layout cross-check, the name drawing and the stamping cannot disagree about
+ * which columns and coordinates belong together.
+ */
+const DESIGNATED_LINES = [
+  {
+    key: 'centerhead',
+    role: 'SWO II/Center Head',
+    box: CENTERHEAD_SIGNATURE_BOX,
+    namePos: CENTERHEAD_NAME_POS,
+    signatureColumn: 'centerheadSignature',
+  },
+  {
+    key: 'sectionchief',
+    role: 'SWO III/Section Chief',
+    box: SECTIONCHIEF_SIGNATURE_BOX,
+    namePos: SECTIONCHIEF_NAME_POS,
+    signatureColumn: 'sectionchiefSignature',
+  },
+];
+
 let cachedTemplateBytes = null;
 let cachedLayout = null;
 
@@ -115,13 +173,30 @@ function loadLayout() {
   // export stamps the same line. Two copies of a coordinate drift; a mismatch means
   // the exported PDF and the published copy would place the signature differently,
   // so it is a hard error rather than a silent difference.
-  for (const [key, expected] of [['houseparentSignatureBox', HOUSEPARENT_SIGNATURE_BOX], ['houseparentNamePos', HOUSEPARENT_NAME_POS]]) {
+  for (const [key, expected] of [
+    ['houseparentSignatureBox', HOUSEPARENT_SIGNATURE_BOX],
+    ['houseparentNamePos', HOUSEPARENT_NAME_POS],
+    ['centerheadSignatureBox', CENTERHEAD_SIGNATURE_BOX],
+    ['centerheadNamePos', CENTERHEAD_NAME_POS],
+    ['sectionchiefSignatureBox', SECTIONCHIEF_SIGNATURE_BOX],
+    ['sectionchiefNamePos', SECTIONCHIEF_NAME_POS],
+  ]) {
     const declared = raw[key];
     if (!declared) continue; // a layout file written before the geometry was shared
     for (const [field, value] of Object.entries(expected)) {
       if (Number(declared[field]) !== value) {
         throw new Error(`The TRI layout's ${key}.${field} is ${declared[field]}, but the PDF writer stamps ${value} (${LAYOUT_PATH})`);
       }
+    }
+  }
+
+  // The two designated names are facts, not coordinates, but they live in the same
+  // file for the same reason: the browser print view prints them too, and a
+  // published copy that disagrees with the printed one is the defect this prevents.
+  for (const line of DESIGNATED_LINES) {
+    const person = raw.designatedPersonnel && raw.designatedPersonnel[line.key];
+    if (!person || !String(person.name || '').trim()) {
+      throw new Error(`The TRI layout is missing the designated name for "${line.key}" (${LAYOUT_PATH})`);
     }
   }
 
@@ -237,6 +312,82 @@ async function drawHouseparentSignature(pdf, pages, record) {
   }
 }
 
+/** The designated official's printed name, read from the shared layout. */
+function designatedNameOf(layout, key) {
+  const person = layout && layout.designatedPersonnel && layout.designatedPersonnel[key];
+  return sanitize(person && person.name);
+}
+
+/**
+ * Prints a designated official's name on the block's second row.
+ *
+ * The template already prints an example name on each of those two lines, so the
+ * band is painted white first — otherwise the real name and the example would be
+ * printed on top of each other. Returns false when there is no name to print.
+ *
+ * The text is shrunk to fit its box so a long name cannot run into the line beside
+ * it, exactly as the Houseparent's name is handled.
+ */
+function drawDesignatedName(pages, layout, line, bold) {
+  const page = pages[line.namePos.page];
+  const name = designatedNameOf(layout, line.key);
+  if (!page || !name) return false;
+
+  page.drawRectangle({
+    x: line.namePos.x,
+    y: DESIGNATED_NAME_COVER.y,
+    width: line.namePos.width,
+    height: DESIGNATED_NAME_COVER.height,
+    color: rgb(1, 1, 1),
+  });
+
+  let size = line.namePos.size;
+  while (size > 4 && bold.widthOfTextAtSize(name, size) > line.namePos.width) size -= 0.25;
+
+  page.drawText(name, {
+    x: line.namePos.x,
+    y: line.namePos.y,
+    size,
+    font: bold,
+    color: rgb(0.08, 0.08, 0.08),
+  });
+  return true;
+}
+
+/**
+ * Stamps a designated official's drawn signature above their rule.
+ *
+ * Same contract as the Houseparent's stamp: false and a blank line when there is
+ * no signature, when it is not a PNG/JPEG data URL, or when it cannot be decoded.
+ * A bad image must never abort the document.
+ */
+async function drawDesignatedSignature(pdf, pages, record, line) {
+  const dataUrl = String((record && record[line.signatureColumn]) || '');
+  const match = dataUrl.match(/^data:image\/(png|jpeg|jpg);base64,/i);
+  if (!match) return false;
+  const page = pages[line.box.page];
+  if (!page) return false;
+
+  try {
+    const image = match[1].toLowerCase() === 'png'
+      ? await pdf.embedPng(dataUrl)
+      : await pdf.embedJpg(dataUrl);
+    const box = line.box;
+    const scale = Math.min(box.width / image.width, box.height / image.height);
+    const width = image.width * scale;
+    const height = image.height * scale;
+    page.drawImage(image, {
+      x: box.x + (box.width - width) / 2,
+      y: box.y + (box.height - height) / 2,
+      width,
+      height,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Draws the official TRI with the record's answers.
  *
@@ -304,10 +455,13 @@ async function buildTriReportPdf(record = {}, { residentName, room } = {}) {
   draw(summary, rating, SUMMARY.x, SUMMARY.rating, 9, bold);
   draw(summary, record.previousRating || '', SUMMARY.x, SUMMARY.previousRating, 9, font);
 
-  // The Houseparent's own line is the one the facility asked to have filled in: the
-  // printed name goes on first, then the drawn signature is stamped over it. The
-  // other four lines (Administrative Officer, SWO I/II/III) stay blank, so this
-  // remains a system copy rather than the fully executed instrument.
+  // Three of the block's five lines are filled in: the Houseparent's own, and the
+  // two designated officials' on the row below it. On each of them the printed name
+  // goes on first and the drawn signature is stamped over it.
+  //
+  // The remaining two lines (Administrative Officer, SWO I/Case Manager) stay blank
+  // on every export, so this remains a system copy rather than the fully executed
+  // instrument.
   //
   // Metadata only beyond that — no overlay text, so nothing can collide with the
   // form's own footer. The "system copy" distinction is carried by the Documents
@@ -315,10 +469,27 @@ async function buildTriReportPdf(record = {}, { residentName, room } = {}) {
   drawHouseparentName(pages, record, bold);
   const signed = await drawHouseparentSignature(pdf, pages, record);
 
+  const signedDesignated = [];
+  const blankDesignated = [];
+  for (const line of DESIGNATED_LINES) {
+    drawDesignatedName(pages, layout, line, bold);
+    const stamped = await drawDesignatedSignature(pdf, pages, record, line);
+    (stamped ? signedDesignated : blankDesignated).push(line.role);
+  }
+
   pdf.setTitle(`TRI ${periodLabel(record.reportingYear, record.reportingMonth)} - ${residentName || record.residentId}`);
-  pdf.setSubject(signed
-    ? 'System-generated copy of the Treatment and Rehabilitation Indicator. The Houseparent signature line is signed; the remaining signature lines are blank.'
-    : 'System-generated copy of the Treatment and Rehabilitation Indicator. Signature lines are blank; this is not the signed original.');
+  // The subject has to describe the page it is attached to. Which lines carry a
+  // signature is variable now that the two officials can sign as well, so it is
+  // built from what was actually drawn rather than from a fixed sentence that a
+  // second signer would make untrue.
+  const signedRoles = [signed ? 'Houseparent' : null, ...signedDesignated].filter(Boolean);
+  const blankRoles = ['Administrative Officer', 'SWO I/Case Manager', ...blankDesignated];
+  pdf.setSubject(
+    'System-generated copy of the Treatment and Rehabilitation Indicator. '
+    + (signedRoles.length
+      ? `Signed: ${signedRoles.join(', ')}. Left blank: ${blankRoles.join(', ')}.`
+      : 'No signature line is signed; this is not the signed original.'),
+  );
   pdf.setProducer('SCH-PATH');
   pdf.setCreator('SCH-PATH');
 
@@ -364,5 +535,12 @@ module.exports = {
   LAYOUT_PATH,
   HOUSEPARENT_SIGNATURE_BOX,
   HOUSEPARENT_NAME_POS,
+  CENTERHEAD_SIGNATURE_BOX,
+  CENTERHEAD_NAME_POS,
+  SECTIONCHIEF_SIGNATURE_BOX,
+  SECTIONCHIEF_NAME_POS,
+  DESIGNATED_NAME_COVER,
+  DESIGNATED_LINES,
   houseparentNameOf,
+  designatedNameOf,
 };

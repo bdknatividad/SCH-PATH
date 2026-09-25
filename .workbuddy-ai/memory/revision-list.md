@@ -5,8 +5,9 @@ was lost from context once. **This file is the list.** The user sends the items 
 each one, check it against the deployed pair, implement what is missing, and add a guard test for
 anything already done.
 
-Status so far: **4, 5, 6, 7 done** (and the force-discharge → re-intake bug found while testing 4).
-**Item 8 is blocked on a question — do not implement it until answered. Next: 8 (on answer), then 9+.**
+Status so far: **4, 5, 6, 7, 8 done** (and the force-discharge → re-intake bug found while testing 4).
+Item 8 was answered, built and guarded. **Item 9 is a do-not-touch item** (leave open for the user).
+Next: 10+.
 
 ## GENERAL / SCH
 
@@ -26,13 +27,18 @@ Status so far: **4, 5, 6, 7 done** (and the force-discharge → re-intake bug fo
 7. **Court Records – Hearing Type.** ✅ Already implemented — "Sentencing" appears nowhere and the
    dropdown offers "Promulgation of Judgement"; `hearingType` is free-text `VARCHAR(100)` and live
    `courtRecords` is empty, so nothing to migrate. **Guard added:** `backend/tests/court-hearing-type.test.js`.
-8. **TRI – Signatures.** ⛔ **Blocked — needs the user's answer.** Draw *and* upload already work for
-   the Houseparent. What is unresolved: the form's page 8 has **five** lines in two rows and the bottom
-   row already prints two example names (NAVARRO under SWO II/Center Head, REGALARIO under SWO III/
-   Section Chief), while the app's print view shows only four. "Sir Francis" is SWO II / Center Head
-   per Form 08; **"Ma'am HCKSBD" is not in the code or the live roster**, and which line each goes on,
-   what to do with the template's existing names, and whether the two sign or are only printed — all
-   open. See the daily log for the page-8 coordinate table.
+8. **TRI – Signatures.** ✅ Built. Draw *and* upload already worked for the Houseparent; the two
+   designated officials now have their own lines. Answers the user gave: leave the Administrative
+   Officer and SWO I / Case Manager lines alone; the template's two printed example names may be
+   covered; **add** the missing fifth line (SWO III / Section Chief); each designated person signs
+   their own line; signing roles are for me to decide (→ `canReview` = socialworker / centerhead /
+   admin, the same reviewer predicate the module already uses); print **full name plus credentials**.
+   Implemented as a separate route over separate columns (`/:id/signature/:line`) so it can never
+   reach the Houseparent's line. The cover band that hides the template's example names is
+   `{ y: 646.5, height: 12 }`, derived from the form's own ink. **Guard added:**
+   `backend/tests/tri-designated-signatures.test.js` (17 tests). See the daily log for the page-8
+   coordinate table. **Still open:** the SWO III / Section Chief's real full name — currently
+   `Ma'am HCKSBD` (the user's own wording) at `triLayout.json` → `designatedPersonnel.sectionchief.name`.
 9. **Anecdotal Report.** Leave open for further details the user will supply. Do not assume or modify
    beyond the explicitly requested changes.
 10. **Admission – Piercing/Tattoo Form.** Add a form/section at admission for documenting piercings and

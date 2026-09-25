@@ -44,6 +44,17 @@ interface TriRecord {
   houseparentSignature?: string | null;
   houseparentSignedBy?: string | null;
   houseparentSignedAt?: string | null;
+  /**
+   * The two designated officials on the same "Assessed by" block — SWO II/Center
+   * Head and SWO III/Section Chief. Each line keeps its own signature and signer,
+   * so a drawing can never be attributed to the wrong official.
+   */
+  centerheadSignature?: string | null;
+  centerheadSignedBy?: string | null;
+  centerheadSignedAt?: string | null;
+  sectionchiefSignature?: string | null;
+  sectionchiefSignedBy?: string | null;
+  sectionchiefSignedAt?: string | null;
   reviewedBy?: string | null; reviewedAt?: string | null;
   finalizedBy?: string | null; finalizedAt?: string | null;
   reviewNotes?: string | null;
@@ -376,6 +387,51 @@ const TRI_OFFENSE_POS = triLayout.offensePos;
 const TRI_HOUSEPARENT_SIGNATURE_BOX = triLayout.houseparentSignatureBox;
 const TRI_HOUSEPARENT_NAME_POS = triLayout.houseparentNamePos;
 
+/**
+ * The page-8 second row: the facility's two designated officials, SWO II/Center
+ * Head and SWO III/Section Chief.
+ *
+ * Same one-copy-of-the-facts rule as the Houseparent line above — the boxes, the
+ * name baselines and the printed names all come from `triLayout.json`, which the
+ * backend writer reads too, so the downloaded copy and the published one cannot
+ * place a signature or spell a name differently.
+ *
+ * `signatureField` names the column on the record, and the backend's
+ * OFFICIAL_SIGNATURE_LINES uses the same keys as the URL segment, so a line is
+ * addressed by one name end to end.
+ */
+const TRI_DESIGNATED_LINES = [
+  {
+    key: 'centerhead',
+    label: 'SWO II / Center Head',
+    signatureBox: (triLayout as any).centerheadSignatureBox,
+    namePos: (triLayout as any).centerheadNamePos,
+    signatureField: 'centerheadSignature' as const,
+  },
+  {
+    key: 'sectionchief',
+    label: 'SWO III / Section Chief',
+    signatureBox: (triLayout as any).sectionchiefSignatureBox,
+    namePos: (triLayout as any).sectionchiefNamePos,
+    signatureField: 'sectionchiefSignature' as const,
+  },
+];
+
+/**
+ * The band painted white before a designated name is printed, so the template's own
+ * example name underneath does not show through.
+ *
+ * Mirrors `DESIGNATED_NAME_COVER` in `backend/src/utils/triReportPdf.js`, which
+ * pins the pair: the downloaded copy and the published one must hide the same text.
+ */
+const TRI_DESIGNATED_NAME_COVER = { y: 646.5, height: 12 };
+
+/** The designated official's printed name, from the shared layout. */
+function designatedLineName(key: string): string {
+  const people = (triLayout as any).designatedPersonnel || {};
+  return String(people[key]?.name || '').trim();
+}
+
 /** Only a well-formed image data URL is safe to inline in the print template. */
 const SIGNATURE_DATA_URL = /^data:image\/(png|jpeg|jpg);base64,[A-Za-z0-9+/=]+$/i;
 
@@ -438,6 +494,62 @@ async function drawTriHouseparentSignature(pdf: any, pages: any[], record: TriRe
 }
 
 /**
+ * Stamps the two designated officials' printed names and drawn signatures onto the
+ * page-8 second row of an exported PDF.
+ *
+ * Mirrors `drawDesignatedName` / `drawDesignatedSignature` in the backend writer.
+ * The template already prints an example name on each of those two lines, so the
+ * band is painted white first — otherwise the real name and the example would be
+ * printed on top of each other. The signature is drawn above the name it belongs to.
+ *
+ * A line with no signature, or one that cannot be decoded, is not an error: it is
+ * simply left blank, exactly as on the server.
+ */
+async function drawTriDesignatedSignatures(pdf: any, pages: any[], record: TriRecord, font: any) {
+  for (const line of TRI_DESIGNATED_LINES) {
+    const namePos = line.namePos;
+    const namePage = pages[namePos.page];
+    const name = designatedLineName(line.key);
+
+    if (namePage && name) {
+      namePage.drawRectangle({
+        x: namePos.x,
+        y: TRI_DESIGNATED_NAME_COVER.y,
+        width: namePos.width,
+        height: TRI_DESIGNATED_NAME_COVER.height,
+        color: rgb(1, 1, 1),
+      });
+      let size = namePos.size;
+      while (size > 4 && font.widthOfTextAtSize(name, size) > namePos.width) size -= 0.25;
+      namePage.drawText(name, { x: namePos.x, y: namePos.y, size, font, color: rgb(0.08, 0.08, 0.08) });
+    }
+
+    const dataUrl = String((record as any)[line.signatureField] || '');
+    const match = dataUrl.match(/^data:image\/(png|jpeg|jpg);base64,/i);
+    const box = line.signatureBox;
+    const page = pages[box.page];
+    if (!match || !page) continue;
+
+    try {
+      const image = match[1].toLowerCase() === 'png'
+        ? await pdf.embedPng(dataUrl)
+        : await pdf.embedJpg(dataUrl);
+      const scale = Math.min(box.width / image.width, box.height / image.height);
+      const width = image.width * scale;
+      const height = image.height * scale;
+      page.drawImage(image, {
+        x: box.x + (box.width - width) / 2,
+        y: box.y + (box.height - height) / 2,
+        width,
+        height,
+      });
+    } catch {
+      // Left blank on purpose — see the docblock.
+    }
+  }
+}
+
+/**
  * Generates and downloads the official TRI PDF.
  *
  * `onError` is how the caller reports a failure. This is a module-level helper
@@ -494,9 +606,11 @@ async function openFormalPdfReport(record: TriRecord, child: any, onError?: (mes
     drawPdfText(summary, exportedRating, 482, 189, 9, bold);
     drawPdfText(summary, record.previousRating || '', 482, 168, 9, font);
 
-    // The Houseparent's own line is the one that is ever filled in. Stamped here as
-    // well as in the published copy so an export is not missing the signature.
+    // The block's three filled-in lines: the Houseparent's, and the two designated
+    // officials' on the row below. Stamped here as well as in the published copy so
+    // an export is never missing a signature the record actually carries.
     await drawTriHouseparentSignature(pdf, pages, record, bold);
+    await drawTriDesignatedSignatures(pdf, pages, record, bold);
 
     const bytes = await pdf.save();
     const safeBytes = new Uint8Array(bytes.byteLength);
@@ -546,8 +660,10 @@ function OfficialTriEditor({
   houseparentName,
   houseparentSignature,
   canSignHouseparent,
+  canSignOfficial,
   signatureSaving,
   onSaveSignature,
+  onSaveOfficialSignature,
 }: {
   form: any;
   record: TriRecord | null;
@@ -573,8 +689,14 @@ function OfficialTriEditor({
   houseparentName: string;
   houseparentSignature: string;
   canSignHouseparent: boolean;
+  /**
+   * The two official lines on the same block belong to the reviewing roles, so
+   * they are gated separately from the Houseparent's line above.
+   */
+  canSignOfficial: boolean;
   signatureSaving: boolean;
   onSaveSignature: (value: string) => void;
+  onSaveOfficialSignature: (line: string, value: string) => void;
 }) {
   const pdfHostRef = useRef<HTMLDivElement | null>(null);
   const [pdfRenderWidth, setPdfRenderWidth] = useState(900);
@@ -796,6 +918,56 @@ function OfficialTriEditor({
                 />
               </div>
             )}
+            {/*
+              The block's second row: the two designated officials. Same pad, same
+              page, coordinates from triLayout.json so the on-screen form, the
+              downloaded copy and the published one agree.
+
+              Gated on `canSignOfficial` — the reviewing roles — because those are the
+              accounts the facility named for these two lines. The Houseparent's line
+              above stays gated to the Houseparent alone.
+            */}
+            {canSignOfficial && TRI_DESIGNATED_LINES.map((line) => {
+              const value = String((record as any)?.[line.signatureField] || '');
+              const box = line.signatureBox;
+              return (
+                <React.Fragment key={line.key}>
+                  {designatedLineName(line.key) && (
+                    <span
+                      aria-label={`${line.label} name`}
+                      data-tri-designated-name={line.key}
+                      className="pointer-events-none absolute z-10 truncate font-bold leading-none text-black"
+                      style={{
+                        left: pdfPercentX(line.namePos.x),
+                        top: pdfPercentTop(line.namePos.y + 3, 11),
+                        width: pdfPercentX(line.namePos.width),
+                        height: `${11 / 936 * 100}%`,
+                        fontSize: 'clamp(6px, 1vw, 11px)',
+                      }}
+                    >
+                      {designatedLineName(line.key)}
+                    </span>
+                  )}
+                  <div
+                    className="absolute z-20"
+                    style={{
+                      left: pdfPercentX(box.x),
+                      top: pdfPercentTop(box.y + box.height / 2, box.height),
+                      width: pdfPercentX(box.width),
+                      height: `${box.height / 936 * 100}%`,
+                    }}
+                  >
+                    <SignaturePadModal
+                      label={`${line.label} signature`}
+                      value={value}
+                      disabled={signatureSaving || record?.status === 'Finalized'}
+                      onChange={(next) => onSaveOfficialSignature(line.key, next)}
+                      hint={record?.status === 'Finalized' ? 'Signed' : value ? 'Change' : 'Sign here'}
+                    />
+                  </div>
+                </React.Fragment>
+              );
+            })}
           </div>
         </PdfDocument>
       </div>
@@ -931,6 +1103,20 @@ function openPrintReport(record: TriRecord, child: any, onError?: (message: stri
     : '';
   const signatureName = houseparentLineName(record);
 
+  // The two designated officials' lines, on the block's second row. Same rule as the
+  // Houseparent's: the printed name comes from the shared layout, and the drawing is
+  // inlined only after the strict shape check, so nothing else can reach the src
+  // attribute.
+  const designatedLinesHtml = TRI_DESIGNATED_LINES.map((line) => {
+    const raw = String((record as any)[line.signatureField] || '');
+    const img = SIGNATURE_DATA_URL.test(raw)
+      ? `<img src="${raw}" alt="${escapeHtml(line.label)} signature" />`
+      : '';
+    const name = designatedLineName(line.key);
+    const slot = img || name ? 'signed' : '';
+    return `<div class="${slot}">${img}${name ? `<div class="name">${escapeHtml(name)}</div>` : ''}<div class="rule">${escapeHtml(line.label)}</div></div>`;
+  }).join('');
+
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>TRI ${escapeHtml(getPeriodLabel(record.reportingYear, record.reportingMonth))}</title>
 <style>
   * { box-sizing: border-box; }
@@ -994,7 +1180,9 @@ ${sectionsHtml}
   </div>
   <div><div class="rule">Administrative Officer</div></div>
   <div><div class="rule">SWO I / Case Manager</div></div>
-  <div><div class="rule">SWO II / Center Head</div></div>
+</div>
+<div class="sign" style="margin-top:12px">
+  ${designatedLinesHtml}
 </div>
 </body></html>`;
 
@@ -1582,6 +1770,34 @@ export function Tri() {
     finally { setSubmitting(false); }
   }
 
+  /**
+   * Saves a signature on one of the two designated official lines.
+   *
+   * Deliberately does NOT submit. The Houseparent's signature completes their own
+   * work and pushes the TRI to the reviewer's queue; an official signs a record that
+   * is already in front of them, so letting their signature submit would let a
+   * reviewer move a record through on their own signature.
+   */
+  async function handleSaveOfficialSignature(line: string, signature: string) {
+    if (!selectedRecord) return;
+    setSignatureSaving(true);
+    setError(null);
+    try {
+      const result = await request<{ success: boolean; data: TriRecord }>(
+        '/tri/' + selectedRecord.id + '/signature/' + line,
+        { method: 'POST', body: JSON.stringify({ signature }) },
+      );
+      const updated = result.data;
+      setRecords(prev => prev.map(r => (r.id === updated.id ? updated : r)));
+      setSelectedRecord(updated);
+      setSignatureSaved(signature ? 'Signature saved.' : 'Signature removed.');
+    } catch (err: any) {
+      setError(err?.message || 'Failed to save the signature');
+    } finally {
+      setSignatureSaving(false);
+    }
+  }
+
   async function handleReturn() {
     if (!selectedRecord || !reviewNotes.trim()) return;
     setActionLoading(true); setError(null);
@@ -2000,8 +2216,10 @@ export function Tri() {
             houseparentName={houseparentName}
             houseparentSignature={selectedRecord?.houseparentSignature || ''}
             canSignHouseparent={isHouseparent}
+            canSignOfficial={canReview}
             signatureSaving={signatureSaving}
             onSaveSignature={handleSaveSignature}
+            onSaveOfficialSignature={handleSaveOfficialSignature}
           />
 
 

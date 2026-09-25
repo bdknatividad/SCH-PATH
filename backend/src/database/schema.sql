@@ -778,6 +778,16 @@ CREATE TABLE triRecords (
   houseparentSignature LONGTEXT NULL,
   houseparentSignedBy VARCHAR(100) NULL,
   houseparentSignedAt DATETIME NULL,
+  -- The two designated personnel on the TRI's "Assessed by" block: the SWO II /
+  -- Center Head and the SWO III / Section Chief. Each signs their own line, so
+  -- each keeps its own triple — a single shared pair of columns could not say
+  -- which official a signature came from. Same PNG-data-URL contract as above.
+  centerheadSignature LONGTEXT NULL,
+  centerheadSignedBy VARCHAR(100) NULL,
+  centerheadSignedAt DATETIME NULL,
+  sectionchiefSignature LONGTEXT NULL,
+  sectionchiefSignedBy VARCHAR(100) NULL,
+  sectionchiefSignedAt DATETIME NULL,
   createdBy VARCHAR(100) NULL,
   updatedBy VARCHAR(100) NULL,
   createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
