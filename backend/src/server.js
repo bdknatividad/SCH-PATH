@@ -1606,20 +1606,33 @@ async function runMigrations() {
           console.log(`Migration: added children.${column}.`);
         }
       }
-      // When and by whom a resident was marked Absconded. Added through
-      // `ensureColumn` rather than as entries in the literal above: that literal
-      // is iterated with `Object.entries`, which the runtime-migration contract
-      // cannot see, and a column the app writes that no runtime migration
-      // creates is missing on every deployed database — a fresh install works
-      // and production throws ER_BAD_FIELD_ERROR.
-      await ensureColumn('children', 'abscondedAt', 'DATETIME NULL', 'updatedAt');
-      await ensureColumn('children', 'abscondedBy', 'VARCHAR(100) NULL', 'abscondedAt');
-      // An existing database has the two-value status; widen it so a resident
-      // can be marked Absconded. Idempotent, and no existing value changes.
-      await pool.query(`ALTER TABLE children MODIFY COLUMN status ENUM('Active', 'Discharged', 'Absconded') NOT NULL DEFAULT 'Active'`);
+      // When and by whom a resident was marked Absconded is added below, in its
+      // own try/catch, rather than here: this block abandons every remaining
+      // statement once one throws, and those two columns are read by the generic
+      // /store contract for `children`.
     }
   } catch (err) {
     console.warn('Migration warning (childRecordTabs):', err.message);
+  }
+
+  // Absconded residents: the two columns the generic /store contract reads for
+  // `children`, plus the widened status. Deliberately isolated from the block
+  // above — if the columns are not created, the whole Child Records module fails
+  // with ER_BAD_FIELD_ERROR instead of degrading, so they must not be skippable
+  // by an unrelated failure.
+  try {
+    // Added through `ensureColumn` rather than as entries in the literal above:
+    // that literal is iterated with `Object.entries`, which the runtime-migration
+    // contract cannot see, and a column the app writes that no runtime migration
+    // creates is missing on every deployed database — a fresh install works and
+    // production throws ER_BAD_FIELD_ERROR.
+    await ensureColumn('children', 'abscondedAt', 'DATETIME NULL', 'updatedAt');
+    await ensureColumn('children', 'abscondedBy', 'VARCHAR(100) NULL', 'abscondedAt');
+    // An existing database has the two-value status; widen it so a resident can
+    // be marked Absconded. Idempotent, and no existing value changes.
+    await pool.query(`ALTER TABLE children MODIFY COLUMN status ENUM('Active', 'Discharged', 'Absconded') NOT NULL DEFAULT 'Active'`);
+  } catch (err) {
+    console.warn('Migration warning (children absconded):', err.message);
   }
 
 
