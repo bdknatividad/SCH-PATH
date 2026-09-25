@@ -702,7 +702,47 @@ function resolveViolationVerificationSide(user, requested) {
   throw new ApiError(400, 'verificationSide must be "psych" or "sw" for this account.');
 }
 
+/**
+ * The dual-verification columns, added on demand if the database is missing
+ * them (the boot migration normally adds them; this covers a database whose
+ * migration did not run, so Verify never fails with "Unknown column").
+ * Runs once per process.
+ */
+let verificationColumnsReady = null;
+function ensureViolationVerificationColumns() {
+  if (!verificationColumnsReady) {
+    verificationColumnsReady = (async () => {
+      const [rows] = await pool.query(
+        `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE() AND LOWER(TABLE_NAME) = 'violations'`
+      );
+      const existing = new Set(rows.map((row) => String(row.COLUMN_NAME).toLowerCase()));
+      for (const [column, definition] of [
+        ['psychVerifiedBy', 'VARCHAR(100) NULL'],
+        ['psychVerifiedAt', 'DATETIME NULL'],
+        ['psychVerification', 'LONGTEXT NULL'],
+        ['swVerifiedBy', 'VARCHAR(100) NULL'],
+        ['swVerifiedAt', 'DATETIME NULL'],
+      ]) {
+        if (!existing.has(column.toLowerCase())) {
+          await pool.query(`ALTER TABLE violations ADD COLUMN \`${column}\` ${definition}`);
+          console.log(`Migration (on demand): violations.${column} added.`);
+        }
+      }
+    })().catch((error) => {
+      verificationColumnsReady = null; // try again on the next review
+      throw error;
+    });
+  }
+  return verificationColumnsReady;
+}
+
 async function review(req, res, next) {
+  try {
+    await ensureViolationVerificationColumns();
+  } catch (error) {
+    return next(error);
+  }
   const connection = await pool.getConnection();
   try {
     const { id } = req.params;
