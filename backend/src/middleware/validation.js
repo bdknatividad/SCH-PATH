@@ -173,9 +173,67 @@ function sanitizeBody(req, res, next) {
   next();
 }
 
+/**
+ * The Education levels that are not a school placement — the resident is not
+ * enrolled (the enrolment window has closed, or they are between schools), so
+ * they have no school and no enrolment date to give. Mirrors `isNotEnrolled` in
+ * `frontend/src/app/components/Education.tsx`; the two change together.
+ */
+const NOT_ENROLLED_EDUCATION_LEVELS = ['Tutorial'];
+
+/**
+ * A learner who is enrolled at a school must have a school and an enrolment
+ * date; one who is not enrolled has neither.
+ *
+ * This cannot live in the table: `education_records.school` and
+ * `.enrollmentDate` are nullable precisely so the not-enrolled level can be
+ * recorded at all. It cannot live in `validateBody` either, because it is
+ * conditional on another field of the same body. And it has to exist on this
+ * side at all — the form is not the only caller, and a record that says "High
+ * School" while naming no school is the inconsistency the frontend check
+ * prevents and a direct API call would otherwise reintroduce.
+ *
+ * A body that does not mention `educationLevel` is left alone: a partial update
+ * that does not touch the level cannot be judged here, and the stored record's
+ * consistency was settled when it was written. A body that names a school
+ * placement without its school is genuinely incomplete and is refused.
+ *
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {Function} next - Express next function
+ */
+function requireEducationPlacement(req, res, next) {
+  const data = req.body || {};
+  const level = data.educationLevel;
+
+  if (level === undefined || level === null || String(level).trim() === '') {
+    return next();
+  }
+
+  if (NOT_ENROLLED_EDUCATION_LEVELS.includes(String(level).trim())) {
+    return next();
+  }
+
+  const missing = [];
+  if (!String(data.school ?? '').trim()) missing.push('school');
+  if (!String(data.enrollmentDate ?? '').trim()) missing.push('enrollmentDate');
+
+  if (missing.length > 0) {
+    return next(
+      new ApiError(
+        400,
+        `A learner recorded at ${level} needs a school and an enrolment date (missing: ${missing.join(', ')}).`
+      )
+    );
+  }
+
+  return next();
+}
+
 module.exports = {
   validateBody,
   validateId,
   schemas,
   sanitizeBody,
+  requireEducationPlacement,
 };

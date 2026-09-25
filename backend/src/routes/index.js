@@ -11,6 +11,7 @@ const { RESOURCES } = require('../utils/constants');
 const { mapRow, generateId } = require('../utils/helpers');
 const { authenticate } = require('../middleware/auth');
 const { snapshotFor, requireModule, requirePermission } = require('../middleware/rbac');
+const { requireEducationPlacement } = require('../middleware/validation');
 const { hasModuleAccess } = require('../config/rbac');
 
 const userRoutes = require('./userRoutes');
@@ -372,8 +373,8 @@ const educationModule = requireModule('Education');
 router.use('/education-records', authenticate, educationModule);
 router.get('/education-records', educationResources.educationRecords.getAll);
 router.get('/education-records/:id', educationResources.educationRecords.getById);
-router.post('/education-records', requirePermission('Education', 'create'), educationResources.educationRecords.create);
-router.put('/education-records/:id', requirePermission('Education', 'edit'), educationResources.educationRecords.update);
+router.post('/education-records', requirePermission('Education', 'create'), requireEducationPlacement, educationResources.educationRecords.create);
+router.put('/education-records/:id', requirePermission('Education', 'edit'), requireEducationPlacement, educationResources.educationRecords.update);
 router.delete('/education-records/:id', requirePermission('Education', 'delete'), educationResources.educationRecords.delete);
 
 router.use('/education-progress-reports', authenticate, educationModule);

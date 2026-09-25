@@ -187,10 +187,11 @@ test('an empty enrolment date is sent as NULL, not an empty string', () => {
   assert.match(save, /enrollmentDate: studentForm\.enrollmentDate \|\| null/, 'an empty date is not sent as NULL');
   assert.match(save, /school: studentForm\.school\.trim\(\) \|\| null/, 'an empty school is not sent as NULL');
 
-  // And the null that comes back must not reach a controlled input.
+  // And the null that comes back must not reach a controlled input. The
+  // parameter is the wire shape, which is where the null legitimately exists.
   assert.match(
     EDUCATION,
-    /function normalizeStudent\(s: Student\): Student \{/,
+    /function normalizeStudent\(s: EducationRecordWire\): Student \{/,
     'there is no normalizer for the nullable fields',
   );
   const normalizer = EDUCATION.slice(
@@ -257,4 +258,84 @@ test('the label reads as the facility words it, and the stored value is untouche
 
   // The union still carries the value the existing rows use.
   assert.match(EDUCATION, /\| 'Tutorial'/, 'the Tutorial value was removed from the type union');
+});
+
+// ── The API enforces the same rule ──────────────────────────────────────────
+
+test('the API refuses a school placement with no school or enrolment date', () => {
+  // The frontend is not the only caller. Relaxing the two columns to NULL would
+  // otherwise let a direct API call store a record that says "High School" while
+  // naming no school — the exact inconsistency the form's check prevents.
+  const { requireEducationPlacement } = require('../src/middleware/validation');
+
+  const drive = (body) => {
+    let error = null;
+    let passed = false;
+    requireEducationPlacement({ body }, {}, (e) => {
+      if (e) error = e;
+      else passed = true;
+    });
+    return { error, passed };
+  };
+
+  const SCHOOL_PLACEMENTS = [
+    'High School',
+    'Senior High School',
+    'Alternative Learning System (ALS)',
+    'ALS Elementary',
+    'ALS Junior High School',
+    'ALS Senior High School',
+    'Calamba Manpower Development Center (CMDC)',
+  ];
+
+  for (const level of SCHOOL_PLACEMENTS) {
+    const { error } = drive({ educationLevel: level, school: '', enrollmentDate: '' });
+    assert.ok(error, `${level} was accepted with no school and no enrolment date`);
+    assert.equal(error.statusCode, 400, `${level} was refused with ${error.statusCode}, not 400`);
+    assert.match(error.message, /needs a school and an enrolment date/, 'the message does not say what is missing');
+    assert.match(error.message, /missing: school, enrollmentDate/, 'the message does not name both missing fields');
+  }
+
+  // Half the pair is not enough — each field is checked on its own.
+  const noDate = drive({ educationLevel: 'High School', school: 'LPU Laguna', enrollmentDate: '' });
+  assert.equal(noDate.error && noDate.error.statusCode, 400, 'a school placement with no date was accepted');
+  assert.match(noDate.error.message, /missing: enrollmentDate/);
+
+  const noSchool = drive({ educationLevel: 'High School', school: '   ', enrollmentDate: '2026-06-01' });
+  assert.equal(noSchool.error && noSchool.error.statusCode, 400, 'a school placement with a blank school was accepted');
+  assert.match(noSchool.error.message, /missing: school/);
+
+  // The not-enrolled level is the whole point: accepted with neither.
+  assert.ok(
+    drive({ educationLevel: 'Tutorial', school: '', enrollmentDate: null }).passed,
+    'Tutorial is still refused, so a not-enrolled learner still cannot be recorded',
+  );
+
+  // A complete school placement is untouched.
+  assert.ok(drive({ educationLevel: 'High School', school: 'LPU Laguna', enrollmentDate: '2026-06-01' }).passed);
+
+  // A body that never mentions the level is left alone: the file-upload path
+  // sends only `files`, and a partial update cannot be judged from one field.
+  assert.ok(drive({ files: [] }).passed, 'a file-only update was refused');
+  assert.ok(drive({}).passed, 'an empty body was refused');
+});
+
+test('the API and the form agree on which levels are not a school placement', () => {
+  // Two runtimes, one rule. A level added to the form's predicate but not to the
+  // middleware (or the reverse) means one side accepts what the other refuses.
+  const validation = read('backend/src/middleware/validation.js');
+
+  const list = validation.match(/const NOT_ENROLLED_EDUCATION_LEVELS = \[([^\]]*)\];/);
+  assert.ok(list, 'the middleware has no not-enrolled level list');
+  const levels = list[1]
+    .split(',')
+    .map((s) => s.trim().replace(/^'|'$/g, ''))
+    .filter(Boolean);
+
+  assert.deepEqual(levels, ['Tutorial'], `the middleware treats ${levels.join(', ')} as not enrolled`);
+
+  // And the frontend's predicate names the same value.
+  const predicate = EDUCATION.match(/const isNotEnrolled = \(level: EducationLevel\): boolean => level === '([^']+)';/);
+  assert.ok(predicate, 'the form has no isNotEnrolled predicate');
+  assert.deepEqual([predicate[1]], levels, 'the form and the API disagree about which level means "not enrolled"');
 });
