@@ -577,8 +577,11 @@ CREATE TABLE IF NOT EXISTS education_records (
   gender ENUM('Male','Female') NOT NULL DEFAULT 'Male',
   educationLevel VARCHAR(150) NOT NULL,
   gradeSection VARCHAR(150) NULL,
-  school VARCHAR(255) NOT NULL,
-  enrollmentDate DATE NOT NULL,
+  -- A resident who is not enrolled in school (the "Tutorial" level, the
+  -- facility's Academic Support Sessions / Tutorial activity) has neither of
+  -- these. Required in the UI for every level that is a school placement.
+  school VARCHAR(255) NULL,
+  enrollmentDate DATE NULL,
   status ENUM('Active','Completed','Dropped') NOT NULL DEFAULT 'Active',
   address TEXT NULL,
   guardianName VARCHAR(150) NULL,

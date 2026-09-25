@@ -77,6 +77,17 @@ export interface Student {
   createdBy?: string;
 }
 
+/**
+ * A record as the API stores it. `school` and `enrollmentDate` are nullable
+ * there, because a learner who is not enrolled in school has neither to give.
+ * The component works in `Student`, where both are strings, so every record
+ * crossing that boundary passes through `normalizeStudent`.
+ */
+interface EducationRecordWire extends Omit<Student, 'school' | 'enrollmentDate'> {
+  school: string | null;
+  enrollmentDate: string | null;
+}
+
 // ── CONSTANTS ────────────────────────────────────────────────────────────────
 
 // Progress report per student
@@ -161,6 +172,27 @@ const EDUCATION_LEVELS: EducationLevel[] = [
   'Calamba Manpower Development Center (CMDC)',
 ];
 
+/*
+ * The label the user reads, which is not always the stored value.
+ *
+ * `Tutorial` is the value already written on existing records, so renaming the
+ * value would orphan them; only the label changes. It is the facility's Academic
+ * Support Sessions / Tutorial activity, recorded for a resident who is not
+ * enrolled in school.
+ */
+const LEVEL_LABELS: Partial<Record<EducationLevel, string>> = {
+  'Tutorial': 'Academic Support Sessions / Tutorial',
+};
+
+const levelLabel = (level: EducationLevel): string => LEVEL_LABELS[level] || level;
+
+/*
+ * Whether a level means "not enrolled in school". Such a learner has no school
+ * and no enrolment date to give, so neither is required of them — every other
+ * level is a school placement and still requires both.
+ */
+const isNotEnrolled = (level: EducationLevel): boolean => level === 'Tutorial';
+
 const LEVEL_COLORS: Record<EducationLevel, { bg: string; text: string; accent: string }> = {
   'High School':                                { bg: '#DBEAFE', text: '#1E40AF', accent: '#3B82F6' },
   'Senior High School':                         { bg: '#FEF3C7', text: '#92400E', accent: '#F59E0B' },
@@ -177,7 +209,7 @@ const LEVEL_COLORS: Record<EducationLevel, { bg: string; text: string; accent: s
 const LEVEL_SHORT: Record<EducationLevel, string> = {
   'High School': 'HS',
   'Senior High School': 'SHS',
-  'Tutorial': 'TUT',
+  'Tutorial': 'Tutorial',
   'Alternative Learning System (ALS)': 'ALS',
   'ALS Elementary': 'ALS-E',
   'ALS Junior High School': 'ALS-JHS',
@@ -206,10 +238,28 @@ const EMPTY_STUDENT: Omit<Student, 'id' | 'files'> = {
 
 // ── HELPERS ──────────────────────────────────────────────────────────────────
 
+/**
+ * `school` and `enrollmentDate` are nullable on the server, because a learner
+ * who is not enrolled in school has neither to give. Everything here treats them
+ * as strings, so every record that enters state — from the API, from the cache,
+ * or from a save response — passes through here first. Without this a Tutorial
+ * record saved once would put `null` into a controlled input on the next render.
+ */
+function normalizeStudent(s: EducationRecordWire): Student {
+  return {
+    ...s,
+    school: s.school || '',
+    enrollmentDate: s.enrollmentDate || '',
+  };
+}
+
 function loadStudents(): Student[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map(normalizeStudent);
   } catch { return []; }
 }
 
@@ -794,17 +844,32 @@ export function Education() {
   const handleSaveStudent = async () => {
     setFormError('');
     if (!studentForm.name.trim()) { setFormError('Name is required.'); return; }
-    if (!studentForm.school.trim()) { setFormError('School is required.'); return; }
-    if (!studentForm.enrollmentDate) { setFormError('Enrollment date is required.'); return; }
+
+    // A resident who is not enrolled in school has no school and no enrolment
+    // date to give. Requiring them made the level unreachable: the educator had
+    // to invent a placement before the record could be saved at all, and what
+    // they typed was indistinguishable from a real one afterwards.
+    if (!isNotEnrolled(studentForm.educationLevel)) {
+      if (!studentForm.school.trim()) { setFormError('School is required.'); return; }
+      if (!studentForm.enrollmentDate) { setFormError('Enrollment date is required.'); return; }
+    }
+
+    // An empty date must go as NULL, not '', which MySQL refuses for a DATE
+    // column under the default strict sql_mode.
+    const fields = {
+      ...studentForm,
+      school: studentForm.school.trim() || null,
+      enrollmentDate: studentForm.enrollmentDate || null,
+    };
 
     const resident = residents.find(c => c.name.trim().toLowerCase() === studentForm.name.trim().toLowerCase());
     try {
       if (editingStudent) {
-        const saved = await updateResource<Student>('education-records', editingStudent.id, { ...studentForm, residentId: editingStudent.residentId || resident?.id });
-        persist(students.map(s => s.id === editingStudent.id ? saved : s));
+        const saved = await updateResource<EducationRecordWire>('education-records', editingStudent.id, { ...fields, residentId: editingStudent.residentId || resident?.id });
+        persist(students.map(s => s.id === editingStudent.id ? normalizeStudent(saved) : s));
       } else {
-        const saved = await createResource<Student>('education-records', { ...studentForm, residentId: resident?.id, files: [] } as any);
-        persist([...students, saved]);
+        const saved = await createResource<EducationRecordWire>('education-records', { ...fields, residentId: resident?.id, files: [] } as any);
+        persist([...students, normalizeStudent(saved)]);
       }
       setIsStudentDialogOpen(false);
     } catch (error) {
@@ -852,7 +917,7 @@ export function Education() {
       );
       persist(updated);
       void updateResource<Student>('education-records', uploadTarget.id, { files: updated.find(s => s.id === uploadTarget.id)?.files || [] })
-        .then(saved => setStudents(prev => prev.map(s => s.id === saved.id ? saved : s)))
+        .then(saved => setStudents(prev => prev.map(s => s.id === saved.id ? normalizeStudent(saved) : s)))
         .catch(error => console.error('Unable to persist education file:', error));
       // also update viewStudent if open
       if (viewStudent?.id === uploadTarget.id) {
@@ -906,7 +971,7 @@ export function Education() {
     );
     persist(updated);
     void updateResource<Student>('education-records', student.id, { files: updated.find(s => s.id === student.id)?.files || [] })
-      .then(saved => setStudents(prev => prev.map(s => s.id === saved.id ? saved : s)))
+      .then(saved => setStudents(prev => prev.map(s => s.id === saved.id ? normalizeStudent(saved) : s)))
       .catch(error => console.error('Unable to persist education file deletion:', error));
     if (viewStudent?.id === student.id) {
       setViewStudent(updated.find(s => s.id === student.id) || null);
@@ -952,7 +1017,7 @@ export function Education() {
           request<{ success: boolean; data: SchoolVisitReport[] }>('/education-school-visits'),
         ]);
         if (cancelled) return;
-        let records = Array.isArray(recordResult.data) ? recordResult.data : [];
+        let records = (Array.isArray(recordResult.data) ? recordResult.data : []).map(normalizeStudent);
         let progress = Array.isArray(progressResult.data) ? progressResult.data.map((r: any) => ({ ...r, studentId: r.educationRecordId || r.studentId })) : [];
         let visits = Array.isArray(visitResult.data) ? visitResult.data.map((r: any) => ({ ...r, studentId: r.educationRecordId || r.studentId })) : [];
 
@@ -1296,7 +1361,7 @@ export function Education() {
                 <Select value={studentForm.educationLevel} onValueChange={v => setStudentForm(p => ({ ...p, educationLevel: v as EducationLevel }))}>
                   <SelectTrigger className="rounded-xl"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {EDUCATION_LEVELS.map(l => <SelectItem key={l} value={l}>{l}</SelectItem>)}
+                    {EDUCATION_LEVELS.map(l => <SelectItem key={l} value={l}>{levelLabel(l)}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </div>
@@ -1328,12 +1393,25 @@ export function Education() {
                 </Select>
               </div>
               <div className="col-span-2 space-y-1.5">
-                <Label className="font-bold text-[#2F3E46]">School / Institution *</Label>
-                <Input value={studentForm.school} onChange={e => setStudentForm(p => ({ ...p, school: e.target.value }))} placeholder="School name" className="rounded-xl" />
+                <Label className="font-bold text-[#2F3E46]">
+                  {isNotEnrolled(studentForm.educationLevel)
+                    ? 'School / Institution'
+                    : 'School / Institution *'}
+                </Label>
+                <Input value={studentForm.school} onChange={e => setStudentForm(p => ({ ...p, school: e.target.value }))} placeholder={isNotEnrolled(studentForm.educationLevel) ? 'Not enrolled — leave blank' : 'School name'} className="rounded-xl" />
               </div>
               <div className="col-span-2 space-y-1.5">
-                <Label className="font-bold text-[#2F3E46]">Enrollment Date *</Label>
+                <Label className="font-bold text-[#2F3E46]">
+                  {isNotEnrolled(studentForm.educationLevel)
+                    ? 'Enrollment Date'
+                    : 'Enrollment Date *'}
+                </Label>
                 <Input type="date" value={studentForm.enrollmentDate} onChange={e => setStudentForm(p => ({ ...p, enrollmentDate: e.target.value }))} className="rounded-xl" />
+                {isNotEnrolled(studentForm.educationLevel) && (
+                  <p className="text-xs text-gray-500">
+                    Not enrolled in school — this record covers Academic Support Sessions / Tutorial.
+                  </p>
+                )}
               </div>
               <div className="col-span-2 space-y-1.5">
                 <Label className="font-bold text-[#2F3E46]">Address</Label>
@@ -1379,7 +1457,7 @@ export function Education() {
                       <h2 className="text-xl font-bold" style={{ color: c.text }}>{viewStudent.name}</h2>
                       <div className="flex items-center gap-2 mt-1 flex-wrap">
                         <Badge style={{ backgroundColor: c.accent, color: 'white', border: 'none' }} className="text-xs">{LEVEL_SHORT[viewStudent.educationLevel]}</Badge>
-                        <span className="text-xs font-medium" style={{ color: c.text }}>{viewStudent.educationLevel}</span>
+                        <span className="text-xs font-medium" style={{ color: c.text }}>{levelLabel(viewStudent.educationLevel)}</span>
                         <span className="text-xs text-gray-500">· {viewStudent.id}</span>
                       </div>
                     </div>

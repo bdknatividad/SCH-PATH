@@ -2256,8 +2256,10 @@ async function runMigrations() {
         gender ENUM('Male','Female') NOT NULL DEFAULT 'Male',
         educationLevel VARCHAR(150) NOT NULL,
         gradeSection VARCHAR(150) NULL,
-        school VARCHAR(255) NOT NULL,
-        enrollmentDate DATE NOT NULL,
+        -- A resident who is not enrolled in school has neither of these: see the
+        -- nullability migration below the Education block.
+        school VARCHAR(255) NULL,
+        enrollmentDate DATE NULL,
         status ENUM('Active','Completed','Dropped') NOT NULL DEFAULT 'Active',
         address TEXT NULL,
         guardianName VARCHAR(150) NULL,
@@ -2354,6 +2356,36 @@ async function runMigrations() {
     console.log('Migration: Education module tables ensured.');
   } catch (err) {
     console.warn('Migration warning (Education module):', err.message);
+  }
+
+  // A resident who is not enrolled in school — the enrolment window has closed,
+  // or they are between schools — is recorded at the "Tutorial" level, which is
+  // the facility's Academic Support Sessions / Tutorial activity. `school` and
+  // `enrollmentDate` were NOT NULL, so such a learner could not be saved at all:
+  // the educator had to invent a school and an enrolment date, and whatever they
+  // typed was then indistinguishable from a real placement.
+  //
+  // Relaxed for existing databases too. `IS_NULLABLE` is read first so this does
+  // not re-run a table rebuild on every boot, and the whole statement is a no-op
+  // where the column is already nullable. Both fields stay required in the UI for
+  // every level that *is* a school placement.
+  try {
+    for (const [column, definition] of [
+      ['school', 'VARCHAR(255) NULL'],
+      ['enrollmentDate', 'DATE NULL'],
+    ]) {
+      const [nullable] = await pool.query(
+        `SELECT IS_NULLABLE FROM INFORMATION_SCHEMA.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE() AND LOWER(TABLE_NAME) = 'education_records'
+            AND LOWER(COLUMN_NAME) = LOWER(?)`,
+        [column]
+      );
+      if (nullable.length === 0 || nullable[0].IS_NULLABLE === 'YES') continue;
+      await pool.query(`ALTER TABLE \`education_records\` MODIFY COLUMN \`${column}\` ${definition}`);
+      console.log(`Migration: education_records.${column} is now nullable.`);
+    }
+  } catch (err) {
+    console.warn('Migration warning (education_records nullability):', err.message);
   }
 
   // ── Quarterly Progress Report ──
