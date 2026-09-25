@@ -14,7 +14,8 @@ import { useSystemDialog } from '@/app/components/SystemDialog';
 import { useAuth } from '../state/AuthContext';
 import { useData } from '../state/DataContext';
 
-pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.mjs';
+// `?v=` is a cache key, not a fetch hint — see the note in QuarterlyProgressReport.tsx.
+pdfjs.GlobalWorkerOptions.workerSrc = `/pdf.worker.mjs?v=${pdfjs.version}`;
 
 export type AnecdotalStatus = 'Draft' | 'Submitted' | 'Under Review' | 'Returned' | 'Finalized';
 

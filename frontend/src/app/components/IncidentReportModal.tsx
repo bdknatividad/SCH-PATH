@@ -12,7 +12,8 @@ import { SignaturePadModal } from '@/app/components/SignaturePad';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 
-pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.mjs';
+// `?v=` is a cache key, not a fetch hint — see the note in QuarterlyProgressReport.tsx.
+pdfjs.GlobalWorkerOptions.workerSrc = `/pdf.worker.mjs?v=${pdfjs.version}`;
 
 const FORM_FILE = '/forms/incident-report.pdf';
 const PAGE_WIDTH = 612.2;

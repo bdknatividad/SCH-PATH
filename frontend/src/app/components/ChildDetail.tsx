@@ -39,7 +39,8 @@ import { Document as PdfDocument, Page as PdfPage, pdfjs } from 'react-pdf';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 
-pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.mjs';
+// `?v=` is a cache key, not a fetch hint — see the note in QuarterlyProgressReport.tsx.
+pdfjs.GlobalWorkerOptions.workerSrc = `/pdf.worker.mjs?v=${pdfjs.version}`;
 import { PhaseProgress } from './PhaseProgress';
 import IncidentReportModal from './IncidentReportModal';
 

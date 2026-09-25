@@ -114,8 +114,9 @@ import { describeError, request } from '@/services/api';
 import { systemDialog } from '@/app/components/SystemDialog';
 import { formatPHDate } from '@/utils/dateFormatter';
 
+// `?v=` is a cache key, not a fetch hint — see the note in QuarterlyProgressReport.tsx.
 pdfjs.GlobalWorkerOptions.workerSrc =
-  '/pdf.worker.mjs';
+  `/pdf.worker.mjs?v=${pdfjs.version}`;
 
 type Gender =
   | 'Male'

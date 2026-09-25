@@ -22,7 +22,12 @@ import { useAuth } from '../state/AuthContext';
 import { request, fetchBinary } from '@/services/api';
 import templateLayout from '@/shared/quarterlyReportTemplate.json';
 
-pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.mjs';
+// `?v=` is a cache key, not a fetch hint. It exists because the worker was once
+// served as `application/octet-stream` under `immutable, max-age=31536000`, and a
+// browser that cached it then will not revalidate it for a year — so the fix has
+// to be a different URL, not a corrected header. Deriving it from pdfjs keeps the
+// worker and the library in step: a version bump changes the key.
+pdfjs.GlobalWorkerOptions.workerSrc = `/pdf.worker.mjs?v=${pdfjs.version}`;
 
 /**
  * Quarterly Progress Report — the facility's six-Developmental-Aspect report.
