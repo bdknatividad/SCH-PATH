@@ -1211,21 +1211,44 @@ async function reconcileSeededAccessGrants() {
   }
 }
 
-async function seedDatabase() {
+/**
+ * Run one seeding step in isolation.
+ *
+ * The steps are independent — the users already exist or they do not, whatever
+ * happened to the violation guide. Sharing a single try/catch meant the first
+ * failure skipped every later step, and that is exactly how the access
+ * reconciliation came to never run: one duplicate-key error while inserting a
+ * seeded user aborted the function above the call, so the repair shipped in the
+ * code and in the deploy and still never executed, on every boot.
+ */
+async function runSeedStep(label, step) {
   try {
-    console.log('Checking default users...');
-    
-    for (const user of DEFAULT_USERS) {
+    await step();
+  } catch (error) {
+    console.error(`Seeding step failed (${label}):`, error.message);
+  }
+}
+
+/**
+ * Create any missing default user.
+ *
+ * Existence is keyed on the *username*, but the row is inserted with an
+ * explicit id — and an operator can rename a seeded account in Account
+ * Management, which is how `HP 1` became `HP1` in production. That frees the
+ * username while the row keeps its id, so the INSERT then collides on the
+ * primary key and throws. Treat the id as the account's identity and skip:
+ * the account exists, it was simply renamed.
+ *
+ * Each user is caught individually so one bad row cannot stop the rest.
+ */
+async function seedDefaultUsers() {
+  console.log('Checking default users...');
+
+  for (const user of DEFAULT_USERS) {
+    try {
       const [existing] = await pool.query('SELECT id FROM users WHERE username = ?', [user.username]);
-      
-            if (existing.length === 0) {
-        const hashedPassword = await bcrypt.hash(user.password, 10);
-        await pool.query(
-          'INSERT INTO users (id, username, password, role, status, createdDate, accessibleModules) VALUES (?, ?, ?, ?, ?, NOW(), ?)',
-          [user.id, user.username, hashedPassword, user.role, user.status, JSON.stringify(user.accessibleModules || [])]
-        );
-        console.log(`Created user: ${user.username}`);
-      } else {
+
+      if (existing.length > 0) {
         const [row] = await pool.query('SELECT password FROM users WHERE username = ?', [user.username]);
         const stored = row[0]?.password;
         if (stored && !stored.startsWith('$2')) {
@@ -1234,26 +1257,50 @@ async function seedDatabase() {
           console.log(`Rehashed legacy password for: ${user.username}`);
         }
         console.log(`User exists: ${user.username}`);
+        continue;
       }
+
+      // The username is free, but the id may not be. See the note above.
+      const [byId] = await pool.query('SELECT username FROM users WHERE id = ?', [user.id]);
+      if (byId.length > 0) {
+        console.log(
+          `Skipped seed user "${user.username}": id ${user.id} is held by the renamed account "${byId[0].username}".`,
+        );
+        continue;
+      }
+
+      const hashedPassword = await bcrypt.hash(user.password, 10);
+      await pool.query(
+        'INSERT INTO users (id, username, password, role, status, createdDate, accessibleModules) VALUES (?, ?, ?, ?, ?, NOW(), ?)',
+        [user.id, user.username, hashedPassword, user.role, user.status, JSON.stringify(user.accessibleModules || [])]
+      );
+      console.log(`Created user: ${user.username}`);
+    } catch (error) {
+      console.error(`Seeding user "${user.username}" failed:`, error.message);
     }
-
-    // NOTE: there is deliberately no Houseparent whitelist here.
-    //
-    // This step used to force every `role = 'houseparent'` account whose
-    // username was not literally "HP 1"…"HP 10" to status = 'Inactive'. That
-    // silently disabled Houseparents created through Account Management on the
-    // next seed, on top of the username filter the caseload endpoint used to
-    // apply — so a newly created Houseparent could never be assigned. Status is
-    // the operator's decision: an account is selectable because its role is
-    // Houseparent AND it is Active, and both are set from Account Management.
-
-    await seedResidentAssignments();
-    await reconcileSeededAccessGrants();
-    await seedOfficialViolationGuide();
-    console.log('Database seeding complete!');
-  } catch (error) {
-    console.error('Seeding failed:', error.message);
   }
+}
+
+async function seedDatabase() {
+  // The reconciliation runs FIRST, in its own step. It repairs accounts that
+  // already exist, so nothing else here has to succeed for it to be correct —
+  // and it is the step that has silently not been running.
+  await runSeedStep('reconcile seeded account grants', reconcileSeededAccessGrants);
+  await runSeedStep('default users', seedDefaultUsers);
+
+  // NOTE: there is deliberately no Houseparent whitelist here.
+  //
+  // This step used to force every `role = 'houseparent'` account whose username
+  // was not literally "HP 1"…"HP 10" to status = 'Inactive'. That silently
+  // disabled Houseparents created through Account Management on the next seed,
+  // on top of the username filter the caseload endpoint used to apply — so a
+  // newly created Houseparent could never be assigned. Status is the operator's
+  // decision: an account is selectable because its role is Houseparent AND it
+  // is Active, and both are set from Account Management.
+
+  await runSeedStep('resident assignments', seedResidentAssignments);
+  await runSeedStep('official violation guide', seedOfficialViolationGuide);
+  console.log('Database seeding complete!');
 }
 
 module.exports = { seedDatabase, reconcileSeededAccessGrants, DEFAULT_USERS };

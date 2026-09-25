@@ -154,6 +154,148 @@ test('seedDatabase() actually reaches the reconciliation', async () => {
   assert.ok(cleared.includes('educator'), 'the drifted educator account must be cleared');
 });
 
+/**
+ * Drive the real seedDatabase() against a stub pool, recording what it issued.
+ *
+ * `overrides` lets a test shape the users table and force failures.
+ */
+async function driveSeed({ users = {}, missingUsernames = new Set(), idHolders = {}, throwOnInsert = false }) {
+  const realQuery = pool.query;
+  const realGetConnection = pool.getConnection;
+  const log = { cleared: null, insertAttempts: [], consoleErrors: [], consoleLogs: [] };
+
+  pool.query = async (sql, params) => {
+    const s = String(sql).replace(/\s+/g, ' ').trim();
+
+    if (/^SELECT id FROM users WHERE username = \?/i.test(s)) {
+      return [missingUsernames.has(params[0]) ? [] : [{ id: 'U' }], []];
+    }
+    if (/^SELECT password FROM users WHERE username = \?/i.test(s)) {
+      return [[{ password: '$2b$10$alreadyhashed' }], []];
+    }
+    if (/^SELECT username FROM users WHERE id = \?/i.test(s)) {
+      return [params[0] in idHolders ? [{ username: idHolders[params[0]] }] : [], []];
+    }
+    if (/^INSERT INTO users/i.test(s)) {
+      log.insertAttempts.push(params[0]);
+      if (throwOnInsert) {
+        const error = new Error("Duplicate entry 'UHP01' for key 'users.PRIMARY'");
+        error.code = 'ER_DUP_ENTRY';
+        throw error;
+      }
+      return [{ affectedRows: 1 }, []];
+    }
+    if (/SELECT username, accessibleModules FROM users WHERE username IN/i.test(s)) {
+      return [(params || []).filter((u) => u in users).map((u) => ({ username: u, accessibleModules: users[u] })), []];
+    }
+    if (/UPDATE users SET accessibleModules = JSON_ARRAY\(\)/i.test(s)) {
+      log.cleared = params;
+      return [{ affectedRows: 1 }, []];
+    }
+    return [[], []];
+  };
+  pool.getConnection = async () => ({
+    query: async () => [[], []],
+    beginTransaction: async () => {},
+    commit: async () => {},
+    rollback: async () => {},
+    release: () => {},
+  });
+
+  const originalError = console.error;
+  const originalLog = console.log;
+  console.error = (...args) => { log.consoleErrors.push(args.map(String).join(' ')); };
+  console.log = (...args) => { log.consoleLogs.push(args.map(String).join(' ')); };
+
+  const { seedDatabase } = require('../src/scripts/seedDatabase');
+  try {
+    await seedDatabase();
+  } finally {
+    pool.query = realQuery;
+    pool.getConnection = realGetConnection;
+    console.error = originalError;
+    console.log = originalLog;
+  }
+  return log;
+}
+
+const DRIFTED = {
+  nurse: ['Dashboard', 'Activities', 'Documents', 'Health', 'Reports'],
+  educator: ['Dashboard', 'Documents', 'Activities', 'Education'],
+};
+
+test('a renamed seeded account does not abort the seed', async () => {
+  // The production failure, reproduced exactly.
+  //
+  // `HP 1` was renamed to `HP1` in Account Management. That freed the username
+  // while the row kept the id `UHP01`, and the seed looks users up *by username*
+  // before inserting *by id* — so it tried to INSERT and collided on the primary
+  // key. Because every step shared one try/catch, the whole function unwound
+  // above the reconciliation.
+  //
+  // Verified against the live runtime log for deployment a01294bb:
+  //   [error] Seeding failed: Duplicate entry 'UHP01' for key 'users.PRIMARY'
+  //   [info]  SCH-PATH Backend Server          <- boot carried on regardless
+  const log = await driveSeed({
+    users: DRIFTED,
+    missingUsernames: new Set(['HP 1']),
+    idHolders: { UHP01: 'HP1' },
+  });
+
+  assert.deepEqual(
+    log.insertAttempts,
+    [],
+    'the id is taken by the renamed account, so no INSERT should be attempted',
+  );
+  assert.ok(
+    log.consoleLogs.some((m) => /Skipped seed user "HP 1"/.test(m)),
+    'the rename should be reported rather than passing silently',
+  );
+  assert.ok(log.cleared, 'the reconciliation must still run');
+  assert.ok(log.cleared.includes('nurse'), 'the drifted nurse account must be cleared');
+  assert.ok(log.cleared.includes('educator'), 'the drifted educator account must be cleared');
+});
+
+test('any other user-seeding failure cannot skip the reconciliation either', async () => {
+  // Belt and braces: even an unexpected throw must not take the reconciliation
+  // down with it. This is what the shared try/catch allowed, whatever the cause.
+  const log = await driveSeed({
+    users: DRIFTED,
+    missingUsernames: new Set(['HP 1']),
+    idHolders: {},
+    throwOnInsert: true,
+  });
+
+  assert.ok(log.insertAttempts.length > 0, 'the INSERT should have been attempted and thrown');
+  assert.ok(
+    log.consoleErrors.some((m) => /Seeding user "HP 1" failed/.test(m)),
+    'the failure should be reported against the user it happened on',
+  );
+  assert.ok(log.cleared, 'the reconciliation must run regardless of the user-seeding failure');
+  assert.ok(log.cleared.includes('nurse'));
+});
+
+test('the reconciliation runs before user seeding, so nothing downstream can skip it', async () => {
+  // Ordering is the durable part of the fix. Asserting it directly means a
+  // future refactor that moves the call back below a throwing step fails here
+  // rather than silently in production.
+  const source = require('fs').readFileSync(
+    require('path').join(__dirname, '../src/scripts/seedDatabase.js'),
+    'utf8',
+  ).replace(/\r\n/g, '\n');
+
+  const body = source.slice(source.indexOf('async function seedDatabase() {'));
+  const reconcileAt = body.indexOf('reconcileSeededAccessGrants');
+  const usersAt = body.indexOf('seedDefaultUsers');
+
+  assert.ok(reconcileAt !== -1, 'seedDatabase() must still call reconcileSeededAccessGrants');
+  assert.ok(usersAt !== -1, 'seedDatabase() must still call seedDefaultUsers');
+  assert.ok(
+    reconcileAt < usersAt,
+    'the reconciliation must run before user seeding, which is the step that used to throw',
+  );
+});
+
 test('an empty stored grant means "inherit the matrix"', () => {
   // The premise the reconciliation rests on. If `[]` ever stopped meaning
   // "fall back to the role matrix", clearing a stale array would strip the

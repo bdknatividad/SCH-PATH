@@ -116,7 +116,24 @@ test('an unparseable value is passed through so MySQL reports the real error', (
   // value and hide the caller's bug; letting MySQL reject it surfaces the
   // offending column and value in the log.
   assert.equal(toMysqlDateTime('not a date'), 'not a date');
-  assert.equal(toMysqlDateTime(''), '');
+});
+
+test('an empty date field becomes NULL rather than an empty string', () => {
+  // Deliberately *not* the same case as the test above. `''` is not a typo — it
+  // is how a browser submits an untouched <input type="date">, and it means
+  // "not set". MySQL rejects '' for DATE and DATETIME columns alike, so passing
+  // it through made every optional date field a 500. Measured in production on
+  // POST /api/healthRecords: `Incorrect date value: '' for column 'followUpDate'`.
+  assert.equal(toMysqlDateTime(''), null);
+  assert.equal(toMysqlDateTime('   '), null);
+  assert.equal(toMysqlDate(''), null);
+  assert.equal(toMysqlDate('   '), null);
+
+  // And through the middleware, which is the path every write actually takes.
+  assert.deepEqual(
+    normalizeDatetimes({ followUpDate: '', title: 'Checkup' }),
+    { followUpDate: null, title: 'Checkup' },
+  );
 });
 
 test('a Date object is converted rather than left to the driver', () => {

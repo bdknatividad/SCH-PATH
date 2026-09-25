@@ -363,7 +363,17 @@ function toMysqlDateTime(value) {
   if (typeof value !== 'string') return value;
 
   const trimmed = value.trim();
-  if (!trimmed) return trimmed;
+  // An empty string is how a browser submits an untouched <input type="date">,
+  // and it means "no value". MySQL rejects '' for DATE and DATETIME columns
+  // alike — `Incorrect datetime value: ''` — so passing it through turned every
+  // optional date field into a 500. Measured in production as
+  // `Incorrect date value: '' for column 'followUpDate'` on POST
+  // /api/healthRecords. NULL is how "not set" is stored.
+  //
+  // A *non-empty* unparseable value is still passed through deliberately, so a
+  // real typo surfaces as a MySQL error naming the column rather than being
+  // silently stored as NULL.
+  if (!trimmed) return null;
 
   // Already in a MySQL-accepted shape. `YYYY-MM-DD`, `YYYY-MM-DD HH:MM` and
   // `YYYY-MM-DD HH:MM:SS` all pass through untouched, as does a fractional
@@ -470,7 +480,9 @@ function toMysqlDate(value) {
   if (typeof value !== 'string') return value;
 
   const trimmed = value.trim();
-  if (!trimmed) return trimmed;
+  // "Not set" is NULL, never '' — MySQL rejects '' for a DATE column. See
+  // toMysqlDateTime above for the production error this came from.
+  if (!trimmed) return null;
 
   // Already a bare date — the common case, and the cheapest to recognise.
   if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
