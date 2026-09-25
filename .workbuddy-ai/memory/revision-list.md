@@ -5,11 +5,12 @@ was lost from context once. **This file is the list.** The user sends the items 
 each one, check it against the deployed pair, implement what is missing, and add a guard test for
 anything already done.
 
-Status so far: **4, 5, 6, 7, 8, 10 done and verified on the deployed pair** (and the
+Status so far: **4, 5, 6, 7, 8, 10, 11 done and verified on the deployed pair** (and the
 force-discharge → re-intake bug found while testing 4). Item 8 was answered, then **corrected by the
 user** and rebuilt — the block is five lines and the template's own second-row names are the right
-people, so the cover band is gone. **Item 9 is a do-not-touch item** (leave open for the user).
-**Next: 11 (Academic Support / Tutorial).**
+people, so the cover band is gone. Item 10 was built, then **reopened by the user's answers** (move the
+card to Part 2; print the markings on the slip) and finished. **Item 9 is a do-not-touch item** (leave
+open for the user). **Next: 12 (Education – Quarterly Reports by Role).**
 
 ## GENERAL / SCH
 
@@ -68,20 +69,75 @@ people, so the cover band is gone. **Item 9 is a do-not-touch item** (leave open
     the edit path must not use the generic bind, which turns `''` into NULL. Nothing recorded is
     stored as **NULL, never `'[]'`** ("checked, and there are none" ≠ "not recorded"), and a new
     admission for a returning resident starts **empty** rather than copying the previous list.
-    **Where it lives:** the card is on **Part 1** of the admission editor (with Resident
-    Identification and Admission Classification), *not* on the Part 2 slip replica. **Guard:**
-    `backend/tests/admission-body-markings.test.js` (22 tests); 15 mutations, 15 caught.
-    Shipped in `61ba7f8`; guard strengthened in `f8ac812`.
-    **Verified live:** API — 5 invalid payloads → 400 with the validator's messages, and a real
-    marking round-tripped then restored. UI — `C:/tmp/verify-item10-ui.js`, **35/35**, including that
-    the body part is a dropdown and **not also a text box**, and the 35-option list with no unsided
-    `Chest`/`Ear`. The save was intercepted (`page.route`) so nothing was written: captured payload
-    `[{"type":"Piercing","location":"Right Ear","description":"…"}]`, all residents still `null`.
-    **Still open:** the markings are stored and editable but are **not drawn onto the official
-    Admission Slip PDF** — that template has no body-marking area, so printing them needs an overlay
-    position the user has to choose.
-11. **Academic Support / Tutorial.** Residents not enrolled in school (e.g. the enrolment period has
-    ended) should have Academic Support Sessions / Tutorial as the appropriate educational activity.
+    **Two later corrections from the user:** (a) the card was moved from Part 1 to **Part 2**, the
+    Official Admission Slip step, so it sits with the save button — `0faafd6`; (b) the markings are
+    **printed on the generated slip** — `37a064e`.
+    **Where it lives now:** the card is on **Part 2**, after `<AdmissionSlipEditor>`; it carries an
+    explicit `{/* END PIERCING / TATTOO` marker so the guard's slice cannot drift.
+    **The slip print — the trap:** the app draws the same slip from **two** writers.
+    `ChildRecords.tsx`'s `generateAdmissionSlipPdf` and `ChildDetail.tsx`'s `handlePrintAdmission` each
+    carry their own copy of the drawing code, with slightly different coordinates, and the **View**
+    button on `/children` navigates to `/children/:id` — so the slip a user opens comes from
+    **ChildDetail**. The block was first added to the Child Records writer only: the guard passed and
+    the live PDF printed nothing. Both writers now call one shared helper,
+    `frontend/src/app/utils/admissionSlipMarkings.ts` (`bodyMarkingsSlipText`,
+    `drawBodyMarkingsOnSlip`), which Vite hoists into its own chunk — so there is **one implementation
+    at runtime**, not merely one at source. `ChildDetail`'s `AdmissionRecord` also needed
+    `bodyMarkings`; the column was already selected by `GET /admissions/resident/:id` and registered as
+    a jsonField, so the writer was being handed `undefined` and printing a blank band rather than
+    erroring.
+    **The overlay geometry, measured not guessed:** the template has no body-marking area, so the block
+    goes in the free band between "Houseparent on Duty (Signature over Printed Name)" and the
+    "Attested by / Checked by / Noted by" row. Rasterising `frontend/public/forms/admission-slip.pdf`
+    at 150 dpi and taking **every row that carries ink** (the ruled lines too, which a text-only
+    extraction misses) gives the band as **y_top 490.56..536.64** — 46.08 pt. The block's four lines
+    occupy **y_top 495.84..527.52**, measured by rendering that worst case onto the template: 5.28 pt
+    clear above, 9.12 pt below. Drawn at x=72, width 636, so it ends at 708 — the template's own right
+    margin. Font 7, leading 8.5, 4 lines, baseline 111.
+    **Guards:** `backend/tests/admission-body-markings.test.js` (**28 tests**); **21 mutations, 21
+    caught** (4 of them cover the second writer, the type field, and the band geometry).
+    **Verified live:** API — 5 invalid payloads → 400 with the validator's messages, and a real marking
+    round-tripped then restored. UI — `C:/tmp/verify-item10-ui.js` 35/35, then
+    `C:/tmp/verify-item10-part2.js` **15/15** (card on Part 2 and gone from Part 1, 35-option dropdown,
+    the slip generated in the browser at 124,993 bytes, the admission restored to `null`). The
+    generated PDF's own **text layer** reads
+    `Piercings / Tattoos: Tattoo: Left Chest (dragon, 4cm); Piercing: Right Ear (two hoops)` at y_top
+    493.48..503.09, x 72.0..335.8 — inside the band, with the rest of the slip intact.
+    Shipped in `61ba7f8`; guard strengthened in `f8ac812`; part 2 + print in `0faafd6`, `37a064e`.
+11. **Academic Support / Tutorial.** ✅ Done and verified on the deployed pair. The level **already
+    existed** (`Tutorial`, in the union and the picker, documented for exactly this case) and was
+    **unreachable**: `education_records.school` and `.enrollmentDate` were `NOT NULL`, so a
+    not-enrolled learner could not be saved at all — the POST returned `400 "Database error occurred"`,
+    which is `errorHandler` masking `ER_BAD_NULL_ERROR`. The educator had to invent a school and a
+    date, and what they typed was then indistinguishable from a real placement.
+    **The user's two answers:** the label is **"Academic Support Sessions / Tutorial"**, and **School
+    and Enrolment Date** both stop being mandatory for a not-enrolled learner. Only the **label**
+    changes (`LEVEL_LABELS`/`levelLabel`); the stored value stays `Tutorial`, because existing rows use
+    it — a label must never leak into a comparison or a write.
+    **The fix, three layers:**
+    * **Schema:** both columns `NULL` in the boot DDL **and** `schema.sql`, plus a guarded boot
+      migration that reads `IS_NULLABLE` from `INFORMATION_SCHEMA` first (so it is a no-op where
+      already nullable and does not rebuild the table every boot) and then `ALTER TABLE … MODIFY
+      COLUMN`, in `try/catch` with a `console.warn`. `CREATE TABLE IF NOT EXISTS` does nothing to a
+      deployed table, so without this the live database keeps refusing.
+    * **Form:** one `isNotEnrolled(level)` predicate; the name is always required, the placement fields
+      only inside `if (!isNotEnrolled(...))`; both labels drop their asterisk; an empty school/date is
+      sent as `null` (MySQL refuses `''` for a DATE under strict `sql_mode`); and `normalizeStudent`
+      runs on **every** path that puts a record into state — the cache load, the API load, and **all
+      four** save responses — or a `null` reaches a controlled input.
+    * **API:** `requireEducationPlacement` in `middleware/validation.js` on both writes, because a
+      frontend-only rule is a suggestion. A school placement with no school/date is a **400 with the
+      middleware's own message**, not a masked 500.
+    **Found live, then fixed (`1e7c783`):** relaxing `school` to NULL created a **second spelling** of
+    "no school" — the form sends `null`, but a caller sending `''` stored `''`, while the same
+    request's `enrollmentDate` came back `null`. `baseController` now honours a per-resource
+    `blankToNull` list (only `education_records` declares it), so "not recorded" is one value.
+    **Guard:** `backend/tests/education-not-enrolled.test.js` (**9 tests**).
+    **Verified live:** `C:/tmp/verify-item11-api.js` **15/15** — a `Tutorial` record is accepted with no
+    school and no date and reads back `Tutorial / school=null / date=null`; `''` and `'   '` both store
+    NULL; a real school survives trimmed; all four school levels are refused with the middleware's own
+    400; a file-only update is still accepted; the probe record is deleted and none left behind.
+    Shipped in `6657607` (schema + form), `55474d9` (API enforcement), `1e7c783` (blank → NULL).
 12. **Education – Quarterly Reports by Role.** Each applicable role gets its own Quarterly Report, with
     role-specific sections. Example: the Educator's report should drop the sections from the
     Observation Phase down if they do not apply. Do not force identical content on every role.
