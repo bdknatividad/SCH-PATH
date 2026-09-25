@@ -54,6 +54,37 @@ function resolveResource(resource) {
   throw new Error(`Unknown resource: ${resource}`);
 }
 
+/**
+ * The value to bind for one column.
+ *
+ * A column the resource declares in `blankToNull` takes NULL for an empty or
+ * whitespace-only string. Without this, "not recorded" has two spellings in the
+ * same column — `''` from a caller that sent the empty form field it read, and
+ * NULL from one that sent nothing — and every comparison downstream has to know
+ * about both. Only the declared columns change; this is opt-in per resource.
+ *
+ * @param {Object} config - The resource config from RESOURCES
+ * @param {string} col - The column being bound
+ * @param {*} value - The value the request supplied
+ */
+function bindValue(config, col, value) {
+  if ((config.blankToNull || []).includes(col)) {
+    if (value === null || value === undefined) return null;
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      return trimmed === '' ? null : trimmed;
+    }
+    return value;
+  }
+
+  // Handle JSON fields
+  if (config.jsonFields.includes(col) && typeof value === 'object') {
+    return JSON.stringify(value);
+  }
+
+  return value;
+}
+
 function createController(resource) {
   const { config, key: resourceKey, tableName } = resolveResource(resource);
 
@@ -130,12 +161,7 @@ function createController(resource) {
           if (col !== 'id' && col !== 'createdAt' && col !== 'updatedAt') {
             if (data[col] !== undefined) {
               columns.push(col);
-              // Handle JSON fields
-              if (config.jsonFields.includes(col) && typeof data[col] === 'object') {
-                values.push(JSON.stringify(data[col]));
-              } else {
-                values.push(data[col]);
-              }
+              values.push(bindValue(config, col, data[col]));
               placeholders.push('?');
             }
           }
@@ -226,12 +252,7 @@ function createController(resource) {
           // `updatedAt` is database-maintained; never write it from a body.
           if (col !== 'id' && col !== 'createdAt' && col !== 'updatedAt' && data[col] !== undefined) {
             updates.push(`${col} = ?`);
-            // Handle JSON fields
-            if (config.jsonFields.includes(col) && typeof data[col] === 'object') {
-              values.push(JSON.stringify(data[col]));
-            } else {
-              values.push(data[col]);
-            }
+            values.push(bindValue(config, col, data[col]));
           }
         }
 
@@ -292,4 +313,5 @@ function createController(resource) {
 
 module.exports = {
   createController,
+  bindValue,
 };

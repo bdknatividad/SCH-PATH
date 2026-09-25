@@ -142,6 +142,14 @@ const RESOURCES = {
     prefix: 'EDU',
     orderBy: 'createdAt DESC',
     jsonFields: ['files'],
+    /*
+     * A learner who is not enrolled in school has no school and no enrolment
+     * date, so both columns are nullable. The form sends `null`, but a caller
+     * that sends the empty string it read out of a form field would otherwise
+     * store `''` — two spellings of "not recorded" in one column, and every
+     * reader downstream would have to know about both. Normalised to NULL here.
+     */
+    blankToNull: ['school', 'enrollmentDate'],
     columns: ['id', 'residentId', 'name', 'age', 'gender', 'educationLevel', 'gradeSection', 'school', 'enrollmentDate', 'status', 'address', 'guardianName', 'guardianContact', 'notes', 'lrn', 'traineeNumber', 'files', 'createdBy', 'modifiedBy'],
   },
   education_progress_reports: {

@@ -664,10 +664,14 @@ test('the slip text names the type, keeps the note, and admits what it dropped',
 test('the printed block stays inside the free band on the template', () => {
   // The template has no body-marking area, so the block is overlaid on the band
   // between the Houseparent block and the Attested-by row. Measured on
-  // frontend/public/forms/admission-slip.pdf at 150 dpi: ink-free from y_top
-  // 492.3 to 531.4 across the full width. Moving the block, growing the font or
-  // adding a line can collide with either neighbour, and no other test would
-  // notice — the PDF would simply print on top of a signature line.
+  // frontend/public/forms/admission-slip.pdf by rasterising it at 150 dpi and
+  // finding every row that carries ink — which includes the ruled lines, not
+  // just the text: "Houseparent on Duty (Signature over Printed Name)" ends at
+  // y_top 490.56 and the "Attested by" row begins at y_top 536.64.
+  //
+  // Moving the block, growing the font or adding a line can collide with either
+  // neighbour, and no other test would notice — the PDF would simply print on
+  // top of a signature rule and still look plausible.
   const num = (name) => {
     const m = SLIP_MARKINGS.match(new RegExp(`const ${name} = ([0-9.]+);`));
     assert.ok(m, `${name} is gone from the shared helper`);
@@ -684,23 +688,39 @@ test('the printed block stays inside the free band on the template', () => {
   assert.ok(leading > size, `line height ${leading} is not greater than font size ${size}`);
   assert.ok(lines >= 1 && lines <= 6, `the block claims ${lines} lines`);
 
-  // PDF y grows upward; the measured bands are quoted top-down.
+  // PDF y grows upward; the measured band is quoted top-down.
   const PAGE_HEIGHT = 612;
-  const houseparentEdge = PAGE_HEIGHT - 492.3; // 119.7
-  const attestedEdge = PAGE_HEIGHT - 531.4; // 80.6
+  const houseparentEdge = PAGE_HEIGHT - 490.56; // 121.44
+  const attestedEdge = PAGE_HEIGHT - 536.64; // 75.36
 
   // `drawBodyMarkingsOnSlip` draws line `index` at `y - index * lineHeight`, so
-  // the first line is the highest and the last is the lowest.
+  // the first line is the highest and the last is the lowest. The ascender and
+  // descender estimates are what a rendered worst case measured: four full lines
+  // occupied y_top 495.84..527.52, against 495.75..528.25 here.
   const highest = baseline + size * 0.75;
   const lowest = baseline - (lines - 1) * leading - size * 0.25;
 
+  // A 3 pt margin, not a hairline: the block is overlaid on a printed form, and
+  // "it does not overlap" is not the same as "it reads as a separate field".
+  const MARGIN = 3;
   assert.ok(
-    highest <= houseparentEdge - 2,
-    `the block reaches y=${highest.toFixed(2)}, into the Houseparent block at ${houseparentEdge}`,
+    highest <= houseparentEdge - MARGIN,
+    `the block reaches y=${highest.toFixed(2)}, within ${MARGIN} pt of the Houseparent block at ${houseparentEdge}`,
   );
   assert.ok(
-    lowest >= attestedEdge + 2,
-    `the block drops to y=${lowest.toFixed(2)}, into the Attested-by row at ${attestedEdge}`,
+    lowest >= attestedEdge + MARGIN,
+    `the block drops to y=${lowest.toFixed(2)}, within ${MARGIN} pt of the Attested-by row at ${attestedEdge}`,
+  );
+
+  // And the clearance the current constants actually achieve, so a change that
+  // eats it fails here rather than being absorbed silently.
+  assert.ok(
+    houseparentEdge - highest > 5,
+    `only ${(houseparentEdge - highest).toFixed(2)} pt above the Houseparent block`,
+  );
+  assert.ok(
+    lowest - attestedEdge > 8,
+    `only ${(lowest - attestedEdge).toFixed(2)} pt below the Attested-by row`,
   );
 
   // It is drawn at this x with this width, and must stay on the page and within

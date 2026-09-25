@@ -7,10 +7,17 @@ import bodyMarkingsConfig from '@/app/config/bodyMarkings.json';
  * The official template has no body-marking area, so the block is overlaid on
  * the free band between the "Houseparent on Duty" block and the "Attested by /
  * Checked by / Noted by" row. Measured on
- * `frontend/public/forms/admission-slip.pdf` at 150 dpi: ink-free from y_top
- * 492.3 to 531.4 across the full width. The four lines below occupy y_top
- * 495.75..528, clearing both neighbours. Changing any of these without
- * re-measuring can print over a signature rule, and nothing else would notice.
+ * `frontend/public/forms/admission-slip.pdf` by rasterising it at 150 dpi and
+ * finding every row that carries ink — which includes the ruled lines, not just
+ * the text: the "Houseparent on Duty (Signature over Printed Name)" block ends
+ * at y_top 490.56 and the "Attested by" row begins at y_top 536.64, so the band
+ * is 46.08 pt tall.
+ *
+ * The four lines below occupy y_top 495.84..527.52 — checked by rendering that
+ * worst case onto the template and re-measuring — clearing the label above by
+ * 5.28 pt and the Attested-by row below by 9.12 pt. Changing any of these
+ * without re-measuring can print over a signature rule, and nothing else would
+ * notice: the PDF would simply look slightly wrong.
  *
  * **One implementation, called by both slip writers.** `ChildRecords.tsx` and
  * `ChildDetail.tsx` each draw the slip from their own copy of the same drawing

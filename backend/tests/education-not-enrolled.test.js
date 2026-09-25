@@ -131,6 +131,65 @@ test('the nullable columns still reach the browser', () => {
   }
 });
 
+test('an empty school is stored as NULL, not as an empty string', () => {
+  // Relaxing the column to NULL creates a second way to say "no school": the
+  // form sends `null`, but a caller that sends the empty string it read out of a
+  // form field would store `''`. Two spellings of the same fact in one column
+  // means every reader downstream has to know about both — and the education
+  // form's own `normalizeStudent` only ever learned about one.
+  //
+  // Found live: `POST /education-records` with `school: ''` returned `""` while
+  // `enrollmentDate: null` returned `null` from the same request.
+  const { bindValue } = require('../src/controllers/baseController');
+  const config = require('../src/utils/constants').RESOURCES.education_records;
+
+  assert.deepEqual(
+    config.blankToNull,
+    ['school', 'enrollmentDate'],
+    'the resource does not declare which columns collapse to NULL',
+  );
+
+  for (const column of config.blankToNull) {
+    assert.equal(bindValue(config, column, ''), null, `"${column}: ''" is not stored as NULL`);
+    assert.equal(bindValue(config, column, '   '), null, `"${column}: '   '" is not stored as NULL`);
+    assert.equal(bindValue(config, column, null), null, `"${column}: null" is not stored as NULL`);
+    assert.equal(bindValue(config, column, undefined), null, `"${column}: undefined" is not stored as NULL`);
+    // A real value survives, trimmed — the trim is what makes '  ' blank.
+    assert.equal(bindValue(config, column, '  LPU Laguna  '), 'LPU Laguna', `${column} is not trimmed`);
+  }
+
+  // Opt-in: a column the resource does not declare is untouched, so this cannot
+  // quietly rewrite the empty strings other resources store deliberately.
+  const other = { columns: ['x'], jsonFields: [], blankToNull: [] };
+  assert.equal(bindValue(other, 'x', ''), '', 'a column outside the list was rewritten');
+  assert.equal(bindValue({ columns: ['x'], jsonFields: [] }, 'x', ''), '', 'the rule is not opt-in');
+
+  // And the JSON fields still stringify, since both branches now go through one
+  // helper and an early return would have skipped this.
+  const filesConfig = { columns: ['files'], jsonFields: ['files'] };
+  assert.equal(bindValue(filesConfig, 'files', []), '[]', 'a JSON field is no longer stringified');
+  assert.equal(bindValue(filesConfig, 'files', [{ name: 'a.pdf' }]), '[{"name":"a.pdf"}]');
+
+  // A JSON field that is `null` keeps the behaviour it already had: the original
+  // branch tested `typeof value === 'object'`, which is true for null, so the
+  // column receives the four-character text `null`. That reads back as null
+  // through `mapRow`'s JSON.parse, so it is harmless — and changing it here
+  // would alter every resource that has a jsonField. Pinned so this refactor is
+  // provably behaviour-preserving rather than assumed to be.
+  assert.equal(bindValue(filesConfig, 'files', null), 'null', 'the jsonField branch changed behaviour');
+
+  // Both write paths have to use it, or a create is normalized and an edit is
+  // not — the same field, two behaviours.
+  const BASE = read('backend/src/controllers/baseController.js');
+  const uses = (BASE.match(/bindValue\(config, col, data\[col\]\)/g) || []).length;
+  assert.equal(uses, 2, `bindValue is used ${uses} times, not 2 (create and update)`);
+  assert.doesNotMatch(
+    BASE,
+    /values\.push\(data\[col\]\)/,
+    'a write path still binds the raw value',
+  );
+});
+
 // ── The form requires them only for a school placement ──────────────────────
 
 test('the form requires a school and an enrolment date only for a school placement', () => {
