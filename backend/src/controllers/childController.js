@@ -624,6 +624,91 @@ async function getIncompleteDocuments(req, res, next) {
 }
 
 /**
+ * The SQL expression for a user's printed label.
+ *
+ * `users.displayName` is added by a boot migration (`server.js`), so it can be
+ * absent on an older database — `assignmentController.getUserLabelColumn()`
+ * guards for exactly the same reason. Probing `INFORMATION_SCHEMA` costs one
+ * query on a path that runs once per re-admission, which is cheaper than failing
+ * the re-admission outright.
+ *
+ * @param {{query: Function}} executor
+ * @returns {Promise<string>} An SQL expression over the alias `u`.
+ */
+async function resolveUserLabelExpression(executor) {
+  try {
+    const [cols] = await executor.query(
+      `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND LOWER(TABLE_NAME) = 'users'`
+    );
+    if (cols.some((c) => String(c.COLUMN_NAME).toLowerCase() === 'displayname')) {
+      return "COALESCE(NULLIF(TRIM(u.displayName), ''), NULLIF(TRIM(u.username), ''))";
+    }
+  } catch {
+    // Fall through to the username: an unreadable INFORMATION_SCHEMA must not
+    // block a re-admission.
+  }
+  return 'u.username';
+}
+
+/**
+ * The Houseparent on duty for a **newly created** admission row.
+ *
+ * `admissions.houseparentOnDuty` is a snapshot: it records who was on duty when
+ * that admission was written and must not follow a later reassignment. That is
+ * precisely why a re-admission cannot simply copy the previous admission's value
+ * — the resident may have moved to a different Houseparent since — and equally
+ * why it cannot be left blank. The official slip prints this line, and the id
+ * stored beside it is what links the resident to a Houseparent's caseload.
+ *
+ * So the new admission snapshots whoever holds the resident *now*, falling back
+ * to the admission it supersedes when there is no active assignment (a legacy
+ * row, or an assignment table that was never populated). `Unspecified` survives
+ * only as the last resort, because the column is NOT NULL.
+ *
+ * The label matches `assignmentController.getByResident`'s `userLabel`
+ * (`displayName || username`), so the name printed on the slip is the same string
+ * the assignment list shows for that person.
+ *
+ * @param {{query: Function}} executor Pool or transaction connection.
+ * @param {string} residentId
+ * @param {{houseparentUserId?: string, houseparentOnDuty?: string}|null} previousAdmission
+ * @returns {Promise<{userId: string|null, label: string}>}
+ */
+async function resolveAdmissionHouseparent(executor, residentId, previousAdmission) {
+  const labelExpression = await resolveUserLabelExpression(executor);
+  const [assigned] = await executor.query(
+    `SELECT u.id AS userId, ${labelExpression} AS label
+       FROM residentAssignments ra
+       JOIN users u ON u.id = ra.userId
+      WHERE ra.residentId = ?
+        AND ra.status = 'Active'
+        AND LOWER(TRIM(ra.assignmentType)) = 'houseparent'
+      ORDER BY ra.startAt DESC, ra.id DESC
+      LIMIT 1`,
+    [residentId]
+  );
+
+  const current = assigned[0];
+  if (current && current.userId) {
+    return {
+      userId: String(current.userId),
+      label: String(current.label || '').trim() || 'Unspecified',
+    };
+  }
+
+  const carriedName = String(previousAdmission?.houseparentOnDuty || '').trim();
+  const carriedId = previousAdmission?.houseparentUserId
+    ? String(previousAdmission.houseparentUserId)
+    : null;
+  if (carriedId || carriedName) {
+    return { userId: carriedId, label: carriedName || 'Unspecified' };
+  }
+
+  return { userId: null, label: 'Unspecified' };
+}
+
+/**
  * Re-admit a discharged child with a new case
  * This creates a new admission cycle with fresh phase progress
  * @async
@@ -736,6 +821,13 @@ async function readmit(req, res, next) {
       ? Number(previousAdmission.admissionNumber || 0) + 1
       : 1;
 
+    // Who is on duty *now*, snapshotted onto this admission. Reading
+    // `child.houseparentOnDuty` here — as this INSERT used to — could only ever
+    // produce 'Unspecified': `children` has no such column, so the value was
+    // always undefined and the new slip printed a blank line while losing the
+    // caseload id the old admission had.
+    const houseparent = await resolveAdmissionHouseparent(pool, id, previousAdmission);
+
     const admissionId = await insertWithGeneratedId(pool, {
       table: 'admissions',
       prefix: 'ADM',
@@ -743,9 +835,9 @@ async function readmit(req, res, next) {
         `INSERT INTO admissions (
            id, residentId, admissionNumber, admissionDate, name, age, sex, birthDate,
            religion, address, guardianName, guardianContact, guardianAddress,
-           referringParty, referringPartyContact, houseparentOnDuty,
+           referringParty, referringPartyContact, houseparentOnDuty, houseparentUserId,
            legalCategory, specificOffense, caseHistory, status, createdBy
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Active', ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Active', ?)`,
         [
           generatedId,
           id,
@@ -762,7 +854,8 @@ async function readmit(req, res, next) {
           child.guardianAddress || 'Unspecified',
           'Re-admission',
           'Unspecified',
-          child.houseparentOnDuty || 'Unspecified',
+          houseparent.label,
+          houseparent.userId,
           newLegalCategory || child.legalCategory || 'Unspecified',
           newCaseType || child.caseType || 'Unspecified',
           `Previous: ${child.caseType} (${child.admissionDate})`,
@@ -941,4 +1034,9 @@ module.exports = {
   mayReadResidentMedicalSummary,
   residentRowFor,
   mayReadHealthRecords,
+  // Exported so the re-admission snapshot can be exercised directly, the same
+  // way `residentRowFor` and `mayReadResidentMedicalSummary` are: the resolution
+  // is the part that was wrong (it read a column that does not exist), and
+  // driving the whole controller would stub every query around it.
+  resolveAdmissionHouseparent,
 };
