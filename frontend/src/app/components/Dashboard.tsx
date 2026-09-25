@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/app/components/ui/dialog';
 import { Card, CardContent, CardHeader, CardTitle } from '@/app/components/ui/card';
@@ -14,7 +14,6 @@ import {
 import { useData, Child, Assessment, Violation } from '../state/DataContext';
 import { useAuth } from '../state/AuthContext';
 import { request } from '@/services/api';
-import { countTriStatistics } from '@/app/components/TriStatistics';
 import { canOpenModule } from '@/app/config/moduleAccess';
 import { formatShortDate } from '@/utils/dateFormatter';
 import { pendingReviewQueue } from '@/utils/pendingDocuments';
@@ -1365,65 +1364,8 @@ function EducatorDashboard({ displayRole, onOpen }: EducatorDashboardProps) {
 
 export function Dashboard() {
   const navigate = useNavigate();
-  const { children, activities, assessments, violations, documents, courtRecords, healthRecords, isLoading: storeLoading, refreshData } = useData();
+  const { children, activities, assessments, violations, documents, courtRecords, healthRecords } = useData();
   const { user } = useAuth();
-
-  // Re-read the database whenever the Dashboard is opened, so "Scheduled Today"
-  // reflects a schedule added in the Activities / Assessments modules (or by
-  // another user, or created server-side) instead of whatever was cached in the
-  // browser from an earlier session. Once per mount.
-  const refreshedOnMount = useRef(false);
-  useEffect(() => {
-    if (refreshedOnMount.current || !user) return;
-    refreshedOnMount.current = true;
-    refreshData();
-  }, [user, refreshData]);
-
-  /**
-   * Today's schedules, counted by the database (GET /dashboard/schedule-summary):
-   * hearings, activities, assessments and assigned intervention sessions for
-   * today's Manila date, each gated by its module and, for a Houseparent, by
-   * their Case Load. The "Scheduled Today" number and the lists in its dialog
-   * are both read from this one answer, so they always agree with the records.
-   *
-   * Re-read when the Dashboard opens, when the window regains focus, once a
-   * minute (so a schedule created by someone else, or the day rolling over,
-   * shows up), and whenever this user's own store changes — which is what
-   * happens right after they create or edit a schedule.
-   */
-  type ScheduleSummary = {
-    date: string;
-    access: { activities: boolean; assessments: boolean; hearings: boolean; assigned: boolean };
-    activities: any[]; assessments: any[]; hearings: any[]; assigned: any[];
-    counts: { activities: number; assessments: number; hearings: number; assigned: number; total: number };
-    scheduledCounts: { activities: number; assessments: number; hearings: number; assigned: number; total: number };
-    scheduledToday: { activities: number; assessments: number; count: number };
-  };
-  const [scheduleSummary, setScheduleSummary] = useState<ScheduleSummary | null>(null);
-  const scheduleSummaryRequest = useRef(0);
-  const loadScheduleSummary = useCallback(async () => {
-    if (!user) return;
-    const requestId = (scheduleSummaryRequest.current += 1);
-    try {
-      const result = await request<{ success: boolean; data?: ScheduleSummary }>('/dashboard/schedule-summary');
-      if (requestId === scheduleSummaryRequest.current && result?.success && result.data) setScheduleSummary(result.data);
-    } catch (err) {
-      console.error('Failed to load today\'s schedule summary:', err);
-    }
-  }, [user]);
-  useEffect(() => {
-    loadScheduleSummary();
-  }, [loadScheduleSummary, activities, assessments, courtRecords, violations]);
-  useEffect(() => {
-    const onFocus = () => { loadScheduleSummary(); };
-    window.addEventListener('focus', onFocus);
-    // Schedules can be created/edited from another module without remounting
-    // the Dashboard. Refresh the database-backed summary frequently enough
-    // that the count changes during the same session, while keeping the
-    // authoritative source on the API rather than the cached store.
-    const timer = window.setInterval(onFocus, 5000);
-    return () => { window.removeEventListener('focus', onFocus); window.clearInterval(timer); };
-  }, [loadScheduleSummary]);
   const [monthlyRatings, setMonthlyRatings] = useState<Array<{
     residentId: string;
     ratingYear: number;
@@ -1478,29 +1420,27 @@ export function Dashboard() {
       return;
     }
     let cancelled = false;
-    let firstLoad = true;
     const loadTriMonitor = async () => {
-      // Only the first load shows "Loading…"; the refreshes below update the
-      // numbers in place.
-      if (firstLoad) setTriMonitorLoading(true);
+      setTriMonitorLoading(true);
       try {
         const result: any = await request('/tri/monitor');
         if (!cancelled) setTriMonitor(result?.data || []);
-      } catch { if (!cancelled && firstLoad) setTriMonitor([]); }
-      finally { if (!cancelled) { setTriMonitorLoading(false); firstLoad = false; } }
+      } catch { if (!cancelled) setTriMonitor([]); }
+      finally { if (!cancelled) setTriMonitorLoading(false); }
     };
     loadTriMonitor();
-    // Keep the TRI statistics current when a TRI is scored or finalized
-    // elsewhere: re-read on focus and every 30 seconds.
-    const onFocus = () => { loadTriMonitor(); };
-    window.addEventListener('focus', onFocus);
-    const timer = window.setInterval(onFocus, 30000);
-    return () => { cancelled = true; window.removeEventListener('focus', onFocus); window.clearInterval(timer); };
+    return () => { cancelled = true; };
   }, [user]);
 
-  // Aggregate finalized TRI ratings across active residents. `Scored` is every
-  // resident whose latest Finalized TRI has a rating (the sum of the four).
-  const triRatingCounts = useMemo(() => countTriStatistics(triMonitor || []), [triMonitor]);
+  // Aggregate finalized TRI ratings across active residents.
+  const triRatingCounts = useMemo(() => {
+    const counts: Record<string, number> = { 'Needs Improvement': 0, Fair: 0, Good: 0, 'Very Good': 0, Unscored: 0 };
+    (triMonitor || []).forEach((r: any) => {
+      if (r.rating && counts[r.rating] !== undefined) counts[r.rating]++;
+      else counts.Unscored++;
+    });
+    return counts;
+  }, [triMonitor]);
 
   /**
    * The interventions scheduled for the signed-in user today — the third kind of
@@ -1567,31 +1507,12 @@ export function Dashboard() {
   const monthLabel = (m: number) => new Date(2000, m - 1, 1).toLocaleString('default', { month: 'long' });
 
   const activeChildren  = children.filter(c => !c.status || c.status === 'Active');
-  // Today's date in the facility's timezone (Asia/Manila), whatever timezone the
-  // browser is set to. `toISOString()` would be UTC — yesterday until 08:00 in
-  // the Philippines — so a schedule for today would read as empty all morning.
+  // Today's date in the browser's own timezone. This was `toISOString()`, which
+  // is UTC: in GMT+8 that returns *yesterday* until 08:00, so a schedule for
+  // today read as empty for the first eight hours of every day.
   const localDateString = (value: Date) =>
-    new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).format(value);
+    `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
   const todayString     = localDateString(new Date());
-  /**
-   * The calendar day a schedule row is on, as `YYYY-MM-DD`. A DATE column
-   * arrives as a bare `YYYY-MM-DD`, but a row can also carry a full timestamp
-   * (a cached copy, or a value written with a time); comparing those with `===`
-   * silently dropped the row from "Scheduled Today". A timestamp with a zone is
-   * converted to its Manila day; anything else keeps its written date.
-   */
-  const scheduleDay = (value: unknown): string => {
-    const text = String(value ?? '').trim();
-    if (!text) return '';
-    if (/^\d{4}-\d{2}-\d{2}T.*(Z|[+-]\d{2}:?\d{2})$/i.test(text)) {
-      const parsed = new Date(text);
-      if (!Number.isNaN(parsed.getTime())) return localDateString(parsed);
-    }
-    const match = text.match(/^(\d{4}-\d{2}-\d{2})/);
-    return match ? match[1] : '';
-  };
-  const byTime = (a: { time?: string | null }, b: { time?: string | null }) =>
-    String(a.time || '').localeCompare(String(b.time || ''));
   // Pending = still 'Scheduled'. Nearest first, so the next assessment to sit is
   // the one the card shows when it can only fit three.
   const scheduledAssessments = assessments
@@ -1641,37 +1562,33 @@ export function Dashboard() {
 
   const alerts: { message: string; type: 'alert'; link: string }[] = [];
 
-  // Scheduled Today = today's Activities + today's Assessments, and nothing else.
-  // The count and the "Scheduled today" list in the dialog below are built from
-  // the same two arrays, so they cannot disagree. Hearings and assigned
-  // intervention sessions still appear in the dialog, but in a separate section
-  // that is not part of this count.
+  // Scheduled Today = every schedule the signed-in user is meant to attend
+  // today, and exactly the four lists the dialog below renders. The tile used to
+  // count today's assessments alone while its dialog listed activities and
+  // hearings too, so a day full of activities read as an empty schedule.
   //
   // Each source is read through the *same* module gate its section uses, so the
-  // number can never include a row the dialog is hiding. Cancelled activities are
-  // not a schedule; an assessment stays on today's schedule whether it is still
-  // Scheduled or already Completed.
+  // number can never include a row the dialog is hiding — and the tile is shown
+  // when any one of the four modules is held, rather than only the first two.
+  // Cancelled activities are not a schedule, so they are out of both.
   const canSeeActivities = hasModule('Activities');
   const canSeeAssessments = hasModule('Assessments');
   const canSeeHearings = hasModule('Court Records');
   const canSeeInterventions = hasModule('Violations');
 
-  // Today's lists come from the database summary above, never from a cached
-  // copy, so the count matches the actual records.
-  const todayActivities: any[] = canSeeActivities ? (scheduleSummary?.activities || []) : [];
-  const todayAssessments: any[] = canSeeAssessments ? (scheduleSummary?.assessments || []) : [];
-  // Upcoming hearings (for the "N upcoming" hint when none is today).
-  const scheduledHearings = canSeeHearings
-    ? (courtRecords || []).filter(r => r.status === 'Scheduled' && scheduleDay(r.hearingDate) >= todayString)
+  const todayActivities = canSeeActivities
+    ? activities.filter(a => a.date === todayString && String(a.status || '') !== 'Cancelled')
     : [];
-  const todayHearings: any[] = canSeeHearings ? (scheduleSummary?.hearings || []) : [];
-  const todayInterventions: any[] = canSeeInterventions ? (scheduleSummary?.assigned || []) : [];
-  // Scheduled Today is specifically today's Activities + Assessments.
-  // Hearings and assigned intervention sessions are shown separately in the
-  // dialog and are not included in this tile.
-  const scheduledTodayCount = scheduleSummary?.scheduledToday?.count ?? (todayActivities.length + todayAssessments.length);
-  const scheduledCounts = scheduleSummary?.scheduledCounts || { activities: 0, assessments: 0, hearings: 0, assigned: 0, total: 0 };
-  const scheduleSummaryReady = scheduleSummary !== null && scheduleSummary.date === todayString;
+  const todayAssessments = canSeeAssessments
+    ? assessments.filter(a => a.date === todayString && a.status === 'Scheduled')
+    : [];
+  const scheduledHearings = canSeeHearings
+    ? (courtRecords || []).filter(r => r.status === 'Scheduled')
+    : [];
+  const todayHearings = scheduledHearings.filter(r => r.hearingDate === todayString);
+  const todayInterventions = canSeeInterventions ? assignedSchedules : [];
+  const scheduledTodayCount =
+    todayActivities.length + todayAssessments.length + todayHearings.length + todayInterventions.length;
 
   const ratingByResidentId = new Map(monthlyRatings.map(rating => [rating.residentId, rating]));
 
@@ -1756,20 +1673,8 @@ export function Dashboard() {
     if (hasModule('Child Records') && userRole !== 'socialworker') {
       base.push({ title: 'Closed Cases', value: String(closedCount), icon: FolderX, color: '#64748b', sub: 'Discharged', clickable: true });
     }
-    // Schedules are intentionally represented by ONE dashboard card. The
-    // database-backed total opens a summary where each schedule type can be
-    // selected and routed to its owning module. Keeping the categories out of
-    // the top-level cards prevents the dashboard from presenting four
-    // competing schedule totals (plus a fifth "Scheduled Today" tile).
     if (canSeeActivities || canSeeAssessments || canSeeHearings || canSeeInterventions) {
-      base.push({
-        title: 'Schedules',
-        value: scheduleSummaryReady ? String(scheduledCounts.total) : '…',
-        icon: Calendar,
-        color: '#2F3E46',
-        sub: 'All scheduled items',
-        clickable: true,
-      });
+      base.push({ title: 'Scheduled Today', value: String(scheduledTodayCount), icon: Calendar, color: '#2F3E46', sub: "Today's schedule", clickable: true });
     }
     if (['centerhead','admin'].includes(userRole)) {
       base.push({ title: 'Total Residents', value: String(activeCount), icon: Users, color: '#2F3E46', sub: 'Active only', clickable: true });
@@ -1895,7 +1800,7 @@ export function Dashboard() {
                   navigate('/children?filter=Active');
                 } else if (stat.title === 'Closed Cases') {
                   navigate('/children?filter=Discharged');
-                } else if (stat.title === 'Schedules') {
+                } else if (stat.title === 'Scheduled Today') {
                   setShowScheduleChoice(true);
                 }
               }}
@@ -2016,9 +1921,8 @@ export function Dashboard() {
             {triMonitorLoading ? <p className="text-xs text-gray-400">Loading TRI ratings…</p>
               : !triMonitor || triMonitor.length === 0 ? <p className="text-xs text-gray-400 italic">No active residents for TRI monitoring.</p>
               : <>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
                     {[
-                      { key: 'Scored', color: 'bg-slate-100 text-[#2F3E46] border-slate-200', icon: 'bg-[#2F3E46]' },
                       { key: 'Needs Improvement', color: 'bg-red-100 text-red-700 border-red-200', icon: 'bg-red-500' },
                       { key: 'Fair', color: 'bg-yellow-100 text-yellow-700 border-yellow-200', icon: 'bg-yellow-500' },
                       { key: 'Good', color: 'bg-blue-100 text-blue-700 border-blue-200', icon: 'bg-blue-500' },
@@ -2208,57 +2112,149 @@ export function Dashboard() {
       </div>
 
       {/* ── CHILDREN OVERVIEW MODAL ── */}
-      {/* ── SCHEDULE SUMMARY DIALOG ── */}
+      {/* ── SCHEDULE CHOICE DIALOG ── */}
       <Dialog open={showScheduleChoice} onOpenChange={setShowScheduleChoice}>
         <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-[#2F3E46] flex items-center gap-2">
-              <Calendar className="w-5 h-5 text-[#FFD100]" /> Schedules
+              <Calendar className="w-5 h-5 text-[#FFD100]" /> Today's Schedule
             </DialogTitle>
           </DialogHeader>
+          <div className="space-y-4 py-2">
 
-          <div className="space-y-3 py-2">
-            <div className="flex items-center justify-between rounded-xl bg-[#FFD100]/15 px-3 py-3">
-              <div>
-                <p className="text-xs font-bold uppercase tracking-wide text-[#2F3E46]">Total schedules</p>
-                <p className="text-[11px] text-gray-500">All scheduled records from the database</p>
+            {/* Activities */}
+            {hasModule('Activities') && <div>
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg bg-blue-100 flex items-center justify-center">
+                    <Zap className="w-4 h-4 text-blue-600" />
+                  </div>
+                  <p className="font-bold text-sm text-[#2F3E46]">Activities</p>
+                </div>
+                <button onClick={() => { setShowScheduleChoice(false); navigate('/activities'); }}
+                  className="text-xs text-blue-600 font-semibold hover:underline">View all →</button>
               </div>
-              <p className="text-2xl font-black text-[#2F3E46]">{scheduleSummaryReady ? scheduledCounts.total : '…'}</p>
-            </div>
+              {todayActivities.length > 0 ? (
+                <div className="space-y-1.5">
+                  {todayActivities.slice(0, 3).map(a => (
+                    <div key={a.id} className="flex items-center gap-2 p-2 bg-blue-50 rounded-lg border-l-3 border-blue-400">
+                      <span className="text-[10px] font-bold text-blue-700 bg-blue-100 px-1.5 py-0.5 rounded whitespace-nowrap">
+                        {formatShortDate(a.date)} · {a.time || 'TBA'}
+                      </span>
+                      <span className="text-xs font-semibold text-[#2F3E46] truncate">{a.title}</span>
+                    </div>
+                  ))}
+                  {todayActivities.length > 3 && <p className="text-xs text-gray-400 pl-2">+{todayActivities.length - 3} more</p>}
+                </div>
+              ) : (
+                <p className="text-xs text-gray-400 italic pl-2">No activities today.</p>
+              )}
+            </div>}
 
-            <div className="space-y-2">
-              {canSeeAssessments && (
-                <button type="button" onClick={() => { setShowScheduleChoice(false); navigate('/assessments'); }} className="w-full flex items-center justify-between rounded-xl border border-gray-200 p-3 text-left hover:border-[#FFD100] hover:bg-[#FFD100]/10 transition-colors">
-                  <span className="flex items-center gap-3"><ClipboardCheck className="w-4 h-4 text-[#2F3E46]" /><span><span className="block text-sm font-bold text-[#2F3E46]">Assessments</span><span className="block text-[10px] text-gray-500">Open Assessments schedule</span></span></span>
-                  <span className="text-lg font-black text-[#2F3E46]">{scheduleSummaryReady ? scheduledCounts.assessments : '…'}</span>
-                </button>
-              )}
-              {canSeeActivities && (
-                <button type="button" onClick={() => { setShowScheduleChoice(false); navigate('/activities'); }} className="w-full flex items-center justify-between rounded-xl border border-gray-200 p-3 text-left hover:border-[#FFD100] hover:bg-[#FFD100]/10 transition-colors">
-                  <span className="flex items-center gap-3"><Calendar className="w-4 h-4 text-[#2F3E46]" /><span><span className="block text-sm font-bold text-[#2F3E46]">Activities</span><span className="block text-[10px] text-gray-500">Open Activities schedule</span></span></span>
-                  <span className="text-lg font-black text-[#2F3E46]">{scheduleSummaryReady ? scheduledCounts.activities : '…'}</span>
-                </button>
-              )}
-              {canSeeHearings && (
-                <button type="button" onClick={() => { setShowScheduleChoice(false); navigate('/court-records?filter=Scheduled'); }} className="w-full flex items-center justify-between rounded-xl border border-gray-200 p-3 text-left hover:border-[#FFD100] hover:bg-[#FFD100]/10 transition-colors">
-                  <span className="flex items-center gap-3"><Gavel className="w-4 h-4 text-[#2F3E46]" /><span><span className="block text-sm font-bold text-[#2F3E46]">Court Hearings</span><span className="block text-[10px] text-gray-500">Open Court Hearings schedule</span></span></span>
-                  <span className="text-lg font-black text-[#2F3E46]">{scheduleSummaryReady ? scheduledCounts.hearings : '…'}</span>
-                </button>
-              )}
-              {canSeeInterventions && (
-                <button type="button" onClick={() => { setShowScheduleChoice(false); navigate('/violations?tab=interventions'); }} className="w-full flex items-center justify-between rounded-xl border border-gray-200 p-3 text-left hover:border-[#FFD100] hover:bg-[#FFD100]/10 transition-colors">
-                  <span className="flex items-center gap-3"><Clock className="w-4 h-4 text-[#2F3E46]" /><span><span className="block text-sm font-bold text-[#2F3E46]">Assigned Schedules</span><span className="block text-[10px] text-gray-500">Open assigned intervention schedules</span></span></span>
-                  <span className="text-lg font-black text-[#2F3E46]">{scheduleSummaryReady ? scheduledCounts.assigned : '…'}</span>
-                </button>
-              )}
-            </div>
+            <div className="h-px bg-gray-100" />
 
-            {(canSeeActivities || canSeeAssessments) && (
-              <div className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2 flex items-center justify-between">
-                <span className="text-[11px] font-semibold text-gray-500">Scheduled Today · Activities + Assessments</span>
-                <span className="font-black text-[#2F3E46]">{scheduleSummaryReady ? scheduledTodayCount : '…'}</span>
+            {/* Assessments */}
+            {hasModule('Assessments') && <div>
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg bg-purple-100 flex items-center justify-center">
+                    <ClipboardCheck className="w-4 h-4 text-purple-600" />
+                  </div>
+                  <p className="font-bold text-sm text-[#2F3E46]">Assessments</p>
+                </div>
+                <button onClick={() => { setShowScheduleChoice(false); navigate('/assessments'); }}
+                  className="text-xs text-purple-600 font-semibold hover:underline">View all →</button>
               </div>
-            )}
+              {todayAssessments.length > 0 ? (
+                <div className="space-y-1.5">
+                  {todayAssessments.slice(0, 3).map(a => (
+                    <div key={a.id} className="flex items-center gap-2 p-2 bg-purple-50 rounded-lg border-l-3 border-purple-400">
+                      <span className="text-[10px] font-bold text-purple-700 bg-purple-100 px-1.5 py-0.5 rounded whitespace-nowrap">
+                        {formatShortDate(a.date)} · {a.time || 'TBA'}
+                      </span>
+                      <span className="text-xs font-semibold text-[#2F3E46] truncate">{a.title}</span>
+                    </div>
+                  ))}
+                  {todayAssessments.length > 3 && <p className="text-xs text-gray-400 pl-2">+{todayAssessments.length - 3} more</p>}
+                </div>
+              ) : (
+                <p className="text-xs text-gray-400 italic pl-2">No assessments today.</p>
+              )}
+            </div>}
+
+            <div className="h-px bg-gray-100" />
+
+            {/* Hearing Schedule */}
+            {hasModule('Court Records') && <div>
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg bg-amber-100 flex items-center justify-center">
+                    <Gavel className="w-4 h-4 text-amber-600" />
+                  </div>
+                  <p className="font-bold text-sm text-[#2F3E46]">Hearing Schedule</p>
+                </div>
+                <button onClick={() => { setShowScheduleChoice(false); navigate('/court-records?filter=Scheduled'); }}
+                  className="text-xs text-amber-600 font-semibold hover:underline">View all →</button>
+              </div>
+              {todayHearings.length > 0 ? (
+                <div className="space-y-1.5">
+                  {todayHearings.slice(0, 3).map(h => {
+                    const resident = children.find(c => c.id === h.residentId);
+                    return (
+                      <div key={h.id} className="flex items-center gap-2 p-2 bg-amber-50 rounded-lg border-l-3 border-amber-400">
+                        <span className="text-[10px] font-bold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded whitespace-nowrap">{h.hearingTime || 'TBA'}</span>
+                        <span className="text-xs font-semibold text-[#2F3E46] truncate">{resident?.name || '—'}</span>
+                        <span className="text-[10px] text-gray-400 truncate">{h.hearingType || 'Hearing'}</span>
+                      </div>
+                    );
+                  })}
+                  {todayHearings.length > 3 && <p className="text-xs text-gray-400 pl-2">+{todayHearings.length - 3} more</p>}
+                </div>
+              ) : scheduledHearings.length > 0 ? (
+                <div className="pl-2">
+                  <p className="text-xs text-gray-400 italic">No hearings today.</p>
+                  <p className="text-xs text-amber-600 font-semibold mt-0.5">{scheduledHearings.length} upcoming — click View all</p>
+                </div>
+              ) : (
+                <p className="text-xs text-gray-400 italic pl-2">No scheduled hearings.</p>
+              )}
+            </div>}
+
+            <div className="h-px bg-gray-100" />
+
+            {/* Assigned Schedules — the intervention sessions the signed-in user
+                is expected to run today. This is the only per-user schedule in
+                the schema, and it is what the "Assigned schedules must display
+                correctly" requirement refers to. */}
+            {canSeeInterventions && <div>
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-lg bg-emerald-100 flex items-center justify-center">
+                    <Clock className="w-4 h-4 text-emerald-600" />
+                  </div>
+                  <p className="font-bold text-sm text-[#2F3E46]">Assigned Schedules</p>
+                </div>
+                <button onClick={() => { setShowScheduleChoice(false); navigate('/violations?tab=interventions'); }}
+                  className="text-xs text-emerald-600 font-semibold hover:underline">View all →</button>
+              </div>
+              {todayInterventions.length > 0 ? (
+                <div className="space-y-1.5">
+                  {todayInterventions.slice(0, 3).map(s => (
+                    <div key={s.id} className="flex items-center gap-2 p-2 bg-emerald-50 rounded-lg border-l-3 border-emerald-400">
+                      <span className="text-[10px] font-bold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded whitespace-nowrap">
+                        {formatShortDate(s.scheduledAt)} · {scheduleClock(s.scheduledAt)}
+                      </span>
+                      <span className="text-xs font-semibold text-[#2F3E46] truncate">{s.residentName || '—'}</span>
+                      <span className="text-[10px] text-gray-400 truncate">{s.interventionType || 'Intervention'}</span>
+                    </div>
+                  ))}
+                  {todayInterventions.length > 3 && <p className="text-xs text-gray-400 pl-2">+{todayInterventions.length - 3} more</p>}
+                </div>
+              ) : (
+                <p className="text-xs text-gray-400 italic pl-2">No assigned schedules today.</p>
+              )}
+            </div>}
+
           </div>
         </DialogContent>
       </Dialog>

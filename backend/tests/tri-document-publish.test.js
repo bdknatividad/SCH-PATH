@@ -188,7 +188,7 @@ test('the description states which signature lines are filled', () => {
   // reverse) is worse than saying nothing.
   assert.match(
     body,
-    /signedLineCount\(record\)[\s\S]{0,300}signature lines are signed/,
+    /houseparentSignature[\s\S]{0,120}signature line is signed/,
     'the description no longer distinguishes a signed copy from an unsigned one — the ' +
       'official TRI carries five signature lines and a reader must not assume they were witnessed'
   );

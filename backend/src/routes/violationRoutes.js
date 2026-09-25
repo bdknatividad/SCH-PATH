@@ -41,7 +41,7 @@ router.get('/resident/:residentId/stats', canReadViolations, asyncHandler(violat
  * GET /api/violations/:id
  * Get violation by ID
  */
-router.get('/:id/review-preview', authorize('psychologist', 'socialworker', 'centerhead'), asyncHandler(violationController.getReviewPreview));
+router.get('/:id/review-preview', authorize('psychologist', 'centerhead'), asyncHandler(violationController.getReviewPreview));
 
 router.get('/:id', canReadViolations, asyncHandler(violationController.getById));
 
@@ -64,17 +64,13 @@ router.get('/:id', canReadViolations, asyncHandler(violationController.getById))
  * including the Nurse and the Educator, who hold no Violations module at all —
  * so the button was visible to roles the route then refused.
  */
-// A Houseparent may log (add) an incident for a resident on their own Case Load;
-// the controller's canAccessResident check refuses anyone else's resident.
-router.post('/', authorize('socialworker', 'centerhead', 'houseparent'), asyncHandler(violationController.create));
+router.post('/', authorize('socialworker', 'centerhead'), asyncHandler(violationController.create));
 
 /**
  * POST /api/violations/:id/review
  * Psychological Staff reviews a violation — confirm/adjust severity, change status to Reviewed
  */
-// Dual verification: the Psychological Support Staff and the Social Worker
-// both verify a logged incident; it proceeds only when both have.
-router.post('/:id/review', authorize('psychologist', 'socialworker', 'centerhead'), asyncHandler(violationController.review));
+router.post('/:id/review', authorize('psychologist', 'centerhead'), asyncHandler(violationController.review));
 
 /**
  * POST /api/violations/:id/mark-done

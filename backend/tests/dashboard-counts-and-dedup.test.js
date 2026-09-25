@@ -137,50 +137,38 @@ test('the module badge counts the same set its tab lists', () => {
 
 // ── Each schedule rendered once ─────────────────────────────────────────────
 
-test('Dashboard has one top-level Schedules card', () => {
-  assert.match(DASHBOARD, /title: 'Schedules'/, 'the single Schedules card is missing');
-  for (const label of ['Activities', 'Assessments', 'Court Hearings', 'Assigned Schedules']) {
-    assert.doesNotMatch(DASHBOARD, new RegExp(`title: '${label}'`), `${label} is still rendered as a separate dashboard card`);
-  }
-  assert.doesNotMatch(DASHBOARD, /title: 'Scheduled Today'/, 'Scheduled Today is still a separate schedule card');
-  assert.match(DASHBOARD, /scheduledCounts\.total/, 'the Schedules card is not using the database-backed total');
-  assert.match(DASHBOARD, /stat\.title === 'Schedules'/, 'the Schedules card does not open its summary');
+test('the repeated schedule cards are gone from the page body', () => {
+  // Each string belonged to exactly one of the two removed cards, so its presence
+  // means that card came back.
+  assert.doesNotMatch(DASHBOARD, /Clean schedule for today\./, 'the "Today\'s Activities" card is back');
+  assert.doesNotMatch(
+    DASHBOARD,
+    /more upcoming • Click to view all/,
+    'the "Hearing Schedule" card is back',
+  );
+  assert.doesNotMatch(
+    DASHBOARD,
+    /\{scheduledHearings\.length\} scheduled/,
+    'the "Hearing Schedule" card\'s scheduled badge is back',
+  );
 });
 
-test('Schedules dialog exposes four clickable categories with database counts', () => {
+test('the Today\'s Schedule dialog still renders all four lists', () => {
   const dialog = DASHBOARD.slice(
     DASHBOARD.indexOf('<Dialog open={showScheduleChoice}'),
     DASHBOARD.indexOf('</Dialog>', DASHBOARD.indexOf('<Dialog open={showScheduleChoice}')),
   );
-  assert.ok(dialog.length > 1000, 'the Schedules dialog was not located');
-  for (const [label, count, route] of [
-    ['Activities', 'scheduledCounts.activities', '/activities'],
-    ['Assessments', 'scheduledCounts.assessments', '/assessments'],
-    ['Court Hearings', 'scheduledCounts.hearings', '/court-records?filter=Scheduled'],
-    ['Assigned Schedules', 'scheduledCounts.assigned', '/violations?tab=interventions'],
-  ]) {
-    assert.match(dialog, new RegExp(label), `${label} category is missing`);
-    assert.match(dialog, new RegExp(count.replace('.', '\\.'), 'g'), `${label} does not show its database count`);
-    assert.match(dialog, new RegExp(route.replace(/[?]/g, '\\?')), `${label} does not route to its module`);
+  assert.ok(dialog.length > 500, 'the Today\'s Schedule dialog was not located');
+  // Match the *rendered heading*, not the word. The dialog's own comments name
+  // these sections too, so `includes('Assigned Schedules')` stayed true after the
+  // heading itself was deleted — the assertion has to be about what renders.
+  for (const heading of ['Activities', 'Assessments', 'Hearing Schedule', 'Assigned Schedules']) {
+    assert.match(
+      dialog,
+      new RegExp(`>${heading}</p>`),
+      `the dialog no longer renders the ${heading} section`,
+    );
   }
-  assert.match(dialog, /scheduledCounts\.total/, 'the dialog does not show the total schedule count');
-});
-
-test('Scheduled Today counts today\'s Activities + Assessments only', () => {
-  assert.match(
-    DASHBOARD,
-    /const scheduledTodayCount = scheduleSummary\?\.scheduledToday\?\.count \?\? \(todayActivities\.length \+ todayAssessments\.length\);/,
-    'Scheduled Today counts something other than today\'s activities and assessments',
-  );
-  assert.match(DASHBOARD, /timeZone: 'Asia\/Manila'/, 'today is not taken in the facility timezone');
-  assert.match(DASHBOARD, /scheduleSummary\?\.scheduledToday\?\.count/, 'the count is not sourced from the database summary');
-});
-
-test('Dashboard exposes database-backed counts for all four schedule categories', () => {
-  for (const label of ['Activities', 'Assessments', 'Court Hearings', 'Assigned Schedules']) {
-    assert.match(DASHBOARD, new RegExp(`scheduledCounts\\.${label === 'Court Hearings' ? 'hearings' : label === 'Assigned Schedules' ? 'assigned' : label.toLowerCase()}`), `${label} count is not read from the schedule summary`);
-  }
-  assert.match(DASHBOARD, /scheduledCounts\.total/, 'the total is not read from the schedule summary');
 });
 
 test('Pending Assessments stayed, because it is not a today-only list', () => {

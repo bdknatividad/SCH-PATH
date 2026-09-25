@@ -14,7 +14,7 @@ import { Checkbox } from '@/app/components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/app/components/ui/dialog';
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogAction, AlertDialogCancel } from '@/app/components/ui/alert-dialog';
 import { Search, Plus, Eye, ShieldAlert, AlertTriangle, AlertCircle, User, Check } from 'lucide-react';
-import { useData, Violation, type Child } from '../state/DataContext';
+import { useData, Violation } from '../state/DataContext';
 import { useAuth } from '../state/AuthContext';
 import { usePermissions } from '@/app/hooks/usePermissions';
 import { formatShortDate } from '@/utils/dateFormatter';
@@ -157,15 +157,6 @@ export function Violations() {
   const { can } = usePermissions();
   const isSocialWorker = ['socialworker', 'centerhead', 'admin'].includes(user?.role?.toLowerCase() || '');
   const isCenterHead = user?.role === 'centerhead';
-  // Houseparents add incidents for residents on their own Case Load.
-  const isHouseparentUser = String(user?.role || '').toLowerCase() === 'houseparent';
-  // Dual verification: the Psychological Support Staff and the Social Worker
-  // each verify a logged incident. A full-access account (Center Head / Admin)
-  // chooses which of the two it is signing.
-  const roleKey = String(user?.role || '').toLowerCase().replace(/[\s_-]+/g, '');
-  const fixedVerificationSide: 'psych' | 'sw' | null = roleKey === 'psychologist' ? 'psych' : roleKey === 'socialworker' ? 'sw' : null;
-  const [chosenVerificationSide, setChosenVerificationSide] = useState<'psych' | 'sw'>('psych');
-  const verificationSide: 'psych' | 'sw' = fixedVerificationSide ?? chosenVerificationSide;
 
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
@@ -454,21 +445,7 @@ export function Violations() {
     });
   };
 
-  // A Houseparent may add an incident only for residents assigned to them.
-  // Their choices come from the server's own list (GET
-  // /resident-assignments/my-residents — the signed-in HP's active Case Load,
-  // by account id), not from whatever the page happens to have cached.
-  const [myAssignedResidents, setMyAssignedResidents] = useState<Child[] | null>(null);
-  const loadMyAssignedResidents = async () => {
-    try {
-      const result = await request<{ success: boolean; data?: Child[] }>('/resident-assignments/my-residents');
-      setMyAssignedResidents((result?.data || []).filter((c) => c && c.status === 'Active'));
-    } catch {
-      setMyAssignedResidents([]);
-    }
-  };
-  const residentChoices: Child[] = isHouseparentUser ? (myAssignedResidents || []) : children;
-  const filteredResidentChoices = residentChoices.filter((child) =>
+  const filteredResidentChoices = children.filter((child) =>
     child.name.toLowerCase().includes(residentSearch.trim().toLowerCase()) ||
     child.id.toLowerCase().includes(residentSearch.trim().toLowerCase())
   );
@@ -581,8 +558,6 @@ export function Violations() {
 
 
   const openVerificationReview = async (violation: Violation) => {
-    // A full-access reviewer starts on whichever verification is still missing.
-    if (fixedVerificationSide === null) setChosenVerificationSide((violation as any).psychVerifiedBy ? 'sw' : 'psych');
     // The backend is the source of truth for verification. It resolves the
     // violation -> guide -> guide_interventions relationship and returns the
     // exact configured intervention rows (including their IDs). The frontend
@@ -652,11 +627,8 @@ export function Violations() {
     // back to it, instead of costing a round-trip and surfacing a server error.
     // Judged on the intervention's type, exactly as the API judges it, so the
     // field this insists on is a field the dialog actually rendered.
-    // The schedule and psychosocial activities are the Psychological Staff's
-    // clinical decision; the Social Worker's verification does not set them.
-    const clinicalSide = verificationSide === 'psych';
-    const requirementNeedsSchedule = clinicalSide && Boolean(req?.interventions?.some(interventionNeedsSchedule));
-    const requirementIsPsychosocial = clinicalSide && Boolean(req?.interventions?.some(interventionIsPsychosocial));
+    const requirementNeedsSchedule = Boolean(req?.interventions?.some(interventionNeedsSchedule));
+    const requirementIsPsychosocial = Boolean(req?.interventions?.some(interventionIsPsychosocial));
     if (decision === 'verify' && requirementNeedsSchedule && !reviewForm.scheduleDateTime) {
       setReviewError('Please set the Schedule Date and Time for this intervention before verifying.');
       return;
@@ -671,17 +643,15 @@ export function Violations() {
     }
     setReviewPending(decision);
     try {
-      const result: any = await request(`/violations/${selectedViolation.id}/review`, {
+      await request(`/violations/${selectedViolation.id}/review`, {
         method: 'POST',
-        body: JSON.stringify({ status: decision === 'reject' ? 'Rejected' : 'Reviewed', verificationSide, actionTaken: notes || null, scheduleDateTime: requirementNeedsSchedule ? reviewForm.scheduleDateTime : null, psychosocialActivities: requirementIsPsychosocial ? reviewForm.psychosocialActivities : [] }),
+        body: JSON.stringify({ status: decision === 'reject' ? 'Rejected' : 'Reviewed', actionTaken: notes || null, scheduleDateTime: requirementNeedsSchedule ? reviewForm.scheduleDateTime : null, psychosocialActivities: requirementIsPsychosocial ? reviewForm.psychosocialActivities : [] }),
       });
       // Confirm the outcome in the dialog before it closes — previously it
       // vanished silently, so a success was indistinguishable from a no-op.
       setReviewSuccess(decision === 'reject'
         ? 'Violation rejected. Your review notes were saved.'
-        : result?.pendingSecondVerification
-          ? (result?.message || 'Verification recorded. The incident proceeds once the other verifier also verifies it.')
-          : 'Both verifications are complete. Interventions were assigned and your review notes were saved.');
+        : 'Violation verified. Interventions were assigned and your review notes were saved.');
       await refreshData();
       setTimeout(() => { setIsReviewDialogOpen(false); setSelectedViolation(null); }, 1200);
     } catch (error) {
@@ -802,14 +772,10 @@ export function Violations() {
             Psychological Staff's specification withholds it: they verify incidents,
             they do not raise them. The backend already refuses the call, so the
             button is removed rather than left to fail. */}
-        {/* Houseparents always get Add Incident (for their own residents);
-            the explicit role test keeps it visible even with an older cached
-            permission snapshot. The API scopes it to their Case Load. */}
-        {(can('Violations', 'create') || isHouseparentUser) && (
+        {can('Violations', 'create') && (
         <Button
         className="flex items-center gap-2 bg-[#2F3E46]"
         onClick={async () => {
-          if (isHouseparentUser) await loadMyAssignedResidents();
           const loaded = await loadGuideMatrix();
           if (loaded) {
             setIncidentDateTime(localDateTimeInput());
@@ -824,7 +790,7 @@ export function Violations() {
         }}
         >
           <Plus className="w-4 h-4" />
-          <span>{isHouseparentUser ? 'Add Incident' : 'Log Incident'}</span>
+          <span>Log Incident</span>
         </Button>
         )}
       </div>
@@ -837,10 +803,7 @@ export function Violations() {
           do not fit a phone: "Manage Violations & Interventions" alone ran past
           the right edge (measured at x=392 on a 390px viewport) and was
           unreachable, while the strip dragged the whole page sideways. */}
-      {/* overflow-y-hidden: with only overflow-x set, the browser also made the
-          strip vertically scrollable (the tabs' bottom border overhangs by a
-          pixel), which showed a pair of up/down scroll arrows beside the tabs. */}
-      <div className="flex items-center gap-1 border-b border-gray-200 mb-4 overflow-x-auto overflow-y-hidden">
+      <div className="flex items-center gap-1 border-b border-gray-200 mb-4 overflow-x-auto">
         {tabs.map(t => {
           if (t.key === 'verification' && !can('Violations', 'verify')) return null;
           if (t.key === 'manage' && !can('Violations', 'edit')) return null;
@@ -1130,7 +1093,7 @@ export function Violations() {
             {forVerificationList.length === 0 ? (
               <CardContent className="p-12 text-center">
                 <AlertTriangle className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-                <p className="text-gray-500">No logged incidents awaiting verification.</p>
+                <p className="text-gray-500">No violations awaiting Psychological Staff verification.</p>
               </CardContent>
             ) : (
               <div className="overflow-x-auto">
@@ -1141,7 +1104,6 @@ export function Violations() {
                       <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide">Resident</th>
                       <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide">Incident Type</th>
                       <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide w-24">Date</th>
-                      <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide w-44">Verification</th>
                       <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide w-40">Action</th>
                     </tr>
                   </thead>
@@ -1158,10 +1120,6 @@ export function Violations() {
                             <p className="text-xs text-[#2F3E46] font-medium leading-tight">{violation.type}</p>
                           </td>
                           <td className="px-4 py-3 text-xs text-gray-500">{formatShortDate(violation.date)}</td>
-                          <td className="px-4 py-3 text-[11px] leading-tight">
-                            <p className={(violation as any).psychVerifiedBy ? 'text-green-700 font-semibold' : 'text-amber-700'}>Psych: {(violation as any).psychVerifiedBy ? '✓ Verified' : 'Pending'}</p>
-                            <p className={(violation as any).swVerifiedBy ? 'text-green-700 font-semibold' : 'text-amber-700'}>SW: {(violation as any).swVerifiedBy ? '✓ Verified' : 'Pending'}</p>
-                          </td>
                           <td className="px-4 py-3">
                             <Button
                               size="sm"
@@ -1200,9 +1158,6 @@ export function Violations() {
                 </div>
                 <div className="max-h-44 overflow-y-auto p-2">
                   <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
-                    {isHouseparentUser && myAssignedResidents !== null && residentChoices.length === 0 && (
-                      <p className="col-span-full px-1 py-2 text-xs text-gray-500">No residents are assigned to you yet. A Center Head or Social Worker assigns them in Houseparent → Case Load.</p>
-                    )}
                     {filteredResidentChoices.map((child) => {
                       const checked = selectedResidentIds.includes(child.id);
                       return (
@@ -1627,33 +1582,9 @@ export function Violations() {
             // Same signal as the API and as the validation above. Scanning the
             // free text here is what hid the Schedule field for the exact
             // interventions the API refuses to verify without one.
-            const clinicalSide = verificationSide === 'psych';
-            const needsSchedule = clinicalSide && interventions.some(interventionNeedsSchedule);
-            const isPsychosocial = clinicalSide && interventions.some(interventionIsPsychosocial);
-            const sv = selectedViolation as any;
+            const needsSchedule = interventions.some(interventionNeedsSchedule);
+            const isPsychosocial = interventions.some(interventionIsPsychosocial);
             return <div className="space-y-4 py-2">
-              {/* Dual verification status — the incident proceeds only when both
-                  the Psychological Support Staff and the Social Worker verify. */}
-              <div className="rounded-lg border border-purple-200 bg-purple-50/40 p-3 text-xs space-y-1.5" data-dual-verification>
-                <p className="font-bold text-purple-800 uppercase tracking-wide">Verification (both required)</p>
-                <p>Psychological Support Staff: {sv.psychVerifiedBy ? <span className="font-semibold text-green-700">✓ Verified by {sv.psychVerifiedBy}</span> : <span className="text-amber-700">Pending</span>}</p>
-                <p>Social Worker: {sv.swVerifiedBy ? <span className="font-semibold text-green-700">✓ Verified by {sv.swVerifiedBy}</span> : <span className="text-amber-700">Pending</span>}</p>
-                {fixedVerificationSide === null && (
-                  <div className="flex items-center gap-2 pt-1">
-                    <span className="text-gray-600">Verify as:</span>
-                    <Select value={chosenVerificationSide} onValueChange={(v) => setChosenVerificationSide(v as 'psych' | 'sw')}>
-                      <SelectTrigger className="h-7 w-56 text-xs"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="psych" disabled={Boolean(sv.psychVerifiedBy)}>Psychological Support Staff</SelectItem>
-                        <SelectItem value="sw" disabled={Boolean(sv.swVerifiedBy)}>Social Worker</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
-                {!clinicalSide && !sv.psychVerifiedBy && (
-                  <p className="text-gray-500">The schedule and activities are set by the Psychological Support Staff when they verify.</p>
-                )}
-              </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-lg bg-gray-50 p-4 text-sm">
                 <p><span className="font-medium">Incident Type:</span> {selectedViolation.type}</p>
                 <p><span className="font-medium">Resident:</span> {children.find(c => c.id === selectedViolation.residentId)?.name || 'Unknown'}</p>
@@ -1708,7 +1639,7 @@ export function Violations() {
           <DialogFooter>
             <Button variant="outline" disabled={isReviewSubmitting} onClick={() => setIsReviewDialogOpen(false)}>Cancel</Button>
             <Button disabled={isReviewSubmitting || !!reviewSuccess} onClick={() => handleReview('reject')} className="bg-red-600 hover:bg-red-700 text-white">{reviewPending === 'reject' ? 'Saving…' : 'Reject'}</Button>
-            <Button disabled={isReviewSubmitting || !!reviewSuccess || Boolean(selectedViolation && (verificationSide === 'psych' ? (selectedViolation as any).psychVerifiedBy : (selectedViolation as any).swVerifiedBy))} onClick={() => handleReview('verify')} className="bg-green-600 hover:bg-green-700 text-white"><Check className="w-4 h-4 mr-1" /> {reviewPending === 'verify' ? 'Saving…' : 'Verify'}</Button>
+            <Button disabled={isReviewSubmitting || !!reviewSuccess} onClick={() => handleReview('verify')} className="bg-green-600 hover:bg-green-700 text-white"><Check className="w-4 h-4 mr-1" /> {reviewPending === 'verify' ? 'Saving…' : 'Verify'}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

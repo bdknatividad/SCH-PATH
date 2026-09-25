@@ -490,11 +490,12 @@
           "view"
         ],
         "Violations": [
-          "view",
-          "create"
+          "view"
         ],
         "Activities": [
           "view",
+          "create",
+          "edit",
           "export"
         ],
         "Assessments": [

@@ -478,35 +478,6 @@ function drawFooters(pdfDoc, fonts, record, person) {
 
 // ── The record body, one block per record type ──
 
-/**
- * BMI and the weight classification, matching the Health module exactly:
- * BMI = kg / m²; healthy band BMI 18.5–24.9; up to 6% over the top of the
- * healthy weight range is "Above Healthy"; beyond that Overweight below BMI 30,
- * Obese from 30. Heights of 3 or less are read as metres, larger as centimetres.
- */
-function measurementValue(value) {
-  const parsed = Number.parseFloat(String(value ?? '').replace(/[^0-9.]/g, ''));
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : NaN;
-}
-function bmiOf(entry) {
-  const raw = measurementValue(entry?.height);
-  const kg = measurementValue(entry?.weight);
-  if (Number.isNaN(raw) || Number.isNaN(kg)) return null;
-  const metres = raw > 3 ? raw / 100 : raw;
-  const bmi = kg / (metres * metres);
-  return Number.isFinite(bmi) && bmi > 0 ? { bmi, kg, metres } : null;
-}
-function weightClassOf(entry) {
-  const result = bmiOf(entry);
-  if (!result) return '';
-  const healthyMax = 24.9 * result.metres * result.metres;
-  if (result.bmi < 18.5) return 'Under';
-  if (result.kg <= healthyMax) return 'Healthy';
-  if (result.kg <= healthyMax * 1.06) return 'Above';
-  if (result.bmi < 30) return 'Overwt';
-  return 'Obese';
-}
-
 /** The 12-column Height and Weight grid, drawn as the form lays it out. */
 function drawMonthlyMeasurements(page, y, details, fonts) {
   const measurements = asArray(details.monthlyMeasurements);
@@ -529,17 +500,11 @@ function drawMonthlyMeasurements(page, y, details, fonts) {
   });
   y -= rowHeight;
 
-  // Height and Weight as recorded, then BMI and the classification computed
-  // from them (never stored, so a corrected measurement corrects both).
-  const derived = {
-    bmi: (entry) => { const r = bmiOf(entry); return r ? r.bmi.toFixed(1) : ''; },
-    class: (entry) => weightClassOf(entry),
-  };
-  for (const [label, key] of [['Height', 'height'], ['Weight', 'weight'], ['BMI', 'bmi'], ['Class', 'class']]) {
+  for (const [label, key] of [['Height', 'height'], ['Weight', 'weight']]) {
     page.drawText(label, { x: MARGIN_X + CELL_PAD, y: y - 12, size: MICRO_SIZE, font: fonts.bold, color: MUTED });
     for (let index = 0; index < 12; index += 1) {
       const entry = measurements.find((row) => Number(row?.month) === index + 1) || {};
-      const value = derived[key] ? derived[key](entry) : text(entry[key]);
+      const value = text(entry[key]);
       if (value) {
         page.drawText(value, {
           x: MARGIN_X + monthWidth + index * cellWidth + 2,
@@ -565,7 +530,7 @@ function drawMonthlyMeasurements(page, y, details, fonts) {
     });
   }
 
-  return y - FIELD_TAIL - 8;
+  return y - FIELD_TAIL;
 }
 
 /** The dentist's service checklist, rendered as the checked items it holds. */
@@ -641,18 +606,16 @@ async function buildHealthRecordPdf(record = {}, resident = {}) {
     const rows = asArray(details.medicalRows).filter((row) => row && Object.values(row).some((value) => String(value || '').trim()));
     ensureSpace(TABLE_HEADER_HEIGHT + 40);
     y = drawTable(page, y, [
-      { label: 'Date', width: 56 },
-      { label: 'Medical Findings', width: 92 },
-      { label: 'Laboratory Procedure', width: 80 },
-      { label: 'Laboratory Results', width: 80 },
-      { label: 'Prescription', width: 80 },
-      { label: 'Care Provider', width: 70 },
-      { label: "Doctor's Signature", width: CONTENT_WIDTH - 56 - 92 - 80 - 80 - 80 - 70 },
+      { label: 'Date', width: 62 },
+      { label: 'Medical Findings', width: 108 },
+      { label: 'Laboratory Procedure', width: 95 },
+      { label: 'Prescription', width: 95 },
+      { label: 'Care Provider', width: 85 },
+      { label: "Doctor's Signature", width: CONTENT_WIDTH - 62 - 108 - 95 - 95 - 85 },
     ], rows.map((row) => [
       row.date ? formatDate(row.date) : '',
       row.findings,
       row.laboratoryProcedure,
-      row.laboratoryResultFileName || '',
       row.prescription,
       row.careProvider,
       row.doctorSignature ? '(signed)' : '',

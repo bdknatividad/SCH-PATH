@@ -1317,21 +1317,7 @@ async function seedDatabase() {
   // decision: an account is selectable because its role is Houseparent AND it
   // is Active, and both are set from Account Management.
 
-  // Resident -> Houseparent assignments are deliberately NOT seeded on boot.
-  //
-  // `seedResidentAssignments()` assigns the FULL Houseparent x resident cross
-  // product, which is fine as demo scaffolding but catastrophic on a live
-  // database: it runs on every restart, so any resident admitted since the last
-  // one lands on EVERY Houseparent's caseload. Measured on production
-  // 2026-09-25: 4 Active residents and 11 Active Houseparent accounts, and each
-  // resident carried 11 Active assignment rows — 10 of them from this function
-  // (`source = 'system'`). The 11 caseload cards therefore listed the same
-  // residents over and over, and it looked as though choosing an HP on Duty on
-  // the Admission Slip had assigned the resident.
-  //
-  // A Case Load Manager is assigned one resident at a time, by hand, in the
-  // Houseparent Module (Center Head or Social Worker). The function is kept
-  // below for a deliberately-seeded demo database, but it is not called here.
+  await runSeedStep('resident assignments', seedResidentAssignments);
   await runSeedStep('official violation guide', seedOfficialViolationGuide);
   console.log('Database seeding complete!');
 }
