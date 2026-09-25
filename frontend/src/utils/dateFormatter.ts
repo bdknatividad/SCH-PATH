@@ -436,6 +436,62 @@ export function getCurrentPHDate(): string {
 }
 
 /**
+ * Get the current moment in the Philippines, shaped for a `datetime-local`.
+ *
+ * Returns:
+ *   YYYY-MM-DDTHH:MM
+ *
+ * The counterpart to `getCurrentPHDate()` for the controls that take a time as
+ * well as a day. `new Date().toISOString().slice(0, 16)` is the wrong tool for
+ * that: `toISOString()` is UTC, so seeding an incident time from it put the
+ * default eight hours early — a form opened at 2:40 PM offered 6:40 AM. The
+ * control reads its value as wall-clock, so the value has to be built from
+ * Manila's wall-clock, not from an instant.
+ *
+ * `hour12: false` matters — `en-CA` with the default 12-hour cycle renders
+ * "02:40 p.m.", which a `datetime-local` rejects as an empty value.
+ */
+export function getCurrentPHDateTime(): string {
+  const parts =
+    new Intl.DateTimeFormat(
+      'en-CA',
+      {
+        timeZone:
+          'Asia/Manila',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      }
+    ).formatToParts(
+      new Date()
+    );
+
+  const pick = (
+    type: string
+  ) =>
+    parts.find(
+      (part) =>
+        part.type ===
+        type
+    )?.value || '';
+
+  // `hourCycle` is not pinned, and some engines report midnight as "24" for
+  // `hour12: false`; a `datetime-local` accepts 00–23 only.
+  const hour =
+    pick('hour') === '24'
+      ? '00'
+      : pick('hour');
+
+  return (
+    `${pick('year')}-${pick('month')}-${pick('day')}` +
+    `T${hour}:${pick('minute')}`
+  );
+}
+
+/**
  * Is a DATE-only value (`YYYY-MM-DD`) today or later?
  *
  * A hearing date, an admission date or any other value that came from an

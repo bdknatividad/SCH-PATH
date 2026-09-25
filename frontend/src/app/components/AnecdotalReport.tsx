@@ -13,6 +13,7 @@ import { describeError, request } from '@/services/api';
 import { useSystemDialog } from '@/app/components/SystemDialog';
 import { useAuth } from '../state/AuthContext';
 import { useData } from '../state/DataContext';
+import { getCurrentPHDate } from '@/utils/dateFormatter';
 
 // `?v=` is a cache key, not a fetch hint — see the note in QuarterlyProgressReport.tsx.
 pdfjs.GlobalWorkerOptions.workerSrc = `/pdf.worker.mjs?v=${pdfjs.version}`;
@@ -121,9 +122,13 @@ export function AnecdotalReportEditor({
   const [localOpen, setLocalOpen] = useState(Boolean(open));
   const [content, setContent] = useState<Record<string, string>>(normalizeContent(record?.content));
   const [room, setRoom] = useState(record?.room || (child as any)?.room || '');
-  const [reportDate, setReportDate] = useState(record?.reportDate || new Date().toISOString().slice(0, 10));
-  const [reportMonth, setReportMonth] = useState(record?.reportingMonth || new Date().getMonth() + 1);
-  const [reportYear, setReportYear] = useState(record?.reportingYear || new Date().getFullYear());
+  // The facility's today, not UTC's. `toISOString().slice(0, 10)` is the UTC
+  // day, which in Manila is still yesterday until 08:00 — so a report opened
+  // during the first working hour of the day was dated the day before, and the
+  // month/year defaults could disagree with it at a month boundary.
+  const [reportDate, setReportDate] = useState(record?.reportDate || getCurrentPHDate());
+  const [reportMonth, setReportMonth] = useState(record?.reportingMonth || Number(getCurrentPHDate().slice(5, 7)));
+  const [reportYear, setReportYear] = useState(record?.reportingYear || Number(getCurrentPHDate().slice(0, 4)));
   const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [reviewBusy, setReviewBusy] = useState(false);
@@ -164,9 +169,9 @@ export function AnecdotalReportEditor({
   useEffect(() => {
     setContent(normalizeContent(record?.content));
     setRoom(record?.room || (child as any)?.room || '');
-    setReportDate(record?.reportDate || new Date().toISOString().slice(0, 10));
-    setReportMonth(record?.reportingMonth || new Date().getMonth() + 1);
-    setReportYear(record?.reportingYear || new Date().getFullYear());
+    setReportDate(record?.reportDate || getCurrentPHDate());
+    setReportMonth(record?.reportingMonth || Number(getCurrentPHDate().slice(5, 7)));
+    setReportYear(record?.reportingYear || Number(getCurrentPHDate().slice(0, 4)));
   }, [record, child]);
 
   const actualOpen = open === undefined ? localOpen : open;

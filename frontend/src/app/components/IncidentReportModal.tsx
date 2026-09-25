@@ -9,6 +9,7 @@ import { request } from '@/services/api';
 import { useAuth } from '../state/AuthContext';
 import { usePermissions } from '@/app/hooks/usePermissions';
 import { SignaturePadModal } from '@/app/components/SignaturePad';
+import { getCurrentPHDateTime } from '@/utils/dateFormatter';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 
@@ -114,7 +115,10 @@ interface Props {
 const emptyForm = {
   reportTypes: [] as string[],
   othersSpecify: '',
-  incidentDateTime: new Date().toISOString().slice(0, 16),
+  // A `datetime-local` reads its value as wall-clock, so the default has to be
+  // Manila's wall-clock. `toISOString().slice(0, 16)` is UTC, which offered
+  // 06:40 AM as the incident time on a form opened at 2:40 PM.
+  incidentDateTime: getCurrentPHDateTime(),
   summary: '',
   actionTaken: '',
   result: '',

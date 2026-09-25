@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useSubModuleTab } from '@/app/hooks/useSubModuleTab';
 import { useSubModuleTabs } from '@/app/hooks/useSubModuleTabs';
+import { getCurrentPHDateTime } from '@/utils/dateFormatter';
 import { Card, CardContent, CardHeader, CardTitle } from '@/app/components/ui/card';
 import { Button } from '@/app/components/ui/button';
 import { Input } from '@/app/components/ui/input';
@@ -1607,7 +1608,7 @@ export function Violations() {
                    ))}
                  </div>
                </div>
-              {needsSchedule && <div className="space-y-2 rounded-lg border p-4"><Label>Schedule Date and Time</Label><Input type="datetime-local" min={new Date(Date.now() + 60000).toISOString().slice(0,16)} value={reviewForm.scheduleDateTime} onChange={(e) => setReviewForm(p => ({ ...p, scheduleDateTime: e.target.value }))} /><p className="text-xs text-gray-500">The configured intervention type is Psychosocial Activity or Dialogue/Counseling, which has to be scheduled before this violation can be verified.</p></div>}
+              {needsSchedule && <div className="space-y-2 rounded-lg border p-4"><Label>Schedule Date and Time</Label><Input type="datetime-local" min={getCurrentPHDateTime()} value={reviewForm.scheduleDateTime} onChange={(e) => setReviewForm(p => ({ ...p, scheduleDateTime: e.target.value }))} /><p className="text-xs text-gray-500">The configured intervention type is Psychosocial Activity or Dialogue/Counseling, which has to be scheduled before this violation can be verified.</p></div>}
               {isPsychosocial && <div className="space-y-2 rounded-lg border p-4"><Label>Psychosocial Activity (select all that apply)</Label><div className="grid grid-cols-1 sm:grid-cols-2 gap-2">{PSYCHOSOCIAL_OPTIONS.map(option => <label key={option} className="flex items-center gap-2 text-sm"><Checkbox checked={reviewForm.psychosocialActivities.includes(option)} onCheckedChange={() => togglePsychosocialActivity(option)} />{option}</label>)}</div></div>}
               <div className="space-y-2 rounded-lg border p-4">
                 <Label htmlFor="review-notes">Review Notes</Label>

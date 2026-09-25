@@ -46,6 +46,28 @@
  * form in places that feed `<input type="date">` (`formatDateInput`). The
  * pattern below requires a time component, so a bare date never matches and is
  * passed through untouched.
+ *
+ * ## Not every DATETIME is a UTC instant
+ *
+ * The rule above assumes the database holds UTC, which it does for every
+ * timestamp the *server* produces — `NOW()`, or a client `toISOString()`
+ * normalised by `toMysqlDateTime`. It is false for a column the *user* fills in
+ * from a `datetime-local` control.
+ *
+ * That control has no zone. Its value (`2026-09-25T14:32`) is sent as a naive
+ * string, and `toMysqlDateTime` passes a naive string through as the wall-clock
+ * it already is — so the column holds **14:32 Manila**, not 14:32 UTC. Treating
+ * it as UTC would render it 22:32, eight hours late, which is the same class of
+ * error this module exists to remove, just pointing the other way.
+ *
+ * So those columns are named in `WALL_CLOCK_DATETIME_COLUMNS` and given the
+ * facility's own offset instead of the database's. The value still comes out
+ * carrying an explicit offset — the invariant that matters — it is just the
+ * honest one for what the column means. `+08:00` on `2026-09-25T14:32:00` names
+ * the same instant the user typed, and every consumer of the string keeps
+ * working: `new Date(...)` resolves it correctly, and the plain-text readers
+ * (`slice(0, 16)`, `formatShortDate`) still find the day and the clock where
+ * they expect them.
  */
 
 /**
@@ -62,6 +84,56 @@ let databaseOffsetMinutes = 0;
 
 /** How the database's zone is named in logs. `UTC` until the probe says otherwise. */
 let databaseZoneLabel = 'UTC';
+
+/**
+ * The facility's own zone — what a `datetime-local` control means.
+ *
+ * `Asia/Manila` is the system's display convention already: the frontend pins
+ * it in `utils/dateFormatter.ts` (`formatPHDate`, `formatPHDateTime`,
+ * `getCurrentPHDate`) and the backend has a `manilaToday` helper for it. The
+ * offset is state rather than a literal so it can be changed in one place.
+ */
+let facilityOffsetMinutes = 480;
+let facilityZoneLabel = 'Asia/Manila';
+
+/**
+ * DATETIME columns that hold the facility's wall-clock rather than a UTC instant.
+ *
+ * These are exactly the columns the browser fills from a `datetime-local`
+ * control — see the module note. Two rules keep this list honest:
+ *
+ *   - it holds only columns whose *only* writer is that control. A column the
+ *     server also writes (`uploadedAt`, `reviewedAt`, `readmittedAt`) holds UTC
+ *     and must not be listed, or the two writers would disagree.
+ *   - `intervention_tracker.scheduledAt` is reached by two paths
+ *     (`violationController` during verification, `violationGuideController`
+ *     from the tracker) and both send the naive control value, so it belongs
+ *     here once.
+ *
+ * Pinned by `backend/tests/wall-clock-columns.test.js`, which also asserts that
+ * no other column is fed a naive value — a new one would otherwise be silently
+ * read as UTC and land eight hours out.
+ */
+const WALL_CLOCK_DATETIME_COLUMNS = new Set([
+  // incidentReports — Form 08's "Date and Time of Incident".
+  'incidentDateTime',
+  // intervention_tracker — the schedule picker for a linked intervention.
+  'scheduledAt',
+]);
+
+/** Records the facility's zone. Mirrors `setDatabaseZone`. */
+function setFacilityZone({ offsetMinutes = 480, label = 'Asia/Manila' } = {}) {
+  facilityOffsetMinutes = Number.isFinite(offsetMinutes) ? Math.trunc(offsetMinutes) : 480;
+  facilityZoneLabel = label || 'Asia/Manila';
+}
+
+function getFacilityOffsetMinutes() { return facilityOffsetMinutes; }
+function getFacilityZoneLabel() { return facilityZoneLabel; }
+
+/** The offset a value in this column should be labelled with. */
+function offsetForColumn(key) {
+  return WALL_CLOCK_DATETIME_COLUMNS.has(key) ? facilityOffsetMinutes : databaseOffsetMinutes;
+}
 
 /**
  * A MySQL datetime: `YYYY-MM-DD HH:MM:SS`, optionally with a `T` separator and
@@ -135,9 +207,12 @@ function isMysqlDatetime(value) {
  * including a value that already carries an offset.
  *
  * @param {*} value
+ * @param {number} [offsetMinutes] the zone to label the value with. Defaults to
+ *   the database's, which is right for every server-produced instant. A
+ *   wall-clock column passes the facility's instead.
  * @returns {*} the value, or its ISO 8601 equivalent
  */
-function toIsoInstant(value) {
+function toIsoInstant(value, offsetMinutes = databaseOffsetMinutes) {
   if (typeof value !== 'string') return value;
 
   // A cheap guard before the regex. Responses carry multi-megabyte base64
@@ -151,7 +226,7 @@ function toIsoInstant(value) {
   const [, year, month, day, hour, minute, second, fraction] = match;
   const millis = `.${(fraction || '0').slice(0, 3).padEnd(3, '0')}`;
 
-  return `${year}-${month}-${day}T${hour}:${minute}:${second}${millis}${offsetSuffix(databaseOffsetMinutes)}`;
+  return `${year}-${month}-${day}T${hour}:${minute}:${second}${millis}${offsetSuffix(offsetMinutes)}`;
 }
 
 /**
@@ -165,13 +240,19 @@ function toIsoInstant(value) {
  * through untouched: a `Buffer`'s bytes are not strings, and a `Date` is already
  * an instant that `JSON.stringify` renders with its own `Z`.
  *
+ * `key` is the property this value was reached through, and is how a
+ * wall-clock column is recognised. It is only ever the *immediate* key: a
+ * nested object is walked with its own keys, so `{ a: { b: … } }` labels `b` by
+ * `b`. That is what a row looks like — the column name is the property name.
+ *
  * @param {*} payload
+ * @param {string} [key] the property name `payload` was reached through
  * @returns {*} a copy with every timezone-less datetime string made explicit
  */
-function withIsoInstants(payload) {
-  if (typeof payload === 'string') return toIsoInstant(payload);
+function withIsoInstants(payload, key) {
+  if (typeof payload === 'string') return toIsoInstant(payload, offsetForColumn(key));
 
-  if (Array.isArray(payload)) return payload.map(withIsoInstants);
+  if (Array.isArray(payload)) return payload.map((item) => withIsoInstants(item));
 
   if (payload && typeof payload === 'object') {
     if (Buffer.isBuffer(payload) || payload instanceof Date) return payload;
@@ -180,8 +261,8 @@ function withIsoInstants(payload) {
     if (prototype !== Object.prototype && prototype !== null) return payload;
 
     const out = {};
-    for (const [key, value] of Object.entries(payload)) {
-      out[key] = withIsoInstants(value);
+    for (const [entryKey, value] of Object.entries(payload)) {
+      out[entryKey] = withIsoInstants(value, entryKey);
     }
     return out;
   }
@@ -191,7 +272,12 @@ function withIsoInstants(payload) {
 
 module.exports = {
   MYSQL_DATETIME,
+  WALL_CLOCK_DATETIME_COLUMNS,
   setDatabaseZone,
+  setFacilityZone,
+  getFacilityOffsetMinutes,
+  getFacilityZoneLabel,
+  offsetForColumn,
   getDatabaseOffsetMinutes,
   getDatabaseZoneLabel,
   processZoneName,

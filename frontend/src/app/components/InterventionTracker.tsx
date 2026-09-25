@@ -5,6 +5,7 @@ import { usePermissions } from '@/app/hooks/usePermissions';
 import { useNavigate } from 'react-router-dom';
 import { describeError, request } from '@/services/api';
 import { systemDialog } from '@/app/components/SystemDialog';
+import { getCurrentPHDateTime } from '@/utils/dateFormatter';
 import IncidentReportModal from './IncidentReportModal';
 import { Card, CardContent, CardHeader, CardTitle } from '@/app/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/app/components/ui/dialog';
@@ -756,7 +757,7 @@ export function InterventionTracker({ embedded = false }: { embedded?: boolean }
             </div>
             <div className="space-y-2">
               <Label htmlFor="tracker-schedule">Schedule Date and Time</Label>
-              <Input id="tracker-schedule" type="datetime-local" min={new Date(Date.now() + 60000).toISOString().slice(0,16)} value={scheduleValue} onChange={(e) => setScheduleValue(e.target.value)} />
+              <Input id="tracker-schedule" type="datetime-local" min={getCurrentPHDateTime()} value={scheduleValue} onChange={(e) => setScheduleValue(e.target.value)} />
             </div>
           </div>
           <DialogFooter>
