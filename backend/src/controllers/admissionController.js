@@ -14,6 +14,10 @@ const {
 } = require('../utils/constants');
 const notifications = require('../services/notificationService');
 const { canAccessResident } = require('./assignmentController');
+const BODY_MARKINGS = require('../config/bodyMarkings.json');
+
+const MARKING_TYPES = BODY_MARKINGS.markingTypes;
+const MARKING_LOCATIONS = BODY_MARKINGS.locations;
 
 function normalizeName(value) {
   return String(value || '')
@@ -34,6 +38,70 @@ function requireValidDate(value, label) {
   if (Number.isNaN(new Date(value).getTime())) {
     throw new ApiError(400, `${label} must be a valid date.`);
   }
+}
+
+/**
+ * The piercings and tattoos an admission records.
+ *
+ * The slip asks for these at admission so the body as it was found is on record
+ * — a marking seen in September belongs to *that* admission, and a later
+ * admission records the body as it is then. The location is chosen from a
+ * dropdown (`src/config/bodyMarkings.json`); the API enforces the same list, so
+ * a request cannot write a body part the form never offers. "Sa anumang bahagi
+ * ng katawan" is the violation's wording, not an answer — a record that says a
+ * tattoo was placed but not where is the thing a case conference asks about.
+ *
+ * Returns the JSON string to store, or `null` when nothing was recorded: a
+ * column holding `'[]'` would read as "checked, and there are none", which is a
+ * different statement from "not recorded".
+ *
+ * @param {unknown} raw - The caller's list, if any.
+ * @returns {string|null} JSON for the `admissions.bodyMarkings` column.
+ */
+function normalizeBodyMarkings(raw) {
+  if (raw === undefined || raw === null) return null;
+  if (typeof raw === 'string') {
+    // A round-tripped value: the edit form re-sends what it was given, and a
+    // caller may hand back the column verbatim.
+    if (raw.trim() === '') return null;
+    try {
+      return normalizeBodyMarkings(JSON.parse(raw));
+    } catch {
+      throw new ApiError(400, 'Body markings must be a list of entries.');
+    }
+  }
+  if (!Array.isArray(raw)) {
+    throw new ApiError(400, 'Body markings must be a list of entries.');
+  }
+
+  const entries = [];
+  for (const item of raw) {
+    const type = String(item?.type ?? '').trim();
+    const location = String(item?.location ?? '').trim();
+    const description = String(item?.description ?? '').trim();
+
+    // A row the form opened and left alone is not a marking. Refusing it would
+    // make an untouched "Add entry" button block the whole admission.
+    if (!type && !location && !description) continue;
+
+    if (!MARKING_TYPES.includes(type)) {
+      throw new ApiError(400, `Body marking type must be one of: ${MARKING_TYPES.join(', ')}.`);
+    }
+    if (!MARKING_LOCATIONS.includes(location)) {
+      throw new ApiError(400, `Body marking location must be one of the ${MARKING_LOCATIONS.length} listed body parts.`);
+    }
+    if (description.length > BODY_MARKINGS.maxDescriptionLength) {
+      throw new ApiError(400, `A body marking note cannot exceed ${BODY_MARKINGS.maxDescriptionLength} characters.`);
+    }
+
+    entries.push({ type, location, description });
+  }
+
+  if (entries.length > BODY_MARKINGS.maxEntries) {
+    throw new ApiError(400, `At most ${BODY_MARKINGS.maxEntries} body markings can be recorded per admission.`);
+  }
+
+  return entries.length ? JSON.stringify(entries) : null;
 }
 
 /**
@@ -186,6 +254,11 @@ async function create(req, res, next) {
     // the constraint and see an opaque "Database error occurred" instead of a
     // saved admission, so normalise it the same way the form does.
     const caseHistory = String(admission.caseHistory ?? '');
+
+    // Validated here, before the transaction opens: an unknown body part is the
+    // caller's mistake, and the transaction below creates a resident, a phase
+    // row and the admission.
+    const bodyMarkings = normalizeBodyMarkings(admission.bodyMarkings);
 
     /*
      * Required resident/admission information.
@@ -648,12 +721,13 @@ async function create(req, res, next) {
           legalCategory,
           specificOffense,
           caseHistory,
+          bodyMarkings,
           admissionStatus,
           expectedDischargeDate,
           status,
           createdBy
         ) VALUES (
-          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Active', ?
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Active', ?
         )`,
         [
           admissionId,
@@ -681,6 +755,7 @@ async function create(req, res, next) {
           admission.legalCategory,
           admission.specificOffense,
           caseHistory,
+          bodyMarkings,
           admissionStatus,
           admission.expectedDischargeDate || null,
           req.user?.username || 'System',
@@ -767,7 +842,7 @@ async function update(req, res, next) {
         throw new ApiError(400, 'Expected discharge date cannot be before the admission date.');
       }
     }
-    const fields = ['admissionDate','expectedDischargeDate','name','age','sex','birthDate','religion','address','residentSignature','guardianName','guardianContact','guardianAddress','guardianSignature','referringParty','referringPartyContact','referringPartySignature','houseparentOnDuty','houseparentUserId','houseparentSignature','residentImage','legalCategory','specificOffense','admissionStatus'];
+    const fields = ['admissionDate','expectedDischargeDate','name','age','sex','birthDate','religion','address','residentSignature','guardianName','guardianContact','guardianAddress','guardianSignature','referringParty','referringPartyContact','referringPartySignature','houseparentOnDuty','houseparentUserId','houseparentSignature','residentImage','legalCategory','bodyMarkings','specificOffense','admissionStatus'];
     const sets = []; const values = [];
     for (const field of fields) {
       if (b[field] === undefined) continue;
@@ -778,6 +853,16 @@ async function update(req, res, next) {
       if (field === 'houseparentUserId') {
         sets.push(`${field} = ?`);
         values.push(await resolveHouseparentUserId(b[field]));
+        continue;
+      }
+      // The markings go through the same validator the create path uses, rather
+      // than the generic bind below: that branch turns `''` into NULL, which is
+      // right for a text column and wrong here — an emptied list has to clear
+      // the column, and a supplied one has to be checked against the dropdown's
+      // vocabulary before it is stored.
+      if (field === 'bodyMarkings') {
+        sets.push(`${field} = ?`);
+        values.push(normalizeBodyMarkings(b[field]));
         continue;
       }
       sets.push(`${field} = ?`); values.push(b[field] === '' ? null : b[field]);
@@ -861,6 +946,7 @@ async function getById(req, res, next) {
 module.exports = {
   resolveAdmissionStatus,
   resolveHouseparentUserId,
+  normalizeBodyMarkings,
   create,
   getByResident,
   getLatestForResident,

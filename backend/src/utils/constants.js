@@ -30,7 +30,9 @@ const RESOURCES = {
     admissions: {
     prefix: 'ADM',
     orderBy: 'admissionDate DESC',
-    jsonFields: [],
+    // `bodyMarkings` is a JSON array of { type, location, description } — see
+    // src/config/bodyMarkings.json for the vocabulary the location comes from.
+    jsonFields: ['bodyMarkings'],
     columns: [
       'id',
       'residentId',
@@ -58,6 +60,7 @@ const RESOURCES = {
       'legalCategory',
       'specificOffense',
       'caseHistory',
+      'bodyMarkings',
       'admissionStatus',
       'status',
       'closedDate',

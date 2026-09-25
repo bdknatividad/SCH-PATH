@@ -157,6 +157,12 @@ CREATE TABLE admissions (
   specificOffense TEXT NOT NULL,
   caseHistory TEXT NOT NULL,
 
+  -- Piercings and tattoos observed at admission, as a JSON array of
+  -- { type, location, description }. `location` is one of the values listed in
+  -- backend/src/config/bodyMarkings.json: the slip offers a dropdown rather
+  -- than a text box, so the recorded body part is a known one.
+  bodyMarkings TEXT NULL,
+
   admissionStatus VARCHAR(40) NULL,
 
   expectedDischargeDate DATE NULL,

@@ -113,6 +113,17 @@ import { usePermissions } from '@/app/hooks/usePermissions';
 import { describeError, request } from '@/services/api';
 import { systemDialog } from '@/app/components/SystemDialog';
 import { formatPHDate } from '@/utils/dateFormatter';
+import bodyMarkingsConfig from '@/app/config/bodyMarkings.json';
+
+// The body parts a piercing or tattoo can be recorded against. Read from the
+// same file `admissionController` validates against, so the dropdown and the API
+// cannot disagree about the vocabulary — and the location is a dropdown rather
+// than a text box, which is the whole point: a typed body part is not
+// comparable between two admissions.
+const BODY_MARKING_TYPES = bodyMarkingsConfig.markingTypes;
+const BODY_MARKING_LOCATIONS = bodyMarkingsConfig.locations;
+const BODY_MARKING_MAX_ENTRIES = bodyMarkingsConfig.maxEntries;
+const BODY_MARKING_MAX_DESCRIPTION = bodyMarkingsConfig.maxDescriptionLength;
 
 // `?v=` is a cache key, not a fetch hint — see the note in QuarterlyProgressReport.tsx.
 pdfjs.GlobalWorkerOptions.workerSrc =
@@ -125,6 +136,20 @@ type Gender =
 type FormStep =
   | 1
   | 2;
+
+/*
+ * One piercing or tattoo recorded on the admission.
+ *
+ * `location` is one of BODY_MARKING_LOCATIONS and `type` one of
+ * BODY_MARKING_TYPES; both are chosen from a dropdown so a stored marking can
+ * be read back and compared. `description` is the free-text note — the design,
+ * the size, anything the two dropdowns cannot say.
+ */
+interface BodyMarkingEntry {
+  type: string;
+  location: string;
+  description: string;
+}
 
 interface ChildFormState {
   firstName: string;
@@ -199,6 +224,12 @@ interface ChildFormState {
    * Database/user assignment ID.
    */
   assignedHouseparentId: string;
+
+  /*
+   * The piercings and tattoos recorded for this admission. `location` is one of
+   * BODY_MARKING_LOCATIONS, chosen from a dropdown.
+   */
+  bodyMarkings: BodyMarkingEntry[];
 }
 
 interface AdmissionRecord {
@@ -253,6 +284,14 @@ interface AdmissionRecord {
 
   caseHistory?: string | null;
 
+  /*
+   * Piercings and tattoos observed at admission. Belongs to the admission
+   * rather than the resident: a later admission records the body as it is then.
+   * Absent on admissions saved before the column existed, which is "not
+   * recorded" rather than "none found".
+   */
+  bodyMarkings?: BodyMarkingEntry[] | null;
+
   status?: string;
 }
 
@@ -292,6 +331,8 @@ const EMPTY_FORM: ChildFormState = {
 
   caseHistory: '',
 
+  bodyMarkings: [],
+
   referringParty: '',
   referringPartyContact: '',
   referringPartySignature: '',
@@ -304,6 +345,67 @@ const EMPTY_FORM: ChildFormState = {
 
   assignedHouseparentId: '',
 };
+
+/*
+ * The body markings as the API receives them.
+ *
+ * A row the form opened and left blank is dropped here as well as on the
+ * server, so an untouched "Add entry" button cannot make the admission
+ * unsaveable. The note is capped to the same length `admissionController`
+ * enforces — a long note would otherwise be refused by the API after the whole
+ * slip had been filled in.
+ */
+function bodyMarkingsForPayload(
+  entries: BodyMarkingEntry[]
+): BodyMarkingEntry[] {
+  return (
+    Array.isArray(entries) ? entries : []
+  )
+    .map((entry) => ({
+      type: String(entry?.type || '').trim(),
+      location: String(entry?.location || '').trim(),
+      description: String(entry?.description || '')
+        .trim()
+        .slice(0, BODY_MARKING_MAX_DESCRIPTION),
+    }))
+    .filter(
+      (entry) =>
+        entry.type !== '' ||
+        entry.location !== '' ||
+        entry.description !== ''
+    );
+}
+
+/*
+ * A marking is a type *plus* a body part. A row that was never touched is simply
+ * dropped, but one carrying only half of the pair is an unfinished entry.
+ *
+ * One rule, used by both write paths: a new admission goes through
+ * `validatePartTwo`, and the edit form does not run that validator — so without
+ * this the API would refuse an edited slip after every other field had been
+ * filled in.
+ */
+function unfinishedBodyMarkings(
+  entries: BodyMarkingEntry[]
+): BodyMarkingEntry[] {
+  return (
+    Array.isArray(entries) ? entries : []
+  ).filter((marking) => {
+    const started =
+      marking.type !== '' ||
+      marking.location !== '' ||
+      marking.description !== '';
+
+    return (
+      started &&
+      (marking.type === '' ||
+        marking.location === '')
+    );
+  });
+}
+
+const UNFINISHED_MARKING_MESSAGE =
+  'Choose both the type and the body part for every marking.';
 
 /* ================================================================
    DATE HELPERS
@@ -2088,6 +2190,19 @@ export function ChildRecords() {
       legalCategory: source.legalCategory || selectedChild.legalCategory || '',
       specificOffense: source.specificOffense || selectedChild.caseType || '',
       caseHistory: source.caseHistory || '',
+      /*
+       * A stored list, or nothing at all — an admission written before this
+       * column existed reads back as null, which is "not recorded" rather than
+       * "none found". Rows are rebuilt field by field so a row saved by an
+       * older build cannot leave an undefined in a controlled input.
+       */
+      bodyMarkings: Array.isArray(source.bodyMarkings)
+        ? source.bodyMarkings.map((entry: Partial<BodyMarkingEntry>) => ({
+            type: entry?.type || '',
+            location: entry?.location || '',
+            description: entry?.description || '',
+          }))
+        : [],
       referringParty: source.referringParty || '',
       referringPartyContact: source.referringPartyContact || '',
       // Older records may have this column holding the referring party's
@@ -2112,12 +2227,74 @@ export function ChildRecords() {
     setIsFormOpen(true);
   };
 
+  /*
+   * The piercing/tattoo rows on the slip.
+   *
+   * The location is a dropdown and not a text box on purpose: "left chest" and
+   * "left side of the chest" are the same finding, and a free-text body part
+   * cannot be compared between two admissions. The list is read from the same
+   * JSON the API validates against, so the form cannot offer a body part the
+   * server would refuse.
+   */
+  const addBodyMarking = () => {
+    setForm((previous) => ({
+      ...previous,
+      bodyMarkings: [
+        ...previous.bodyMarkings,
+        { type: '', location: '', description: '' },
+      ],
+    }));
+
+    setFormErrors((previous) => ({
+      ...previous,
+      bodyMarkings: '',
+    }));
+  };
+
+  const updateBodyMarking = (
+    index: number,
+    patch: Partial<BodyMarkingEntry>
+  ) => {
+    setForm((previous) => ({
+      ...previous,
+      bodyMarkings: previous.bodyMarkings.map(
+        (entry, entryIndex) =>
+          entryIndex === index
+            ? { ...entry, ...patch }
+            : entry
+      ),
+    }));
+
+    setFormErrors((previous) => ({
+      ...previous,
+      bodyMarkings: '',
+    }));
+  };
+
+  const removeBodyMarking = (index: number) => {
+    setForm((previous) => ({
+      ...previous,
+      bodyMarkings: previous.bodyMarkings.filter(
+        (_entry, entryIndex) =>
+          entryIndex !== index
+      ),
+    }));
+  };
+
   const handleUpdateResident = async () => {
     if (!editingId) return;
 
     const fullName = buildFullName(form);
     if (!fullName) {
       setFormErrors({ name: 'Full name is required.' });
+      return;
+    }
+
+    // The edit form does not run `validatePartTwo`, so the marking rule is
+    // applied here too — otherwise a half-filled row added while editing would
+    // be refused by the API instead of by the form that produced it.
+    if (unfinishedBodyMarkings(form.bodyMarkings).length > 0) {
+      setFormErrors({ bodyMarkings: UNFINISHED_MARKING_MESSAGE });
       return;
     }
 
@@ -2165,6 +2342,7 @@ export function ChildRecords() {
             houseparentUserId: form.assignedHouseparentId || null,
             houseparentSignature: form.houseparentSignature || null,
             residentImage: form.residentImage || null,
+            bodyMarkings: bodyMarkingsForPayload(form.bodyMarkings),
             admissionStatus,
           }),
         });
@@ -2622,6 +2800,15 @@ export function ChildRecords() {
 
             caseHistory: '',
 
+            /*
+             * Deliberately NOT carried over from the previous admission.
+             * A marking is recorded as the body was found at *this*
+             * admission, so re-sending the last admission's list would
+             * assert that a tattoo seen a year ago is still there — and a
+             * removed one would stay on record for ever.
+             */
+            bodyMarkings: [],
+
             referringParty:
               '',
 
@@ -2720,6 +2907,15 @@ export function ChildRecords() {
               previous.specificOffense,
 
             caseHistory: '',
+
+            /*
+             * Deliberately NOT carried over from the previous admission.
+             * A marking is recorded as the body was found at *this*
+             * admission, so re-sending the last admission's list would
+             * assert that a tattoo seen a year ago is still there — and a
+             * removed one would stay on record for ever.
+             */
+            bodyMarkings: [],
 
             referringParty:
               '',
@@ -2835,6 +3031,19 @@ export function ChildRecords() {
           'Houseparent on duty is required.';
       }
 
+      // A marking is a type *plus* a body part. A row that was never touched is
+      // simply dropped, but one carrying only half of the pair is an unfinished
+      // entry — caught here rather than by the API, which would refuse the whole
+      // slip after every other field had been filled in.
+      if (
+        unfinishedBodyMarkings(
+          form.bodyMarkings
+        ).length > 0
+      ) {
+        errors.bodyMarkings =
+          UNFINISHED_MARKING_MESSAGE;
+      }
+
       setFormErrors(
         errors
       );
@@ -2946,6 +3155,11 @@ export function ChildRecords() {
           form.specificOffense,
 
         caseHistory: '',
+
+        bodyMarkings:
+          bodyMarkingsForPayload(
+            form.bodyMarkings
+          ),
 
         admissionStatus,
       };
@@ -3727,6 +3941,11 @@ export function ChildRecords() {
 
             caseHistory: '',
 
+            bodyMarkings:
+              bodyMarkingsForPayload(
+                form.bodyMarkings
+              ),
+
             admissionStatus,
 
             residentSignature:
@@ -4501,6 +4720,187 @@ export function ChildRecords() {
                     </div>
 
                   </div>
+                </div>
+
+                {/* PIERCING / TATTOO */}
+                <div className="rounded-2xl border bg-white p-6">
+
+                  <div className="flex items-center gap-3 mb-6">
+
+                    <div className="p-2 rounded-xl bg-[#FFD100]/20">
+                      <FileText
+                        className="w-5 h-5 text-[#2F3E46]"
+                      />
+                    </div>
+
+                    <div>
+                      <h4 className="font-bold text-[#2F3E46]">
+                        Piercing / Tattoo
+                      </h4>
+
+                      <p className="text-xs text-gray-500">
+                        Recorded as the resident was received at
+                        this admission. Pick the body part from the
+                        list.
+                      </p>
+                    </div>
+
+                  </div>
+
+                  {form.bodyMarkings.length === 0 && (
+                    <p className="text-sm text-gray-500">
+                      No piercing or tattoo recorded for this
+                      admission.
+                    </p>
+                  )}
+
+                  <div className="space-y-4">
+
+                    {form.bodyMarkings.map((marking, index) => (
+
+                      <div
+                        key={index}
+                        className="rounded-xl border bg-[#f8f9fa] p-4"
+                      >
+
+                        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-[150px_1fr_1fr_auto]">
+
+                          <div className="space-y-2">
+
+                            <Label className="font-bold text-[#2F3E46]">
+                              Type
+                            </Label>
+
+                            <Select
+                              value={
+                                marking.type ||
+                                undefined
+                              }
+                              onValueChange={(value) =>
+                                updateBodyMarking(index, { type: value })
+                              }
+                            >
+                              <SelectTrigger className="rounded-xl">
+                                <SelectValue placeholder="Select type" />
+                              </SelectTrigger>
+
+                              <SelectContent>
+                                {BODY_MARKING_TYPES.map((type) => (
+                                  <SelectItem
+                                    key={type}
+                                    value={type}
+                                  >
+                                    {type}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+
+                          </div>
+
+                          <div className="space-y-2">
+
+                            <Label className="font-bold text-[#2F3E46]">
+                              Body Part
+                            </Label>
+
+                            <Select
+                              value={
+                                marking.location ||
+                                undefined
+                              }
+                              onValueChange={(value) =>
+                                updateBodyMarking(index, { location: value })
+                              }
+                            >
+                              <SelectTrigger className="rounded-xl">
+                                <SelectValue placeholder="Select body part" />
+                              </SelectTrigger>
+
+                              <SelectContent>
+                                {BODY_MARKING_LOCATIONS.map((location) => (
+                                  <SelectItem
+                                    key={location}
+                                    value={location}
+                                  >
+                                    {location}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+
+                          </div>
+
+                          <div className="space-y-2">
+
+                            <Label className="font-bold text-[#2F3E46]">
+                              Notes
+                            </Label>
+
+                            <Input
+                              value={
+                                marking.description
+                              }
+                              onChange={(event) =>
+                                updateBodyMarking(index, {
+                                  description: event.target.value,
+                                })
+                              }
+                              placeholder="Design, size, remarks"
+                              maxLength={
+                                BODY_MARKING_MAX_DESCRIPTION
+                              }
+                              className="rounded-xl"
+                            />
+
+                          </div>
+
+                          <div className="flex items-end">
+
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="rounded-xl text-red-600"
+                              aria-label="Remove this marking"
+                              onClick={() =>
+                                removeBodyMarking(index)
+                              }
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+
+                          </div>
+
+                        </div>
+
+                      </div>
+
+                    ))}
+
+                  </div>
+
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="rounded-xl mt-4"
+                    disabled={
+                      form.bodyMarkings.length >=
+                      BODY_MARKING_MAX_ENTRIES
+                    }
+                    onClick={addBodyMarking}
+                  >
+                    <Plus className="w-4 h-4 mr-2" />
+                    Add marking
+                  </Button>
+
+                  {formErrors.bodyMarkings && (
+                    <p className="text-xs text-red-600 mt-2">
+                      {
+                        formErrors.bodyMarkings
+                      }
+                    </p>
+                  )}
+
                 </div>
 
                 {/* ADMISSION STATUS */}

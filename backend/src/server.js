@@ -557,6 +557,11 @@ async function runMigrations() {
       specificOffense TEXT NOT NULL,
       caseHistory TEXT NOT NULL,
 
+      -- Piercings and tattoos observed at admission: a JSON array of
+      -- { type, location, description }. The location is picked from the
+      -- dropdown built from src/config/bodyMarkings.json.
+      bodyMarkings TEXT NULL,
+
       admissionStatus VARCHAR(40) NULL,
 
       expectedDischargeDate DATE NULL,
@@ -627,6 +632,21 @@ async function runMigrations() {
     }
   } catch (err) {
     console.warn('Migration warning (admissions.admissionStatus):', err.message);
+  }
+
+  // Piercings and tattoos are recorded on the admission itself, as a JSON array
+  // of { type, location, description }.
+  //
+  // A column rather than a table because the marking belongs to one admission,
+  // not to the resident across their whole stay: a tattoo seen in September is
+  // part of what that admission documented, and a later admission records the
+  // body as it is then. Nothing is backfilled — an admission written before the
+  // column existed has no markings on record, which is the honest answer and
+  // not the same as "no markings".
+  try {
+    await ensureColumn('admissions', 'bodyMarkings', 'TEXT NULL', 'caseHistory');
+  } catch (err) {
+    console.warn('Migration warning (admissions.bodyMarkings):', err.message);
   }
 
   // The Houseparent on duty as a *stable id*, alongside the printed name.
