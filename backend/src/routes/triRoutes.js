@@ -42,6 +42,11 @@ router.post('/:id/submit', authorize('socialworker', 'centerhead', 'admin', 'hou
 // signature. Kept narrow on purpose: widening this list would let a reviewer sign
 // the very document they are reviewing.
 router.post('/:id/signature', authorize('houseparent'), asyncHandler(triController.sign));
+// The typed names and E-Signatures of the rest of the page-8 block. The
+// Houseparent name may be entered by the Houseparent or a reviewer; the Administrative Officer, SWO I /
+// Case Manager, MARICOR C. NAVARRO and NICOLAS Q. REGALARIO lines are filled in by
+// a reviewer. The controller enforces the per-line rule.
+router.put('/:id/signatories', authorize('socialworker', 'centerhead', 'admin', 'houseparent'), asyncHandler(triController.updateSignatories));
 router.post('/:id/review', authorize('socialworker', 'centerhead', 'admin'), asyncHandler(triController.review));
 router.post('/:id/return', authorize('socialworker', 'centerhead', 'admin'), asyncHandler(triController.returnForRevision));
 router.post('/:id/finalize', authorize('socialworker', 'centerhead', 'admin'), asyncHandler(triController.finalize));

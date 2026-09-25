@@ -213,6 +213,20 @@ export function InterventionTracker({ embedded = false }: { embedded?: boolean }
 
   const [trackerRecords, setTrackerRecords] = useState<any[]>([]);
 
+  /**
+   * An Incident Report the Center Head sent back — Failed (document Rejected) or
+   * For Reassessment — and not yet approved. It is offered as "Fill Out Again",
+   * which resubmits the same record.
+   */
+  const incidentReportNeedsRework = (report: any) => Boolean(report) && report.documentStatus !== 'Approved' && (
+    report.status === 'Failed'
+    || report.status === 'Reassessment'
+    || report.status === 'Rejected'
+    || report.status === 'For Reassessment'
+    || report.documentStatus === 'Rejected'
+    || report.documentStatus === 'Reassessment'
+  );
+
   const activeChildren = children.filter(c => c.status !== 'Discharged');
 
   const displayViolationStatus = (v: any) => {
@@ -237,11 +251,16 @@ export function InterventionTracker({ embedded = false }: { embedded?: boolean }
 
   const buildTracks = (resolved: boolean) => {
     return activeChildren.flatMap(child => {
-      const childViolations = violations.filter(v =>
-        v.residentId === child.id &&
-        (resolved ? v.status === 'Resolved' : !['Pending Review', 'Rejected', 'Resolved'].includes(v.status)) &&
-        matchesFilters(v)
-      );
+      const childViolations = violations.filter(v => {
+        if (v.residentId !== child.id || !matchesFilters(v)) return false;
+        // A resolved violation with a returned Incident Report belongs back in
+        // the active Intervention Tracker for the Form 08 correction (and not in
+        // Done at the same time), but its completed interventions stay in their
+        // original Completed state.
+        const returnedIncident = incidentReportNeedsRework(incidentReportsByViolation[v.id]);
+        if (resolved) return v.status === 'Resolved' && !returnedIncident;
+        return returnedIncident || !['Pending Review', 'Rejected', 'Resolved'].includes(v.status);
+      });
 
       if (childViolations.length === 0) return [];
 
@@ -300,12 +319,15 @@ export function InterventionTracker({ embedded = false }: { embedded?: boolean }
 
   const activeList = useMemo(
     () => buildTracks(false),
-    [children, violations, trackerRecords, search, sevFilter, statusFilter, incidentMonthFilter]
+    // The loaded Incident Reports decide whether a returned report puts its
+    // violation back in the active list, so they are a dependency too — without
+    // them the list was built before the reports arrived and never updated.
+    [children, violations, trackerRecords, search, sevFilter, statusFilter, incidentMonthFilter, incidentReportsByViolation]
   );
 
   const doneList = useMemo(
     () => buildTracks(true),
-    [children, violations, trackerRecords, search, sevFilter, statusFilter, incidentMonthFilter]
+    [children, violations, trackerRecords, search, sevFilter, statusFilter, incidentMonthFilter, incidentReportsByViolation]
   );
 
   const totalActive = useMemo(() => filteredTrackerRecords.filter(row => row.status === 'In Progress').length, [filteredTrackerRecords]);
@@ -373,7 +395,7 @@ export function InterventionTracker({ embedded = false }: { embedded?: boolean }
       </div>
 
       {/* Tabs — scrolls rather than overflowing the page on a narrow screen. */}
-      <div className="flex items-center gap-2 border-b border-gray-200 pb-0 overflow-x-auto">
+      <div className="flex items-center gap-2 border-b border-gray-200 pb-0 overflow-x-auto overflow-y-hidden">
         {([
           { key: 'active', label: 'Active', count: activeList.reduce((s,ci) => s + ci.count, 0) },
           { key: 'done',   label: 'Done',             count: doneList.reduce((s,ci) => s + ci.count, 0)   },
@@ -682,7 +704,12 @@ export function InterventionTracker({ embedded = false }: { embedded?: boolean }
                                   </li>
                                 );
                               })}
-                              {track.interventions.length > 0 && track.interventions.every((s: any) => s.status === 'Completed') && (
+                              {/* The Form 08 row appears once every requirement is complete — and
+                                  always while its report is Failed / For Reassessment, so "Fill Out
+                                  Again" is reachable even when a reassessment has reopened the
+                                  intervention's requirements. */}
+                              {((track.interventions.length > 0 && track.interventions.every((s: any) => s.status === 'Completed'))
+                                || incidentReportNeedsRework(incidentReportsByViolation[track.violation.id])) && (
                                 <li className="rounded-lg border border-blue-200 bg-blue-50 p-2 mt-2">
                                   <div className="flex items-center gap-2">
                                     <span className="font-bold shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-[9px] bg-blue-500 text-white">8</span>
@@ -693,8 +720,8 @@ export function InterventionTracker({ embedded = false }: { embedded?: boolean }
                                     {incidentReportsByViolation[track.violation.id] ? (() => {
                                       const report = incidentReportsByViolation[track.violation.id];
                                       const approved = report.documentStatus === 'Approved' || (!report.pdfDocumentId && report.status === 'Verified');
-                                      const failed = report.status === 'Failed' || (report.documentStatus === 'Rejected' && report.status !== 'Verified');
-                                      const reassessment = report.status === 'Reassessment';
+                                      const failed = report.status === 'Failed' || report.status === 'Rejected' || (report.documentStatus === 'Rejected' && report.status !== 'Verified');
+                                      const reassessment = report.status === 'Reassessment' || report.status === 'For Reassessment' || report.documentStatus === 'Reassessment';
                                       if (approved) return <span className="text-[10px] font-bold text-green-700">✓ Approved</span>;
                                       if (failed) return (
                                         <div className="flex items-center gap-2">

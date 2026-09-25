@@ -140,6 +140,8 @@ export function Activities() {
   };
 
   const handleSave = async () => {
+    // View-only for Houseparents (the API refuses the write as well).
+    if (isHouseparent) return;
     if (!formState.title || !formState.date || formState.facilitators.length === 0) {
       void systemDialog.validation('Some required fields are still blank', {
         items: [
@@ -230,7 +232,9 @@ export function Activities() {
         {/* Scheduling is a `create` capability on Activities. The Social Worker
             holds view/edit/delete but not create, so this button follows the
             definition rather than a role test. */}
-        {can('Activities', 'create') && (
+        {/* Houseparents are view-only on Activities: no Add button, whatever a
+            cached permission snapshot says (the API refuses the write too). */}
+        {can('Activities', 'create') && !isHouseparent && (
           <Dialog open={isDialogOpen} onOpenChange={(open) => { if(!open) resetForm(); setIsDialogOpen(open); }}>
             <DialogTrigger asChild>
               <Button 
@@ -519,7 +523,7 @@ export function Activities() {
                     <Eye size={16} className="text-[#FFD100]" /> View
                   </Button>
                   
-                  {can('Activities', 'edit') && (
+                  {can('Activities', 'edit') && !isHouseparent && (
                     <>
                   <Button 
                     variant="ghost" 

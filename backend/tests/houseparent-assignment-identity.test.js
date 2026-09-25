@@ -78,7 +78,7 @@ function between(source, startMarker, endMarker, label) {
 const READERS = [
   [
     'the caseload scope',
-    between(RESIDENT_SCOPE, 'async function assignedResidentIds', '} catch (error) {', 'caseload scope'),
+    between(RESIDENT_SCOPE, 'async function assignedResidentIds', 'async function loadResidentScope', 'caseload scope'),
   ],
   [
     'canAccessResident',
@@ -86,9 +86,7 @@ const READERS = [
   ],
   [
     'the Case Load roster',
-    // The second `legacyRows` query in the file; located by position rather than
-    // by an indented multi-line marker.
-    ASSIGNMENT.slice(ASSIGNMENT.lastIndexOf('const [legacyRows] = await pool.query(')),
+    between(ASSIGNMENT, 'async function getCaseload', 'async function getMyResidents', 'getCaseload'),
   ],
 ];
 
@@ -163,36 +161,36 @@ test('a selected id is stored verbatim and an empty selection clears the link', 
   assert.equal(await resolveHouseparentUserId(undefined, executor), null);
 });
 
-test('every reader resolves the caseload from the id first', () => {
+test('the Houseparent on Duty never becomes the Case Load Manager', () => {
+  // HP on Duty (admissions.houseparentOnDuty / houseparentUserId) and the Case
+  // Load Manager (residentAssignments) are two separate fields. None of the
+  // readers that decide a Houseparent's residents may fall back to the
+  // admission, or selecting an HP on Duty would silently hand them the case.
   for (const [label, block] of READERS) {
-    assert.match(block, /houseparentUserId = u\.id/, `${label} does not match the Houseparent by id`);
+    assert.doesNotMatch(block, /FROM admissions|JOIN admissions/, `${label} still reads the admission as a caseload link`);
+    assert.doesNotMatch(block, /houseparentOnDuty\)|a\.houseparentUserId/, `${label} still matches the HP on Duty`);
+    assert.match(block, /residentAssignments|assignedResidentIds|effectiveRows|rows\.length/, `${label} no longer reads the assignment table`);
   }
 });
 
-test('the name match is a migration aid, never a fallback that overrides an id', () => {
-  for (const [label, block] of READERS) {
-    const flat = block.replace(/\s+/g, ' ');
+test('saving an Admission Slip does not create a Case Load assignment', () => {
+  const posts = CHILD_RECORDS.match(/request\(\s*`\/resident-assignments\/resident\//g) || [];
+  assert.equal(posts.length, 0, 'the admission form still creates a residentAssignments row from the HP on Duty');
+  assert.doesNotMatch(CHILD_RECORDS, /\/resident-assignments\/\$\{editingAssignmentId\}\/end/, 'editing an admission still ends the Case Load assignment');
+});
 
-    // The gate must sit immediately in front of the name comparisons. Without
-    // it, an admission that already carries a correct id would still be
-    // re-resolved by name — so renaming a Houseparent would move residents who
-    // had been explicitly assigned to them.
-    assert.match(
-      flat,
-      /a\.houseparentUserId IS NULL AND \( LOWER\(TRIM\(a\.houseparentOnDuty\)\) = LOWER\(TRIM\(u\.username\)\)/,
-      `${label}: the name comparisons are not gated on houseparentUserId IS NULL`,
-    );
-
-    // And no name comparison may sit outside that gate.
-    const { gate, total, gated } = gateCoverage(block);
-    assert.ok(total > 0, `${label} no longer resolves the legacy name at all`);
-    assert.equal(
-      gated,
-      total,
-      `${label}: ${total - gated} of ${total} name comparisons are outside the ` +
-        'houseparentUserId IS NULL gate, so they can override an explicit assignment when a ' +
-        'Houseparent is renamed',
-    );
+test('only the Center Head can assign or change a Case Load Manager', () => {
+  const { canAssignCaseLoadManager } = require('../src/controllers/assignmentController');
+  assert.equal(canAssignCaseLoadManager({ role: 'centerhead' }), true);
+  assert.equal(canAssignCaseLoadManager({ role: 'Center Head' }), true);
+  assert.equal(canAssignCaseLoadManager({ role: 'admin' }), true);
+  for (const role of ['socialworker', 'houseparent', 'nurse', 'psychologist', 'educator']) {
+    assert.equal(canAssignCaseLoadManager({ role }), false, `${role} may assign a Case Load Manager`);
+  }
+  for (const fn of ['async function create', 'async function update', 'async function end']) {
+    const next = ASSIGNMENT.indexOf('\nasync function', ASSIGNMENT.indexOf(fn) + 1);
+    const block = ASSIGNMENT.slice(ASSIGNMENT.indexOf(fn), next < 0 ? undefined : next);
+    assert.match(block, /canAssignCaseLoadManager\(req\.user\)/, `${fn} does not apply the Center Head rule`);
   }
 });
 
@@ -202,12 +200,11 @@ test('the SPA sends the id it shows, on create and on edit', () => {
     writes.length >= 3,
     `only ${writes.length} of the three payloads (create, update, admission record) send the Houseparent id`,
   );
-  // Restoring an admission must prefer its own stored id over the current
-  // assignment row, or reopening a historical admission would re-point it at
-  // whoever holds the resident today.
+  // The HP on Duty is restored from the admission alone — never from the Case
+  // Load assignment, which is a separate field.
   assert.match(
     CHILD_RECORDS,
-    /assignedHouseparentId: source\.houseparentUserId \|\| assignment\?\.userId \|\| ''/,
-    'the form restores the Houseparent from the current assignment before the admission\'s own id',
+    /assignedHouseparentId: source\.houseparentUserId \|\| ''/,
+    'the form restores the HP on Duty from the Case Load assignment',
   );
 });

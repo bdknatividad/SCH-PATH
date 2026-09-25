@@ -5,6 +5,7 @@
  */
 
 const { pool } = require('../config/database');
+const { assertResidentNotAbsconded } = require('../utils/abscond');
 const { createController } = require('./baseController');
 const { insertWithGeneratedId, mapRow, normalizeDatetimes } = require('../utils/helpers');
 const { ApiError } = require('../middleware/errorHandler');
@@ -596,6 +597,10 @@ async function create(req, res, next) {
       }
     }
 
+    // An absconded resident's record is frozen: no new document or upload is
+    // filed for them (existing ones stay readable).
+    if (data.residentId) await assertResidentNotAbsconded(data.residentId, 'given new documents');
+
     // Role restriction check — enforced for all upload sources
     const permissionKey = docType === 'Other' ? 'Other' : docTitle;
     const allowedRoles = DOCUMENT_ROLE_PERMISSIONS[permissionKey];
@@ -815,8 +820,7 @@ async function submit(req, res, next) {
     if (isIncidentReport) {
       await pool.query(
         `UPDATE incidentReports
-            SET status = 'Submitted', verifiedBy = NULL, verifiedAt = NULL,
-                interventionType = NULL, interventionScheduleDate = NULL, updatedAt = CURRENT_TIMESTAMP
+            SET status = 'Submitted', verifiedBy = NULL, verifiedAt = NULL, updatedAt = CURRENT_TIMESTAMP
           WHERE pdfDocumentId = ?`,
         [id]
       );
@@ -1008,13 +1012,22 @@ async function reject(req, res, next) {
       snapshot: revisionSnapshot(rejected),
     });
 
-    try {
-      await notifyUploaderOfDecision(
-        rejected,
-        { decision: 'Rejected', reviewer, reason }
-      );
-    } catch (notifyErr) {
-      console.error('[DocumentController] Rejection notification failed (non-fatal):', notifyErr.message);
+    // An Incident Report (Form 08) marked Failed goes back to the Intervention
+    // Tracker as "Fill Out Again" — the same incident record, updated in place on
+    // resubmission. That helper sends the incident-specific notice, so the
+    // generic one is skipped for it.
+    const isIncidentReport = String(existing[0].title || '').trim().toLowerCase() === 'incident report';
+    if (isIncidentReport) {
+      await applyIncidentReportDecision(rejected, 'Rejected', reason, req.user);
+    } else {
+      try {
+        await notifyUploaderOfDecision(
+          rejected,
+          { decision: 'Rejected', reviewer, reason }
+        );
+      } catch (notifyErr) {
+        console.error('[DocumentController] Rejection notification failed (non-fatal):', notifyErr.message);
+      }
     }
 
     res.json({
@@ -1165,36 +1178,97 @@ const APPROVAL_STATUSES = ['Approved', 'Rejected', 'Reassessment', 'Under Review
  * @param {string} violationId - The violation the Form 08 was raised against.
  * @param {Object} [actor] - The authenticated user making the decision.
  */
+/**
+ * A returned Incident Report is reopened for the form itself only. Prescribed
+ * interventions and their linked assessments are historical/completed work and
+ * must never be reset by a document review decision. The same violation remains
+ * in its existing state; the Intervention Tracker explicitly surfaces the
+ * returned Form 08 from the same incident record.
+ */
 async function reopenInterventionForReassessment(violationId, actor) {
-  if (!violationId) return;
+  // Kept as a no-op compatibility helper for older callers/tests. Reassessment
+  // no longer mutates intervention_tracker or violations.
+  return { violationId, actor: actor?.username || 'System' };
+}
 
-  const connection = await pool.getConnection();
+/**
+ * The Center Head's Failed / For Reassessment decision on an Incident Report
+ * (Form 08), applied to the incident workflow.
+ *
+ * Both decisions send the SAME incident record back to the Intervention Tracker,
+ * where it is offered as "Fill Out Again". Resubmitting it
+ * (`POST /incident-reports/:id/resubmit`) updates that same record and its same
+ * document back to 'Submitted', which puts it in Documents → Pending Review again —
+ * so the cycle repeats on one record until the report is approved. No second
+ * incident report is ever created.
+ *
+ * Reassessment/Rejected returns only the Incident Report for correction. Completed
+ * interventions, linked assessments, schedules, and the violation's existing state
+ * are preserved. The Intervention Tracker surfaces the same returned incident record.
+ *
+ * Used by both the generic PUT (Reassessment) and POST /:id/reject (Failed). The
+ * reject route used to skip this entirely, so a "Failed" decision left the
+ * incident at 'Submitted' — the tracker could not offer it for rework and the
+ * resubmit endpoint refused it.
+ *
+ * @param {Object} document  The Incident Report's documents row.
+ * @param {'Rejected'|'Reassessment'} status  The document decision.
+ * @param {string} reason  The reviewer's note.
+ * @param {Object} actor  The authenticated reviewer.
+ */
+async function applyIncidentReportDecision(document, status, reason, actor) {
+  const incidentStatus = status === 'Reassessment' ? 'Reassessment' : 'Failed';
+  const [incidentRows] = await pool.query(
+    'SELECT id, violationId FROM incidentReports WHERE pdfDocumentId = ? LIMIT 1',
+    [document.id]
+  );
+  await pool.query(
+    `UPDATE incidentReports
+     SET status = ?, updatedAt = CURRENT_TIMESTAMP
+     WHERE pdfDocumentId = ?`,
+    [incidentStatus, document.id]
+  );
+
+  // The report alone is returned for correction. Do NOT reset intervention_tracker,
+  // intervention_requirements, assessments, schedules, or the violation's resolved
+  // state. The frontend tracker uses this same incident record to expose
+  // "Fill Out Again", while the completed intervention history remains DONE.
+
   try {
-    await connection.beginTransaction();
-
-    await connection.query(
-      `UPDATE intervention_tracker
-          SET status = 'In Progress', completionDate = NULL, completedBy = NULL
-        WHERE violationId = ?`,
-      [violationId]
-    );
-
-    await connection.query(
-      `UPDATE violations
-          SET status = 'Reviewed', reviewedBy = ?
-        WHERE id = ? AND status = 'Resolved'`,
-      [actor?.username || 'System', violationId]
-    );
-
-    await connection.commit();
-  } catch (error) {
-    await connection.rollback().catch(() => {});
-    throw error;
-  } finally {
-    connection.release();
+    const uploader = document.uploadedBy || document.submittedBy || document.createdBy;
+    const targetUserId = uploader ? await notifications.userIdForUsername(uploader) : null;
+    const residentName = document.residentId ? await notifications.residentName(document.residentId) : null;
+    if (targetUserId) {
+      const failed = incidentStatus === 'Failed';
+      await notifications.notify({
+        type: failed ? 'Incident Report Failed' : 'Incident Report For Reassessment',
+        title: failed ? `Incident Report Failed — ${residentName || 'Resident'}` : `Incident Report For Reassessment — ${residentName || 'Resident'}`,
+        message: failed
+          ? `${residentName || 'Resident'}'s Incident Report was marked Failed. ${reason ? `Reason: ${reason}` : 'Please correct it and fill it out again.'}`
+          : `${residentName || 'Resident'}'s Incident Report was sent for reassessment. ${reason ? `Reason: ${reason}` : 'Please review and resubmit the corrections.'}`,
+        priority: 'High',
+        actionRequired: failed ? 'Fill out the Incident Report again and resubmit it for review.' : 'Review the requested corrections and resubmit the Incident Report.',
+        residentId: document.residentId || null,
+        relatedRecordType: 'incidentReports',
+        relatedRecordId: (await pool.query('SELECT id FROM incidentReports WHERE pdfDocumentId = ? LIMIT 1', [document.id]))[0][0]?.id || null,
+        targetUserId,
+        actorUsername: actor?.username || null,
+      });
+    }
+  } catch (notifyErr) {
+    console.error('[DocumentController] Incident Report decision notification failed (non-fatal):', notifyErr.message);
   }
 }
 
+/**
+ * PUT /documents/:id — the generic document update, which is also the path the
+ * Documents page uses for review decisions (Approved / For Reassessment) and for
+ * resubmitting a returned document.
+ *
+ * Restored: this function had been deleted while its export was left in place,
+ * so the backend could not even load this controller ("update is not defined")
+ * and every Documents / Incident Report workflow stopped working.
+ */
 async function update(req, res, next) {
   try {
     const status = req.body?.status;
@@ -1358,7 +1432,7 @@ async function update(req, res, next) {
               SET status = 'Submitted', verifiedBy = NULL, verifiedAt = NULL,
                   psychVerifiedBy = NULL, psychVerifiedAt = NULL,
                   swVerifiedBy = NULL, swVerifiedAt = NULL,
-                  interventionType = NULL, interventionScheduleDate = NULL, updatedAt = CURRENT_TIMESTAMP
+                  updatedAt = CURRENT_TIMESTAMP
             WHERE pdfDocumentId = ?`,
           [document.id]
         );
@@ -1398,55 +1472,7 @@ async function update(req, res, next) {
     }
 
     if (isIncidentReport && ['Rejected', 'Reassessment'].includes(status)) {
-      const incidentStatus = status === 'Reassessment' ? 'Reassessment' : 'Failed';
-      const reason = String(req.body?.rejectionReason || '').trim();
-      const [incidentRows] = await pool.query(
-        'SELECT id, violationId FROM incidentReports WHERE pdfDocumentId = ? LIMIT 1',
-        [document.id]
-      );
-      await pool.query(
-        `UPDATE incidentReports
-         SET status = ?, updatedAt = CURRENT_TIMESTAMP
-         WHERE pdfDocumentId = ?`,
-        [incidentStatus, document.id]
-      );
-
-      // The report is going to be produced again, so the intervention it records
-      // goes back to pending and reappears in the Intervention Tracker. Failure
-      // here must not lose the decision — the status write above already
-      // committed, and the caller can reopen the intervention from the tracker.
-      if (incidentStatus === 'Reassessment') {
-        try {
-          await reopenInterventionForReassessment(incidentRows[0]?.violationId, req.user);
-        } catch (reopenErr) {
-          console.error('[DocumentController] Reopening the intervention failed (non-fatal):', reopenErr.message);
-        }
-      }
-
-      try {
-        const uploader = document.uploadedBy || document.submittedBy || document.createdBy;
-        const targetUserId = uploader ? await notifications.userIdForUsername(uploader) : null;
-        const residentName = document.residentId ? await notifications.residentName(document.residentId) : null;
-        if (targetUserId) {
-          const failed = incidentStatus === 'Failed';
-          await notifications.notify({
-            type: failed ? 'Incident Report Failed' : 'Incident Report For Reassessment',
-            title: failed ? `Incident Report Failed — ${residentName || 'Resident'}` : `Incident Report For Reassessment — ${residentName || 'Resident'}`,
-            message: failed
-              ? `${residentName || 'Resident'}'s Incident Report was marked Failed. ${reason ? `Reason: ${reason}` : 'Please correct it and fill it out again.'}`
-              : `${residentName || 'Resident'}'s Incident Report was sent for reassessment. ${reason ? `Reason: ${reason}` : 'Please review and resubmit the corrections.'}`,
-            priority: 'High',
-            actionRequired: failed ? 'Fill out the Incident Report again and resubmit it for review.' : 'Review the requested corrections and resubmit the Incident Report.',
-            residentId: document.residentId || null,
-            relatedRecordType: 'incidentReports',
-            relatedRecordId: (await pool.query('SELECT id FROM incidentReports WHERE pdfDocumentId = ? LIMIT 1', [document.id]))[0][0]?.id || null,
-            targetUserId,
-            actorUsername: req.user?.username || null,
-          });
-        }
-      } catch (notifyErr) {
-        console.error('[DocumentController] Incident Report decision notification failed (non-fatal):', notifyErr.message);
-      }
+      await applyIncidentReportDecision(document, status, String(req.body?.rejectionReason || '').trim(), req.user);
     }
 
     return originalJson(responsePayload);

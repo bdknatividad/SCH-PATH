@@ -1412,11 +1412,19 @@
     }
   ],
   "houseparentSignatureBox": {
-    "$comment": "The blank band above the page-8 \"Houseparent\" rule. Measured against the template: the underscore run is 90.24pt wide at x 72.02 with its baseline at y 772.75, the caption sits 20.6pt below it, and the line above the block ends at y 804. Shared so the on-screen overlay, the browser export and the backend PDF writer stamp the signature in the same place.",
-    "page": 7, "x": 72.02, "y": 774, "width": 90.24, "height": 22
+    "$comment": "Page-8 \"Houseparent\" line, E-Signature band. Order on the form, top to bottom: E-Signature, typed name, the printed underscore rule (ink 770.6-772.5, x 72.02-162.26), then the caption. The typed name sits on the rule (baseline 775) and the signature band runs from just above the name (784) to under the text line above the block (descenders at 811.4). Shared by the on-screen overlay, the browser export and the backend PDF writer.",
+    "page": 7, "x": 72.02, "y": 784, "width": 90.24, "height": 26
   },
   "houseparentNamePos": {
-    "$comment": "Where the Houseparent's printed name goes, directly above their signature rule. Baseline y 800 clears the 774-796 signature box below and the descenders of the block heading above.",
-    "page": 7, "x": 72.02, "y": 800, "size": 8, "width": 90.24
+    "$comment": "The Houseparent's typed name (text holder), sitting on the signature rule, below the E-Signature.",
+    "page": 7, "x": 72.02, "y": 775, "size": 8, "width": 90.24
+  },
+  "signatories": {
+    "$comment": "Every signature line of the page-8 'Assessed by' block. signatureY/signatureHeight is the E-Signature band; nameY/nameSize is the typed-name text holder (only the three lines without a pre-printed name have one). Houseparent, Administrative Officer and SWO I / Case Manager rules sit at y ~771 (x 72.02-162.26, 223.8-318.8, 346.2-461.5). The MARICOR C. NAVARRO and NICOLAS Q. REGALARIO rules sit at y ~670 (x 72.0-247.3 and 326.8-511.8) with the printed names below them, so their E-Signature band is directly above the rule.",
+    "houseparent": { "page": 7, "x": 72.02, "width": 90.24, "signatureY": 784, "signatureHeight": 26, "nameY": 775, "nameSize": 8 },
+    "administrativeOfficer": { "page": 7, "x": 223.8, "width": 95.0, "signatureY": 784, "signatureHeight": 26, "nameY": 775, "nameSize": 8 },
+    "caseManager": { "page": 7, "x": 346.2, "width": 115.3, "signatureY": 784, "signatureHeight": 26, "nameY": 775, "nameSize": 8 },
+    "centerHead": { "page": 7, "x": 72.0, "width": 175.3, "signatureY": 672, "signatureHeight": 40 },
+    "sectionChief": { "page": 7, "x": 326.8, "width": 185.0, "signatureY": 672, "signatureHeight": 40 }
   }
 }

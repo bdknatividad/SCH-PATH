@@ -588,7 +588,9 @@ async function assignInterventions(req, res, next) {
  */
 async function getScheduledInterventions(req, res, next) {
   try {
-    const today = new Date().toISOString().slice(0, 10);
+    // Today in the facility's timezone. `toISOString()` is UTC, which is still
+    // yesterday until 08:00 in the Philippines.
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
     const from = String(req.query.from || today).slice(0, 10);
     const to = String(req.query.to || from).slice(0, 10);
 

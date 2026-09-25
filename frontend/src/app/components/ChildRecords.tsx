@@ -1550,10 +1550,9 @@ function AdmissionSlipEditor({
                     (
                       houseparent
                     ) => {
-                      const isFull =
-                        houseparent.assignedCount >=
-                        houseparent.maxCaseload;
-
+                      // HP on Duty is not a Case Load assignment, so the
+                      // Houseparent's case-load size neither shows here nor
+                      // blocks choosing them as the one on duty.
                       return (
                         <SelectItem
                           key={
@@ -1562,25 +1561,10 @@ function AdmissionSlipEditor({
                           value={
                             houseparent.id
                           }
-                          disabled={
-                            isFull
-                          }
                         >
                           {
                             houseparent.label
                           }
-                          {' — '}
-                          {
-                            houseparent.assignedCount
-                          }
-                          /
-                          {
-                            houseparent.maxCaseload
-                          }
-
-                          {isFull
-                            ? ' (Full)'
-                            : ''}
                         </SelectItem>
                       );
                     }
@@ -1819,7 +1803,8 @@ export function ChildRecords() {
     useState<
       'All' |
       'Active' |
-      'Discharged'
+      'Discharged' |
+      'Absconded'
     >(() => {
       const params =
         new URLSearchParams(
@@ -1836,6 +1821,12 @@ export function ChildRecords() {
         'Discharged'
       ) {
         return 'Discharged';
+      }
+
+      if (
+        filter === 'Absconded'
+      ) {
+        return 'Absconded';
       }
 
       if (
@@ -1907,6 +1898,12 @@ export function ChildRecords() {
     ) {
       setStatusFilter(
         'Discharged'
+      );
+    } else if (
+      filter === 'Absconded'
+    ) {
+      setStatusFilter(
+        'Absconded'
       );
     } else if (
       filter === 'All'
@@ -2095,16 +2092,15 @@ export function ChildRecords() {
       referringPartySignature: /^data:image\/(png|jpeg|jpg);base64,/i.test(String(source.referringPartySignature || ''))
         ? source.referringPartySignature
         : '',
-      houseparentOnDuty: source.houseparentOnDuty || assignment?.userLabel || '',
+      houseparentOnDuty: source.houseparentOnDuty || '',
       houseparentSignature: source.houseparentSignature || '',
       residentImage: source.residentImage || '',
       /*
-       * The admission's own id first, because it is what was chosen when this
-       * admission was created; the assignment row is the fallback for
-       * admissions that predate the column. Preferring the assignment would
-       * re-point a historical admission at whoever holds the resident now.
+       * The Houseparent on Duty comes from the admission alone. The Case Load
+       * Manager (residentAssignments) is a separate field and must never be
+       * read back into the slip as if it were the HP on Duty.
        */
-      assignedHouseparentId: source.houseparentUserId || assignment?.userId || '',
+      assignedHouseparentId: source.houseparentUserId || '',
     });
     setFormErrors({});
     setFormStep(1);
@@ -2169,20 +2165,9 @@ export function ChildRecords() {
         });
       }
 
-      // Keep the assignment table synchronized with the HP selected on the slip.
-      if (form.assignedHouseparentId && form.assignedHouseparentId !== editingAssignedHouseparentId) {
-        if (editingAssignmentId && form.assignedHouseparentId !== '') {
-          await request(`/resident-assignments/${editingAssignmentId}/end`, { method: 'POST', body: JSON.stringify({}) });
-        }
-        if (!editingAssignmentId || form.assignedHouseparentId !== '') {
-          await request(`/resident-assignments/resident/${editingId}`, {
-            method: 'POST',
-            body: JSON.stringify({ userId: form.assignedHouseparentId, assignmentType: 'houseparent', startAt: new Date().toISOString(), source: 'admission-update' }),
-          });
-        }
-      } else if (!form.assignedHouseparentId && editingAssignmentId) {
-        await request(`/resident-assignments/${editingAssignmentId}/end`, { method: 'POST', body: JSON.stringify({}) });
-      }
+      // The Houseparent on Duty is saved on the admission above and is not
+      // synchronised into the Case Load: the Case Load Manager is a separate
+      // assignment that only the Center Head makes, in the Houseparent module.
 
       await refreshData();
       setIsFormOpen(false);
@@ -3836,44 +3821,11 @@ export function ChildRecords() {
         }
 
         /*
-         * Keep assignment in the existing
-         * resident assignment system.
+         * The Houseparent on Duty selected on the slip is saved on the
+         * admission only. It does NOT make that Houseparent the resident's
+         * Case Load Manager — the Center Head assigns the Case Load Manager
+         * separately from the Houseparent module's Case Load tab.
          */
-        if (
-          form.assignedHouseparentId
-        ) {
-          try {
-            await request(
-              `/resident-assignments/resident/${response.data.resident.id}`,
-              {
-                method:
-                  'POST',
-
-                body:
-                  JSON.stringify({
-                    userId:
-                      form.assignedHouseparentId,
-
-                    assignmentType:
-                      'houseparent',
-
-                    startAt:
-                      new Date().toISOString(),
-
-                    source:
-                      'admission',
-                  }),
-              }
-            );
-          } catch (
-            assignmentError
-          ) {
-            console.error(
-              'Houseparent assignment failed:',
-              assignmentError
-            );
-          }
-        }
 
         await refreshData();
 
@@ -3949,13 +3901,21 @@ export function ChildRecords() {
             statusFilter ===
               'Active' &&
             child.status !==
-              'Discharged'
+              'Discharged' &&
+            child.status !==
+              'Absconded'
           ) ||
           (
             statusFilter ===
               'Discharged' &&
             child.status ===
               'Discharged'
+          ) ||
+          (
+            statusFilter ===
+              'Absconded' &&
+            child.status ===
+              'Absconded'
           );
 
         return (
@@ -3969,7 +3929,17 @@ export function ChildRecords() {
     children.filter(
       (child: any) =>
         child.status !==
-        'Discharged'
+        'Discharged' &&
+        child.status !==
+        'Absconded'
+    ).length;
+
+  // Residents marked Absconded (from the Abscond button in Personal Info).
+  const abscondedCount =
+    children.filter(
+      (child: any) =>
+        child.status ===
+        'Absconded'
     ).length;
 
   const dischargedCount =
@@ -3991,10 +3961,22 @@ export function ChildRecords() {
     !editingId && (duplicateChild || exactResident)
   );
 
+  // A resident who is currently Absconded is definitively "Returning Resident
+  // (Abscon/Tumakas)" — there is no ambiguity to ask the Social Worker to
+  // resolve here, unlike an ordinary returning admission. The backend enforces
+  // this regardless of what is submitted; this keeps the form's own display
+  // from suggesting a choice ("Relapse") that would not actually be saved.
+  const isReturningFromAbscond = Boolean(
+    isReturningAdmission &&
+      (duplicateChild || exactResident)?.status === 'Absconded'
+  );
+
   const admissionStatus = editingId
     ? existingAdmission?.admissionStatus || 'New'
     : isReturningAdmission
-      ? returningAdmissionStatus
+      ? (isReturningFromAbscond
+        ? 'Returning Resident (Abscon/Tumakas)'
+        : returningAdmissionStatus)
       : 'New';
 
   return (
@@ -4520,11 +4502,13 @@ export function ChildRecords() {
                       </p>
 
                       <p className="text-xs text-gray-500 mt-1">
-                        {isReturningAdmission
-                          ? 'This resident already has an admission on record. Choose how this one is classified.'
-                          : editingId
-                            ? 'Kept from the admission on record.'
-                            : 'First admission for this resident.'}
+                        {isReturningFromAbscond
+                          ? 'This resident absconded from a previous admission. This new admission is automatically classified as Returning Resident (Abscon/Tumakas).'
+                          : isReturningAdmission
+                            ? 'This resident already has an admission on record. Choose how this one is classified.'
+                            : editingId
+                              ? 'Kept from the admission on record.'
+                              : 'First admission for this resident.'}
                       </p>
 
                     </div>
@@ -4558,8 +4542,11 @@ export function ChildRecords() {
 
                   {/* Only a returning admission has a choice to make: the two
                       returning classifications are indistinguishable from the
-                      data, so one of them has to be picked by hand. */}
-                  {isReturningAdmission && (
+                      data, so one of them has to be picked by hand. A resident
+                      returning from Abscond is not ambiguous — the record
+                      already says why they left — so no picker is shown and
+                      nothing here can override the forced classification. */}
+                  {isReturningAdmission && !isReturningFromAbscond && (
                     <div className="mt-4 space-y-2">
                       <p className="text-xs font-semibold text-gray-500">
                         Classify this admission
@@ -4804,6 +4791,12 @@ export function ChildRecords() {
                       <Badge className="bg-blue-100 text-blue-700 hover:bg-blue-100">
                         Returning Resident
                       </Badge>
+
+                      {duplicateChild.status === 'Absconded' && (
+                        <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100">
+                          Absconded — re-admitting
+                        </Badge>
+                      )}
 
                     </div>
 
@@ -5115,6 +5108,7 @@ export function ChildRecords() {
             'All',
             'Active',
             'Discharged',
+            'Absconded',
           ] as const
         ).map(
           (status) => {
@@ -5126,7 +5120,10 @@ export function ChildRecords() {
                 : status ===
                     'Active'
                   ? activeCount
-                  : dischargedCount;
+                  : status ===
+                      'Absconded'
+                    ? abscondedCount
+                    : dischargedCount;
 
             const active =
               statusFilter ===
@@ -5146,6 +5143,9 @@ export function ChildRecords() {
 
                   active
                     ? status ===
+                      'Absconded'
+                      ? 'bg-orange-600 border-orange-600 text-white'
+                      : status ===
                       'Discharged'
                       ? 'bg-emerald-600 border-emerald-600 text-white'
                       : status ===
@@ -5156,7 +5156,7 @@ export function ChildRecords() {
                 ].join(' ')}
               >
                 {
-                  status
+                  status === 'Absconded' ? 'Abscond' : status
                 }
 
                 <span
@@ -5257,6 +5257,13 @@ export function ChildRecords() {
                           'Discharged' && (
                           <Badge className="bg-emerald-500/20 text-emerald-300 border-none text-[10px] uppercase font-bold">
                             Case Closed
+                          </Badge>
+                        )}
+
+                        {child.status ===
+                          'Absconded' && (
+                          <Badge className="bg-orange-500/25 text-orange-200 border-none text-[10px] uppercase font-bold">
+                            Absconded
                           </Badge>
                         )}
 

@@ -203,6 +203,9 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
   const { user } = useAuth();
   const { addDocument, deleteDocument, documents: allDocuments, updateChild, children, generateReport, refreshData } = useData();
   const isCenterHead = user?.role === 'centerhead';
+  // An absconded resident's Phase Timeline is frozen: shown as it stood, with
+  // every action disabled (the API refuses them too). Nothing is removed.
+  const isAbsconded = children.find(c => c.id === residentId)?.status === 'Absconded';
   /**
    * Who may force a phase advance past requirements that are still outstanding.
    *
@@ -1254,6 +1257,15 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
 
   return (
     <div className="space-y-6 pb-4">
+      {isAbsconded && (
+        <div className="rounded-xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-800" data-phase-frozen>
+          <p className="font-bold">Phase Timeline frozen — resident absconded</p>
+          <p className="text-xs mt-0.5">All phase progress and records are kept and shown as they stood. No phase can be advanced and no new phase documents can be uploaded.</p>
+        </div>
+      )}
+      {/* A disabled fieldset turns every button and field inside the timeline
+          view-only while the resident is absconded; the content stays visible. */}
+      <fieldset disabled={isAbsconded} className="m-0 min-w-0 border-0 p-0 space-y-6">
       {/* Timeline Card */}
       <Card className="shadow-sm border border-gray-200 bg-white">
         <CardHeader className="border-b border-gray-200 pb-4 bg-gradient-to-r from-gray-50 to-white">
@@ -2312,6 +2324,7 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
           )}
         </CardContent>
       </Card>
+      </fieldset>
     </div>
   );
 }

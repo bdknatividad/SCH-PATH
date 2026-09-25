@@ -13,6 +13,7 @@ import { useData, Child } from '@/app/state/DataContext';
 import { useAuth } from '@/app/state/AuthContext';
 import { usePermissions } from '@/app/hooks/usePermissions';
 import { describeError, request } from '@/services/api';
+import { TriStatistics } from '@/app/components/TriStatistics';
 import { useSystemDialog } from '@/app/components/SystemDialog';
 import { triTrend, ratingForPoints } from '@/utils/triRating';
 import triLayout from '@/shared/triLayout.json';
@@ -43,6 +44,12 @@ interface TriRecord {
   houseparentSignature?: string | null;
   houseparentSignedBy?: string | null;
   houseparentSignedAt?: string | null;
+  /**
+   * The rest of the page-8 block: the Houseparent's typed name, the typed name +
+   * E-Signature of the Administrative Officer and SWO I / Case Manager, and the
+   * E-Signatures of MARICOR C. NAVARRO and NICOLAS Q. REGALARIO.
+   */
+  signatories?: TriSignatories | string | null;
   reviewedBy?: string | null; reviewedAt?: string | null;
   finalizedBy?: string | null; finalizedAt?: string | null;
   reviewNotes?: string | null;
@@ -375,12 +382,63 @@ const TRI_OFFENSE_POS = triLayout.offensePos;
 const TRI_HOUSEPARENT_SIGNATURE_BOX = triLayout.houseparentSignatureBox;
 const TRI_HOUSEPARENT_NAME_POS = triLayout.houseparentNamePos;
 
+type TriSignatorySlot = 'houseparent' | 'administrativeOfficer' | 'caseManager' | 'centerHead' | 'sectionChief';
+interface TriSignatoryEntry { name?: string | null; signature?: string | null; signedBy?: string | null; signedAt?: string | null }
+type TriSignatories = Partial<Record<TriSignatorySlot, TriSignatoryEntry>>;
+
+/**
+ * The five signature lines of the page-8 "Assessed by" block, in form order.
+ * `hasName` lines get a typed-name text holder under the E-Signature; the last two
+ * carry a pre-printed name and get the E-Signature above it.
+ */
+const TRI_SIGNATORIES: { slot: TriSignatorySlot; title: string; hasName: boolean; printedName?: string }[] = [
+  { slot: 'houseparent', title: 'Houseparent', hasName: true },
+  { slot: 'administrativeOfficer', title: 'Administrative Officer', hasName: true },
+  { slot: 'caseManager', title: 'SWO I / Case Manager', hasName: true },
+  { slot: 'centerHead', title: 'SWO II / Center Head', hasName: false, printedName: 'MARICOR C. NAVARRO, RSW, MSSW' },
+  { slot: 'sectionChief', title: 'SWO III / Section Chief', hasName: false, printedName: 'NICOLAS Q. REGALARIO, RSW, MSSW' },
+];
+
+/** Measured geometry of each line, shared with the backend PDF writer. */
+const TRI_SIGNATORY_LAYOUT = triLayout.signatories as Record<TriSignatorySlot, {
+  page: number; x: number; width: number; signatureY: number; signatureHeight: number; nameY?: number; nameSize?: number;
+}>;
+
+function signatoriesOf(record: TriRecord | null | undefined): TriSignatories {
+  const raw = record?.signatories;
+  if (!raw) return {};
+  if (typeof raw === 'string') { try { return JSON.parse(raw) || {}; } catch { return {}; } }
+  return raw;
+}
+
+/** The E-Signature saved on a line, or ''. */
+function signatorySignature(record: TriRecord | null | undefined, slot: TriSignatorySlot): string {
+  if (!record) return '';
+  return String((slot === 'houseparent' ? record.houseparentSignature : signatoriesOf(record)[slot]?.signature) || '');
+}
+
+/** The name typed into a line's text holder, or ''. */
+function signatoryTypedName(record: TriRecord | null | undefined, slot: TriSignatorySlot): string {
+  return String(signatoriesOf(record)[slot]?.name || '').trim();
+}
+
 /** Only a well-formed image data URL is safe to inline in the print template. */
 const SIGNATURE_DATA_URL = /^data:image\/(png|jpeg|jpg);base64,[A-Za-z0-9+/=]+$/i;
 
-/** The name that belongs on the Houseparent line: whoever signed, else whoever submitted. */
+/**
+ * The name printed on the Houseparent line: the name typed into its text holder,
+ * else (for a TRI signed before the text holder existed) whoever signed, else
+ * whoever submitted.
+ */
 function houseparentLineName(record: TriRecord): string {
-  return String(record.houseparentSignedBy || record.submittedBy || '').trim();
+  return signatoryTypedName(record, 'houseparent')
+    || String(record.houseparentSignedBy || record.submittedBy || '').trim();
+}
+
+/** The name printed on any line ('' for the two pre-printed lines). */
+function signatoryLineName(record: TriRecord, slot: TriSignatorySlot): string {
+  if (slot === 'houseparent') return houseparentLineName(record);
+  return TRI_SIGNATORIES.find(s => s.slot === slot)?.hasName ? signatoryTypedName(record, slot) : '';
 }
 
 function drawPdfText(page: any, text: any, x: number, y: number, size = 9, font?: any) {
@@ -389,51 +447,53 @@ function drawPdfText(page: any, text: any, x: number, y: number, size = 9, font?
 }
 
 /**
- * Stamps the Houseparent's printed name and drawn signature onto the page-8
- * "Houseparent" line of an exported PDF.
+ * Stamps every page-8 signature line onto an exported PDF: the E-Signature on top
+ * and, for the Houseparent, Administrative Officer and SWO I / Case Manager, the
+ * typed name below it on the rule; for MARICOR C. NAVARRO and NICOLAS Q.
+ * REGALARIO, the E-Signature above their pre-printed name.
  *
  * The export re-draws the answers onto the same official template the server fills
- * in when it publishes the approved copy, so it has to carry the same signature.
- * Without this, exporting a signed TRI produced a document with a blank signature
- * line — which is exactly what a Center Head sees when they export the Houseparent's
- * work, and why the signature appeared to be missing from the download.
+ * in when it publishes the approved copy, so it has to carry the same signatures in
+ * the same places (both read `triLayout.json`).
  *
- * An unsigned or undecodable signature is not an error: an unsigned TRI is still a
- * valid export, so the line is simply left blank.
+ * An unsigned or undecodable signature is not an error: that line is simply left
+ * blank.
  */
-async function drawTriHouseparentSignature(pdf: any, pages: any[], record: TriRecord, font: any) {
-  const name = houseparentLineName(record);
-  const namePos = TRI_HOUSEPARENT_NAME_POS;
-  const namePage = pages[namePos.page];
-  if (namePage && name) {
-    let size = namePos.size;
-    while (size > 4 && font.widthOfTextAtSize(name, size) > namePos.width) size -= 0.25;
-    namePage.drawText(name, { x: namePos.x, y: namePos.y, size, font, color: rgb(0.08, 0.08, 0.08) });
-  }
+async function drawTriSignatures(pdf: any, pages: any[], record: TriRecord, font: any) {
+  let signed = 0;
+  for (const { slot, hasName } of TRI_SIGNATORIES) {
+    const geometry = slot === 'houseparent'
+      ? { page: TRI_HOUSEPARENT_SIGNATURE_BOX.page, x: TRI_HOUSEPARENT_SIGNATURE_BOX.x, width: TRI_HOUSEPARENT_SIGNATURE_BOX.width, signatureY: TRI_HOUSEPARENT_SIGNATURE_BOX.y, signatureHeight: TRI_HOUSEPARENT_SIGNATURE_BOX.height, nameY: TRI_HOUSEPARENT_NAME_POS.y, nameSize: TRI_HOUSEPARENT_NAME_POS.size }
+      : TRI_SIGNATORY_LAYOUT[slot];
+    const page = pages[geometry.page];
+    if (!page) continue;
 
-  const dataUrl = String(record.houseparentSignature || '');
-  const match = dataUrl.match(/^data:image\/(png|jpeg|jpg);base64,/i);
-  const box = TRI_HOUSEPARENT_SIGNATURE_BOX;
-  const page = pages[box.page];
-  if (!match || !page) return false;
+    const name = hasName ? signatoryLineName(record, slot) : '';
+    if (name && geometry.nameY != null) {
+      let size = geometry.nameSize || 8;
+      while (size > 4 && font.widthOfTextAtSize(name, size) > geometry.width) size -= 0.25;
+      page.drawText(name, { x: geometry.x, y: geometry.nameY, size, font, color: rgb(0.08, 0.08, 0.08) });
+    }
 
-  try {
-    const image = match[1].toLowerCase() === 'png'
-      ? await pdf.embedPng(dataUrl)
-      : await pdf.embedJpg(dataUrl);
-    const scale = Math.min(box.width / image.width, box.height / image.height);
-    const width = image.width * scale;
-    const height = image.height * scale;
-    page.drawImage(image, {
-      x: box.x + (box.width - width) / 2,
-      y: box.y + (box.height - height) / 2,
-      width,
-      height,
-    });
-    return true;
-  } catch {
-    return false;
+    const dataUrl = signatorySignature(record, slot);
+    const match = dataUrl.match(/^data:image\/(png|jpeg|jpg);base64,/i);
+    if (!match) continue;
+    try {
+      const image = match[1].toLowerCase() === 'png'
+        ? await pdf.embedPng(dataUrl)
+        : await pdf.embedJpg(dataUrl);
+      const scale = Math.min(geometry.width / image.width, geometry.signatureHeight / image.height);
+      const width = image.width * scale;
+      const height = image.height * scale;
+      // Centred on the line and resting on the bottom of the band, so the
+      // signature sits directly above the name / printed name.
+      page.drawImage(image, { x: geometry.x + (geometry.width - width) / 2, y: geometry.signatureY, width, height });
+      signed += 1;
+    } catch {
+      // An unreadable image leaves this one line blank; the export continues.
+    }
   }
+  return signed;
 }
 
 /**
@@ -493,9 +553,8 @@ async function openFormalPdfReport(record: TriRecord, child: any, onError?: (mes
     drawPdfText(summary, exportedRating, 482, 189, 9, bold);
     drawPdfText(summary, record.previousRating || '', 482, 168, 9, font);
 
-    // The Houseparent's own line is the one that is ever filled in. Stamped here as
-    // well as in the published copy so an export is not missing the signature.
-    await drawTriHouseparentSignature(pdf, pages, record, bold);
+    // All five page-8 signature lines, exactly as the published copy stamps them.
+    await drawTriSignatures(pdf, pages, record, bold);
 
     const bytes = await pdf.save();
     const safeBytes = new Uint8Array(bytes.byteLength);
@@ -525,6 +584,40 @@ function pdfPercentTop(centerY: number, height: number, offsetPx = 0) {
   return `calc(${((936 - centerY - height / 2) / 936) * 100}% + ${offsetPx}px)`;
 }
 
+/**
+ * The name text holder on a page-8 signature line. Saved when the field loses
+ * focus (or on Enter), and only when the text actually changed.
+ */
+function TriNameField({ label, value, placeholder, disabled, onCommit }: {
+  label: string;
+  value: string;
+  placeholder: string;
+  disabled: boolean;
+  onCommit: (value: string) => void;
+}) {
+  const [draft, setDraft] = useState(value);
+  useEffect(() => { setDraft(value); }, [value]);
+  const commit = () => {
+    const next = draft.trim();
+    if (next !== value.trim()) onCommit(next);
+  };
+  return (
+    <input
+      type="text"
+      aria-label={label}
+      value={draft}
+      placeholder={placeholder}
+      disabled={disabled}
+      maxLength={150}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLInputElement).blur(); } }}
+      className="h-full w-full rounded-sm border border-dashed border-yellow-500/70 bg-yellow-50/70 px-0.5 font-bold leading-none text-black placeholder:font-normal placeholder:text-gray-400 focus:border-solid focus:outline-none"
+      style={{ fontSize: 'clamp(6px, 1vw, 11px)' }}
+    />
+  );
+}
+
 function OfficialTriEditor({
   form,
   record,
@@ -545,8 +638,10 @@ function OfficialTriEditor({
   houseparentName,
   houseparentSignature,
   canSignHouseparent,
+  canSignReviewerLines,
   signatureSaving,
   onSaveSignature,
+  onSaveSignatory,
 }: {
   form: any;
   record: TriRecord | null;
@@ -572,8 +667,11 @@ function OfficialTriEditor({
   houseparentName: string;
   houseparentSignature: string;
   canSignHouseparent: boolean;
+  /** The Administrative Officer, SWO I / Case Manager, Maricor and Nicolas lines. */
+  canSignReviewerLines: boolean;
   signatureSaving: boolean;
   onSaveSignature: (value: string) => void;
+  onSaveSignatory: (slot: TriSignatorySlot, patch: { name?: string; signature?: string }) => void;
 }) {
   const pdfHostRef = useRef<HTMLDivElement | null>(null);
   const [pdfRenderWidth, setPdfRenderWidth] = useState(900);
@@ -743,58 +841,101 @@ function OfficialTriEditor({
           <div className="relative w-full overflow-hidden bg-white shadow-lg" style={{ aspectRatio: '612 / 936' }}>
             <PdfPage pageNumber={8} width={pdfRenderWidth} renderTextLayer={false} renderAnnotationLayer={false} className="absolute inset-0 h-full w-full" />
             {/*
-              Page 8 is where the official form asks the Houseparent to sign, in the
-              "Assessed by" block under "The Rehabilitation Team together with the
-              resident:". The printed name is filled in automatically — it is never
-              typed — and the drawing is captured through the shared popup pad, the
-              same surface every other form in the system uses.
+              Page 8 is the official form's "Assessed by" block. Every line is laid
+              out the same way, top to bottom: E-Signature (draw with the cursor or
+              upload an image, through the shared popup pad), then the name text
+              holder on the rule, then the printed position. MARICOR C. NAVARRO and
+              NICOLAS Q. REGALARIO have their names pre-printed, so their lines get
+              the E-Signature above the printed name only.
 
-              Only the Houseparent gets the pad. A Center Head or Social Worker
-              reviews the submitted TRI and either approves or returns it; writing on
-              the Houseparent's line is not part of that, so for them this stays a
-              read-only record of what was signed.
-
-              The two boxes mirror the generator's measured constants in
-              `backend/src/utils/triReportPdf.js`: the name sits in the 797.5–808.6
-              band (a baseline of 800, so its box centres on 803) and the pad fills
-              the 774–796 signature box. Move one without the other and the on-screen
-              form stops matching the exported PDF.
+              Who writes where: the Houseparent fills in only the Houseparent line; a
+              reviewer (Social Worker, Center Head, Admin) fills in the other four.
+              Everything locks once the TRI is finalized. The boxes mirror
+              triLayout.json, which the backend PDF writer reads too, so the on-screen
+              form matches the exported and published PDF.
             */}
-            {houseparentName && (
-              <span
-                aria-label="Houseparent name"
-                data-tri-houseparent-name={houseparentName}
-                className="pointer-events-none absolute z-10 truncate font-bold leading-none text-black"
-                style={{
-                  left: pdfPercentX(72.02),
-                  top: pdfPercentTop(803, 11),
-                  width: pdfPercentX(90.24),
-                  height: `${11 / 936 * 100}%`,
-                  fontSize: 'clamp(6px, 1vw, 11px)',
-                }}
-              >
-                {houseparentName}
-              </span>
-            )}
-            {canSignHouseparent && (
-              <div
-                className="absolute z-20"
-                style={{
-                  left: pdfPercentX(72.02),
-                  top: pdfPercentTop(785, 22),
-                  width: pdfPercentX(90.24),
-                  height: `${22 / 936 * 100}%`,
-                }}
-              >
-                <SignaturePadModal
-                  label="Houseparent signature"
-                  value={houseparentSignature}
-                  disabled={signatureSaving || record?.status === 'Finalized'}
-                  onChange={onSaveSignature}
-                  hint={record?.status === 'Finalized' ? 'Signed' : houseparentSignature ? 'Change' : 'Sign here'}
-                />
-              </div>
-            )}
+            {TRI_SIGNATORIES.map(({ slot, title, hasName }) => {
+              const geometry = TRI_SIGNATORY_LAYOUT[slot];
+              const finalized = record?.status === 'Finalized';
+              const mayWrite = !finalized && (slot === 'houseparent' ? canSignHouseparent : canSignReviewerLines);
+              // The Houseparent's name text holder is always offered on the
+              // Houseparent line, to the Houseparent and to a reviewer alike, so
+              // the name can be entered whoever is completing the page. The
+              // Houseparent's E-Signature itself stays theirs alone.
+              const mayWriteName = slot === 'houseparent'
+                ? !finalized && (canSignHouseparent || canSignReviewerLines)
+                : mayWrite;
+              const signature = slot === 'houseparent' ? houseparentSignature : signatorySignature(record, slot);
+              const typedName = signatoryTypedName(record, slot);
+              const shownName = slot === 'houseparent' ? (typedName || houseparentName) : typedName;
+              return (
+                <React.Fragment key={slot}>
+                  <div
+                    className="absolute z-20"
+                    data-tri-signature-slot={slot}
+                    style={{
+                      left: pdfPercentX(geometry.x),
+                      top: pdfPercentTop(geometry.signatureY + geometry.signatureHeight / 2, geometry.signatureHeight),
+                      width: pdfPercentX(geometry.width),
+                      height: `${geometry.signatureHeight / 936 * 100}%`,
+                    }}
+                  >
+                    {mayWrite ? (
+                      <SignaturePadModal
+                        label={`${title} signature`}
+                        value={signature}
+                        disabled={signatureSaving || finalized}
+                        onChange={(value) => (slot === 'houseparent' ? onSaveSignature(value) : onSaveSignatory(slot, { signature: value }))}
+                        hint={signature ? 'Change' : 'E-Signature / Upload'}
+                      />
+                    ) : signature ? (
+                      <img src={signature} alt={`${title} signature`} className="h-full w-full object-contain object-bottom" />
+                    ) : slot === 'houseparent' && !finalized ? (
+                      // Keeps the Houseparent column laid out like the others
+                      // (E-Signature above the name) for a reviewer, who cannot
+                      // sign on the Houseparent's behalf.
+                      <div
+                        className="flex h-full w-full items-center justify-center rounded-md border border-dashed border-gray-300 bg-white/60 px-1 text-center leading-tight text-gray-400"
+                        style={{ fontSize: 'clamp(5px, 0.8vw, 9px)' }}
+                        title="The Houseparent signs this line from their own account"
+                      >
+                        Houseparent E-Signature
+                      </div>
+                    ) : null}
+                  </div>
+                  {hasName && geometry.nameY != null && (
+                    <div
+                      className="absolute z-20"
+                      style={{
+                        left: pdfPercentX(geometry.x),
+                        top: pdfPercentTop(geometry.nameY + 3, 11),
+                        width: pdfPercentX(geometry.width),
+                        height: `${11 / 936 * 100}%`,
+                      }}
+                    >
+                      {mayWriteName ? (
+                        <TriNameField
+                          label={`${title} name`}
+                          value={typedName}
+                          placeholder={slot === 'houseparent' && houseparentName ? houseparentName : 'Type name'}
+                          disabled={signatureSaving}
+                          onCommit={(value) => onSaveSignatory(slot, { name: value })}
+                        />
+                      ) : shownName ? (
+                        <span
+                          aria-label={`${title} name`}
+                          data-tri-signatory-name={slot}
+                          className="pointer-events-none block truncate font-bold leading-none text-black"
+                          style={{ fontSize: 'clamp(6px, 1vw, 11px)' }}
+                        >
+                          {shownName}
+                        </span>
+                      ) : null}
+                    </div>
+                  )}
+                </React.Fragment>
+              );
+            })}
           </div>
         </PdfDocument>
       </div>
@@ -921,14 +1062,22 @@ function openPrintReport(record: TriRecord, child: any, onError?: (message: stri
       }).join('')
     : '<tr><td colspan="3" class="sm">No offenses recorded for this period.</td></tr>';
 
-  // The signature block is part of the form, so it prints here too. The data URL is
-  // inlined only after the strict shape check above — nothing else can reach the
-  // attribute.
-  const signatureDataUrl = String(record.houseparentSignature || '');
-  const signatureImg = SIGNATURE_DATA_URL.test(signatureDataUrl)
-    ? `<img src="${signatureDataUrl}" alt="Houseparent signature" />`
-    : '';
-  const signatureName = houseparentLineName(record);
+  // The signature block is part of the form, so it prints here too, in the form's
+  // order: E-Signature, then the typed (or pre-printed) name, then the rule and
+  // position. Each data URL is inlined only after the strict shape check — nothing
+  // else can reach the attribute.
+  const signatureBlocks = TRI_SIGNATORIES.map(({ slot, title, printedName }) => {
+    const signatureDataUrl = signatorySignature(record, slot);
+    const signatureImg = SIGNATURE_DATA_URL.test(signatureDataUrl)
+      ? `<img src="${signatureDataUrl}" alt="${escapeHtml(title)} signature" />`
+      : '<div class="blank"></div>';
+    const name = printedName || signatoryLineName(record, slot);
+    return `<div class="signed">
+    ${signatureImg}
+    <div class="name">${name ? escapeHtml(name) : '&nbsp;'}</div>
+    <div class="rule">${escapeHtml(title)}</div>
+  </div>`;
+  }).join('\n  ');
 
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>TRI ${escapeHtml(getPeriodLabel(record.reportingYear, record.reportingMonth))}</title>
 <style>
@@ -951,11 +1100,11 @@ function openPrintReport(record: TriRecord, child: any, onError?: (message: stri
   .totals div { flex: 1; border: 1px solid #ccc; padding: 6px; text-align: center; }
   .totals b { display: block; font-size: 16px; }
   .rating { margin-top: 8px; text-align: center; border: 2px solid #2F3E46; padding: 8px; font-size: 14px; font-weight: 700; text-transform: uppercase; }
-  .sign { display: flex; gap: 20px; margin-top: 26px; align-items: flex-end; }
-  .sign > div { flex: 1; }
+  .sign { display: grid; grid-template-columns: repeat(3, 1fr); gap: 26px 20px; margin-top: 26px; align-items: end; }
   .sign .rule { border-top: 1px solid #2F3E46; padding-top: 4px; font-size: 9px; text-align: center; text-transform: uppercase; }
-  .sign .signed img { display: block; margin: 0 auto 2px; height: 26px; max-width: 100%; }
-  .sign .signed .name { text-align: center; font-size: 9px; font-weight: 600; }
+  .sign .signed img { display: block; margin: 0 auto 2px; height: 30px; max-width: 100%; object-fit: contain; }
+  .sign .signed .blank { height: 32px; }
+  .sign .signed .name { text-align: center; font-size: 9px; font-weight: 600; min-height: 12px; }
   @media print { body { margin: 10px; } }
 </style></head><body>
 <div class="head">
@@ -986,14 +1135,7 @@ ${sectionsHtml}
   <div class="sm" style="text-align:center;margin-top:6px">Previous Adjectival Rating: ${escapeHtml(record.previousRating || '—')}</div>
 </div>
 <div class="sign">
-  <div class="signed">
-    ${signatureImg}
-    ${signatureName ? `<div class="name">${escapeHtml(signatureName)}</div>` : ''}
-    <div class="rule">Houseparent</div>
-  </div>
-  <div><div class="rule">Administrative Officer</div></div>
-  <div><div class="rule">SWO I / Case Manager</div></div>
-  <div><div class="rule">SWO II / Center Head</div></div>
+  ${signatureBlocks}
 </div>
 </body></html>`;
 
@@ -1055,12 +1197,10 @@ export function Tri() {
   const [signatureSaved, setSignatureSaved] = useState<string | null>(null);
 
   /**
-   * The name that goes on the page-8 "Houseparent" line.
-   *
-   * Filled in automatically — the Houseparent never types it. Prefers whoever
-   * actually signed, then whoever submitted (the TRI is submitted by the
-   * Houseparent), then the signed-in Houseparent for a record not yet submitted, so
-   * the line is never blank while they are still working on the form.
+   * The fallback name for the page-8 "Houseparent" line, used as the text
+   * holder's placeholder and printed only when no name has been typed in.
+   * Prefers whoever actually signed, then whoever submitted, then the signed-in
+   * Houseparent for a record not yet submitted.
    */
   const houseparentName = selectedRecord?.houseparentSignedBy
     || selectedRecord?.submittedBy
@@ -1501,6 +1641,36 @@ export function Tri() {
     }
   }
 
+  /**
+   * Saves a typed name or an E-Signature on one of the page-8 lines other than the
+   * Houseparent's own signature (which keeps `handleSaveSignature` and its
+   * submit-on-sign behaviour): the Houseparent's name, and the Administrative
+   * Officer, SWO I / Case Manager, MARICOR C. NAVARRO and NICOLAS Q. REGALARIO
+   * lines. The server decides who may write each line.
+   */
+  async function handleSaveSignatory(slot: TriSignatorySlot, patch: { name?: string; signature?: string }) {
+    const clearing = (patch.name === undefined || patch.name === '') && (patch.signature === undefined || patch.signature === '');
+    if (clearing && !selectedRecord) return;
+    setSignatureSaving(true);
+    setError(null);
+    try {
+      const target = await ensureRecordForSignature();
+      if (!target) return;
+      const result = await request<{ success: boolean; data: TriRecord; message?: string }>(
+        '/tri/' + target.id + '/signatories',
+        { method: 'PUT', body: JSON.stringify({ slot, ...patch }) },
+      );
+      const updated = result.data;
+      setRecords(prev => prev.map(r => r.id === updated.id ? updated : r));
+      setSelectedRecord(updated);
+      setSignatureSaved(result.message || 'Saved.');
+    } catch (err: any) {
+      setError(err?.message || 'Failed to save the signature line');
+    } finally {
+      setSignatureSaving(false);
+    }
+  }
+
   // Creates the record if needed, then submits. Previously this returned early
   // when no record existed, which made "Save & Submit" dead for new records.
   async function handleSubmit() {
@@ -1713,7 +1883,7 @@ export function Tri() {
 
       {/* CASE LOAD — restored from the original TRI workflow */}
       {tabs.length > 0 && (
-        <div className="flex gap-1 border-b border-gray-200 overflow-x-auto">
+        <div className="flex gap-1 border-b border-gray-200 overflow-x-auto overflow-y-hidden">
           {tabs.map(tab => (
             <button key={tab.key} type="button" onClick={() => setActiveTab(tab.key)} className={`shrink-0 whitespace-nowrap border-b-2 px-4 py-2 text-sm font-semibold transition-colors ${activeTab === tab.key ? 'border-[#FFD100] text-[#2F3E46]' : 'border-transparent text-gray-400 hover:text-gray-600'}`}>{tab.label}</button>
           ))}
@@ -1726,6 +1896,11 @@ export function Tri() {
         <AnecdotalReports />
       ) : (
       <>
+
+      {/* TRI Statistics — residents per TRI status, from the finalized TRI
+          records. `records` changes whenever a TRI is saved, submitted or
+          finalized here, which re-reads the counts. */}
+      {canReview && <TriStatistics refreshKey={records} />}
 
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div className="relative w-full lg:max-w-sm">
@@ -1978,8 +2153,10 @@ export function Tri() {
             houseparentName={houseparentName}
             houseparentSignature={selectedRecord?.houseparentSignature || ''}
             canSignHouseparent={isHouseparent}
+            canSignReviewerLines={canReview}
             signatureSaving={signatureSaving}
             onSaveSignature={handleSaveSignature}
+            onSaveSignatory={handleSaveSignatory}
           />
 
 

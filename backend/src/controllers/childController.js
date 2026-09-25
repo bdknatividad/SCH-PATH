@@ -16,6 +16,7 @@ const { isManager } = require('../utils/authorization');
 const notifications = require('../services/notificationService');
 const { buildAccessSnapshot, hasModuleAccess, hasSubModuleAccess, can } = require('../config/rbac');
 const { activeAdmissionIdFor } = require('../services/admissionLink');
+const { ABSCONDED_STATUS, assertResidentNotAbsconded } = require('../utils/abscond');
 
 const baseController = createController('children');
 
@@ -512,6 +513,14 @@ async function update(req, res, next) {
     if (!await canModifyResident(req.user, req.params.id)) {
       throw new ApiError(403, 'You are not authorized to update this resident record');
     }
+    // An absconded resident's record is view-only; marking a resident Absconded
+    // goes through POST /children/:id/abscond, never a plain edit.
+    await assertResidentNotAbsconded(req.params.id, 'edited');
+    if (req.body && (req.body.status === ABSCONDED_STATUS || 'abscondedAt' in req.body || 'abscondedBy' in req.body)) {
+      delete req.body.abscondedAt;
+      delete req.body.abscondedBy;
+      if (req.body.status === ABSCONDED_STATUS) delete req.body.status;
+    }
 
     // Recalculate age if birthDate changed
     if (req.body.birthDate) {
@@ -928,7 +937,100 @@ async function togglePsychAssessment(req, res, next) {
   }
 }
 
+/**
+ * POST /api/children/:id/abscond — mark a resident Absconded.
+ *
+ * Center Head and Social Worker (and Admin, the Center Head's system account).
+ * Every record the resident has — phase progress, admissions, documents,
+ * violations, health — is kept exactly as it is, and from here the Phase
+ * Timeline is frozen and the record is view-only (see utils/abscond.js).
+ *
+ * The one thing that does change beyond the resident's own status is their
+ * current admission: it is closed in the same transaction, the same way a
+ * discharge closes one (see `update`, below). Without this the resident would
+ * still be carrying an 'Active' admission while also being Absconded — they
+ * would keep showing up wherever "active admission" is the test, and the
+ * Admission Slip would refuse to admit them again ("This resident already
+ * has an active admission"). Closing it here, immediately, is what lets a
+ * later admission be a *new* admission (own Phase Timeline, documents,
+ * assignments) rather than a reopening of this one. The admission row itself
+ * is never deleted or rewritten — only `status` and `closedDate` change — so
+ * it stays fully intact as historical/read-only data (see
+ * `admissionController.update`: only the current 'Active' admission can be
+ * edited).
+ */
+async function abscond(req, res, next) {
+  let connection;
+  try {
+    const role = String(req.user?.role || '').toLowerCase().replace(/[\s_-]+/g, '');
+    if (!['centerhead', 'admin', 'socialworker'].includes(role)) {
+      throw new ApiError(403, 'Only the Center Head or a Social Worker can mark a resident as absconded.');
+    }
+    const [rows] = await pool.query('SELECT id, name, status FROM children WHERE id = ? LIMIT 1', [req.params.id]);
+    if (!rows.length) throw new ApiError(404, 'Resident not found');
+    const child = rows[0];
+    if (child.status === ABSCONDED_STATUS) throw new ApiError(409, 'This resident is already marked as absconded.');
+    if (child.status === 'Discharged') throw new ApiError(409, 'A discharged resident cannot be marked as absconded.');
+
+    const today = new Date().toISOString().split('T')[0];
+    const actor = req.user?.username || 'System';
+
+    connection = await pool.getConnection();
+    await connection.beginTransaction();
+
+    await connection.query(
+      'UPDATE children SET status = ?, abscondedAt = NOW(), abscondedBy = ?, modifiedBy = ? WHERE id = ?',
+      [ABSCONDED_STATUS, actor, actor, child.id]
+    );
+
+    // Close the admission that was active when the resident absconded. Scoped
+    // to 'Active' so an admission that was somehow already closed is left
+    // untouched, and so only one row is ever affected — a resident has at
+    // most one active admission at a time.
+    await connection.query(
+      `UPDATE admissions
+          SET status = 'Closed',
+              closedDate = ?,
+              modifiedBy = ?
+        WHERE residentId = ?
+          AND status = 'Active'`,
+      [today, actor, child.id]
+    );
+
+    await connection.commit();
+
+    try {
+      const managers = await notifications.usersWithAnyRole(['centerhead', 'socialworker']);
+      if (managers.length) {
+        await notifications.notifyUsers(managers.map((u) => u.id), {
+          type: 'Resident Absconded',
+          title: `Resident absconded — ${child.name}`,
+          message: `${req.user?.username || 'Staff'} marked ${child.name} as absconded. The record is now view-only and the Phase Timeline is frozen.`,
+          priority: 'High',
+          residentId: child.id,
+          relatedRecordType: 'children',
+          relatedRecordId: child.id,
+          actorUsername: req.user?.username || null,
+        });
+      }
+    } catch (notifyErr) {
+      console.error('[ChildController] Abscond notification failed (non-fatal):', notifyErr.message);
+    }
+
+    const [updated] = await pool.query('SELECT * FROM children WHERE id = ?', [child.id]);
+    res.json({ success: true, data: mapRow('children', updated[0]), message: `${child.name} is marked as absconded.` });
+  } catch (error) {
+    if (connection) {
+      try { await connection.rollback(); } catch { /* connection already gone */ }
+    }
+    next(error);
+  } finally {
+    if (connection) connection.release();
+  }
+}
+
 module.exports = {
+  abscond,
   create,
   getById,
   getAll,
