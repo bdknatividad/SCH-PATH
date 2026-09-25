@@ -4,8 +4,8 @@
 `bdknatividad/SCH-PATH`, branch `master`. Live pair: `sch-path-production.up.railway.app` (API) +
 `sch-path.vercel.app`. **History lives in the daily logs; this file is rules only.** No reachable MySQL
 here — verify on the live pair: the **served artifact** (a lazy route's fix lands in a *route chunk*,
-not the entry chunk), the **real UI** (Playwright, real login, assert rendered output not HTTP 200s),
-the **API** with a token.
+not the entry chunk), the **real UI** (Playwright, real login), the **API** with a token. **Keep this
+file under ~10 KB — the injection budget truncates it silently.**
 
 ## Conventions that are easy to break
 
@@ -68,10 +68,9 @@ from `toISOString()`** — use `getCurrentPHDate()` / `getCurrentPHDateTime()` (
   and the logo from the **frontend tree** at runtime. `COPY backend/src` is a **directory** copy, but the
   frontend tree is copied file-by-file — **every frontend file the backend resolves at request time
   needs a `COPY` line, and the build will not tell you**.
-- **A publisher with a non-fatal catch needs a retry path** — TRI `finalize` swallows a render failure so
-  an approval is never rolled back, so `publishMissingTriDocuments()` (at boot) finishes the job; the
-  Anecdotal Report publishes *before* flipping status instead. A publish fault must be **reported**, not
-  a silent `documentId: null`.
+- **A publisher with a non-fatal catch needs a retry path** — TRI `finalize` swallows a render failure,
+  so `publishMissingTriDocuments()` (at boot) finishes the job; the Anecdotal Report publishes *before*
+  flipping status. A publish fault must be **reported**, not a silent `documentId: null`.
 - `frontend/vercel.json`'s SPA rewrite excludes a whitelist of root paths; a new file in
   `frontend/public/` **must** be added or it is served as `index.html`.
 - **`/pdf.worker.mjs` must not be `immutable`, and its URL must carry a version query.**
@@ -104,8 +103,8 @@ Roles: `centerhead` (fullAccess), `admin`, `nurse`, `psychologist`, `educator`, 
   `nurse`/`educator`/`houseparent`, so a `[]` on `centerhead`/`socialworker`/`psychologist` is the
   original seed, *not* a repair.
 - **`/alerts` has no module guard**, and `DELETE /api/alerts/:id` checks only `findVisible` — any
-  recipient can delete a role-addressed alert for everyone, contradicting the per-user read state the
-  module is built around. `/violations` and `/phaseProgress` are likewise mounted unguarded.
+  recipient can delete a role-addressed alert for everyone, against a module built on per-user read
+  state. `/violations` and `/phaseProgress` are likewise mounted unguarded.
 - **Caseload scope:** only `houseparent` is scoped (`utils/residentScope.js`), and the seed writes
   `assignmentType = 'houseparent'`. Never widen a reader to accept the old `'household'` typo (fixed
   `effd62d`): the seed creates the full houseparent × child cross product. `/violations` and
