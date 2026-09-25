@@ -47,6 +47,16 @@ print `matched N occurrence(s)` and exit non-zero on zero. **Restore must be an
 unconditional `copyFileSync`**: validating the match string in restore mode always
 fails, because the mutation removed it.
 
+**A mutation harness must not run the suite itself.** A node process cannot spawn
+the managed node binary as a child here: `execFileSync` returns `status: null`
+with `stdout`/`stderr` both `undefined`. Because it *throws*, a harness that
+treats "threw" as "the suite failed" reports **every** mutation as caught — a
+vacuous check wearing a green tick. This was live in `C:/tmp/mut.js` for several
+sessions. The working shape is `C:/tmp/mut.js` (`apply <n>` / `restore <n>`, node
+edits files only) driven by `C:/tmp/mutate-stream.sh`, which runs the suite from
+bash between the two. Restore the bytes captured **at apply time**, not an earlier
+snapshot, so a stale backup cannot revert an uncommitted fix.
+
 **Verbatim no-backticks rule.** Several components build print HTML inside JS
 **template literals** (`Reports.tsx`, `PhaseProgress.tsx`, `Tri.tsx`). A backtick
 inside a CSS comment there terminates the string and produces a confusing
@@ -169,7 +179,40 @@ created (`ensureTable`, `server.js` boot migration, `schema.sql`). Applied to
 - `VITE_API_URL` is baked at build time and **must** be set on Vercel. The baseline
   hardcoded `'/api'` in production, which broke every request on the split
   deployment. `api.ts` exports `API_BASE_URL`/`apiUrl` for callers that cannot use
-  `request()`.
+  `request()`. Consequence for verification: **a local build's entry-chunk hash
+  will never equal the deployed one**, because the baked value differs. Compare
+  the chunk's *content* (grep it for the change), not its filename.
+
+## The notification push channel
+
+The feed was pull-only (30s poll + window focus), so a Houseparent's submission
+took up to half a minute to reach the reviewer. `services/alertStream.js` +
+`GET /api/alerts/stream` (SSE) is the push channel; `notificationService.notify()`
+publishes after the row is written and before it returns the id.
+
+- **The frame carries no data** — `event: alerts\ndata: {}` is a bare "re-read the
+  feed". The client answers it with the scoped `GET /api/alerts`, which stays the
+  single implementation of visibility. Putting the body on the wire would create a
+  second, weaker copy of that rule — i.e. a leak. A signal reaching a superset of
+  the intended recipients is a wasted refresh, never a disclosure.
+- **Never signal a suppressed duplicate.** A swallowed `ER_DUP_ENTRY` is not news;
+  signalling it makes every page reopen — which re-fires the same event — look
+  like an incoming notification. Pinned by `tests/alert-stream.test.js`.
+- `publish()` counts writes that **succeeded**, and drops a listener whose socket
+  has gone without silencing the rest.
+- The client uses `fetch` + `ReadableStream`, **not `EventSource`** (which cannot
+  send `Authorization`, so the token would land in the query string and every
+  access log). It rejects a body that is not `text/event-stream` — the same
+  SPA-rewrite trap `fetchBinary` guards. The 30s poll stays as a fallback.
+- **`targetRole` is one column, so a role-addressed row reaches exactly one role.**
+  Where several roles may act, address **one row per user** via
+  `usersWithAnyRole(...)` + `notifyUsers(...)`, and derive both the gate and the
+  notification from **one constant** — the set that may act and the set that is
+  told must not be able to drift. Fixed for the TRI, then the Anecdotal Report
+  (`REVIEWER_ROLES`), then the psych-assessment upload and document resubmission
+  (`APPROVER_ROLES`).
+- Verified live: frames land in **216–333 ms**; a browser session's bell went
+  12 → 13 in **628 ms** with no reload.
 
 ## Access model
 
