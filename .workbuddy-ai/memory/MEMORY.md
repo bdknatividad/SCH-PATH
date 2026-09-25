@@ -1,257 +1,250 @@
 # SCH-PATH — Project Notes
 
-Long-term notes for `C:\sept23`. Stack: React 18 + Vite 6 + TS + Tailwind 4
-(frontend), Express 4 + mysql2 + JWT (backend). MySQL-only.
+`C:\sept23`. React 18 + Vite 6 + TS + Tailwind 4 (frontend), Express 4 + mysql2
++ JWT (backend). MySQL-only. Repo `bdknatividad/SCH-PATH`, branch `master`.
 
 ## Conventions that are easy to break
 
-### Backend tests read frontend source as text
-`backend/tests/*.test.js` has no frontend test runner, so it pins frontend
-behaviour by regex against `.tsx` source. Consequences:
+### The suite pins frontend behaviour by regex against `.tsx` source
+`backend/tests/*.test.js` has no frontend runner, so it reads frontend source as
+text. Consequences:
 - Renaming a state variable or parameter in a pinned component breaks a
-  **backend** test. The pin is often a literal identifier, not a pattern.
-- Relaxing such a test is sometimes correct (it was asserting a calling
-  convention rather than behaviour) — but check that first.
-- Run `cd backend && node --test "tests/**/*.test.js"` after any frontend edit to
-  `App.tsx`, `Layout.tsx`, `PhaseProgress.tsx`, `SignaturePad.tsx`,
-  `ChildRecords.tsx`, `Tri.tsx`, `Health.tsx`.
+  **backend** test. The pin is often a literal identifier.
+- Relaxing such a test is sometimes correct — it was asserting a calling
+  convention rather than behaviour — but check that first.
+- Match with `\s*` where a call may wrap onto the next line, and flatten
+  (`replace(/\s+/g,' ')`) when a pin would otherwise depend on indentation.
+  `[^)]*` breaks on nested parens like `includes('x')`; use `[^;]*` or `[^]*?`.
+- Run `cd backend && node --test "tests/**/*.test.js"` after editing `App.tsx`,
+  `Layout.tsx`, `PhaseProgress.tsx`, `SignaturePad.tsx`, `ChildRecords.tsx`,
+  `Tri.tsx`, `Health.tsx`, `QuarterlyProgressReport.tsx`, `api.ts`.
+
+### Verifying a guard: mutate, then restore from your own copy
+The suite is source-text scanning, so a guard can pass vacuously. Neuter the
+code, confirm the test actually *fails*, then restore **from a backup you made**
+— not `git checkout --`, because the fix is normally still uncommitted and HEAD
+does not contain it. Have the mutator print `matched N occurrence(s)` and exit
+non-zero on zero. **Restore must be an unconditional `copyFileSync`**: validating
+the match string in restore mode always fails, because the mutation removed it.
 
 ### Verbatim no-backticks rule
 Several components build print HTML inside JS **template literals**
 (`Reports.tsx`, `PhaseProgress.tsx`, `Tri.tsx`). A backtick inside a CSS comment
-in those blocks terminates the string and produces a confusing `TS1005`. Write
-comments there without backticks.
+there terminates the string and produces a confusing `TS1005`. Write those
+comments without backticks.
 
-### RBAC definition is duplicated byte-for-byte
-`backend/src/config/rbac.definition.json` and
-`frontend/src/app/config/rbac.definition.json` are asserted equal by a test.
-Edit one, then copy it over the other.
+### `rbac.definition.json` is duplicated byte-for-byte
+`backend/src/config/` and `frontend/src/app/config/` are asserted equal. Edit
+one, copy it over the other.
 
 ### `accessDefaults.js` needs the `rbac.` prefix
 `rbac.CHILD_RECORD_TABS_MODULE`, not the bare name — the bare identifier is not
-in scope in that file and throws at require time, breaking unrelated tests with
-HTTP 500s.
+in scope there and throws at require time, breaking unrelated tests with 500s.
 
 ### A plain `Error` from a service is a 500, not a 400
 `middleware/errorHandler.js` maps only `ApiError`, `ER_*`, `ValidationError` and
-the JWT errors to a specific status; anything else falls through to
-`err.statusCode || 500`, and in production the message is masked to "Internal
-server error". So a service that validates by throwing a bare `Error` reports the
-caller's mistake as a server fault with nothing to act on. Validate in the
+the JWT errors to a status; anything else falls through to
+`err.statusCode || 500`, and production masks the message to "Internal server
+error". So a service validating by throwing a bare `Error` reports the caller's
+mistake as a server fault with nothing to act on. Validate in the
 **controller** and throw `ApiError(400, …)`; leave the service's throw as a
-programmer-error guard for callers that bypass the controller. Measured before
-the fix: `POST /alerts {}` → 500 (now 400). When auditing an endpoint's error
-contract, grep `throw new Error(` under `services/`.
+programmer-error guard. `POST /alerts {}` was 500, now 400. When auditing an
+endpoint's error contract, grep `throw new Error(` under `services/`.
 
-### Verifying a guard: mutate, then restore from your own copy
-The dominant test style here is source-text scanning, so a guard can pass
-vacuously. Neuter the code and confirm the test actually *fails* before trusting
-it. Restore from a copy you made — **not `git checkout --`** — because the fix is
-normally still uncommitted, so HEAD does not contain it and the checkout reverts
-the fix along with the mutation.
+### Binary endpoints: `res.ok` is not proof the body is the file
+`api.ts` exports `fetchBinary(path, init)` — use it for anything that answers
+with bytes (stored documents, generated PDFs, the bulk ZIP). It joins the base
+through `apiUrl`, checks the status, **then the shape**: an HTML body throws
+"The file request did not reach the API…". Why it exists: a path that never
+reaches the API is answered by the frontend host's SPA rewrite with `index.html`
+and a **200**, so `res.ok` is true and the "file" is the app's own HTML. Fed to
+pdf.js that surfaces as a *render* failure — a message about the viewer, which
+is the side that works.
 
-**Check the mutator actually applied.** A mutation script that silently fails to
-match makes the whole battery vacuous — a green run then proves nothing. Have the
-mutator print `replaced N occurrence(s)` and fail loudly on zero.
-
-### Windows traps when scripting a mutation or a source-scanning test
-- **Python text-mode writes convert LF → CRLF.** `io.open(p, 'w')` writes `\r\n`.
-  A test that locates a block by a multi-line marker containing `\n` then stops
-  matching: `indexOf` gives `-1` and `slice(-1)` yields a *one-character* block —
-  which fails, or with a loose pattern passes for the wrong reason. Normalize on
-  read (`.replace(/\r\n/g, '\n')`) and assert the markers were found plus a
-  plausible block length. Write LF deliberately with `newline=''`.
-- **Python resolves `/tmp` as `C:\tmp`.** A helper heredoc'd to `/tmp/x.py` is not
-  readable by `python /tmp/x.py` under Git Bash. Use `"$(cygpath -w /tmp)/x.py"`.
+**`.blob()` is now allowed only inside `fetchBinary`** and a test pins that.
+`/forms/*.pdf` are same-origin static assets read as `arrayBuffer()` and must
+NOT go through `apiUrl` (that would 404 them at the backend).
 
 ### Verifying a push — the remote-tracking ref lies
-`GIT_TERMINAL_PROMPT=0` is set and the `git-credential-manager.exe` helper reads
-Windows Credential Manager non-interactively, so `git push` works without a
-prompt. But **the sandbox discards the write to `refs/remotes/origin/master`**:
-after a push that the server accepted, `git log origin/master..HEAD` still lists
-the commits you just pushed, and `git fetch origin master` *prints*
-`53bf20a..34f3686 master -> origin/master` while `git rev-parse origin/master`
-still returns the old SHA. Do not conclude the push failed. Ask the server —
-`git ls-remote origin master` — and to make the local ref agree, edit the
-`refs/remotes/origin/master` line in `.git/packed-refs` by hand.
+`GIT_TERMINAL_PROMPT=0` is set and `git-credential-manager.exe` reads Windows
+Credential Manager non-interactively, so `git push` works without a prompt. But
+**the sandbox discards writes to `refs/remotes/`**: after a push the server
+accepted, `git log origin/master..HEAD` still lists those commits and
+`git fetch` *prints* the update while `git rev-parse origin/master` stays stale.
+Ask the server — `git ls-remote origin master` — and to make the local ref agree,
+edit the `refs/remotes/origin/master` line in `.git/packed-refs` by hand.
 
 ### Behavioural controller tests without a database
 Inject a pool stub into `require.cache` for `src/config/database` *before*
-requiring the controller, then dispatch on the SQL text inside a fake
-`query(sql, params)`. Lets the real rule be exercised — not source text. Patterns:
-`tests/violation-verification-access.test.js`,
-`tests/access-request-history-identity.test.js`.
+requiring the controller, then dispatch on the SQL text in a fake
+`query(sql, params)`. Patterns: `tests/violation-verification-access.test.js`,
+`tests/access-request-history-identity.test.js`. If validation precedes the
+first query, no stub is needed at all — drive the controller with fake
+`req`/`res` and assert the real status (`tests/notifications.test.js`).
 
 ### Keying a relationship on a display name (the recurring defect class)
-Where a link is stored as a printed name, the fix shape is: add an id column
-*beside* the name; read the id first; gate the old name comparison on
-`<idColumn> IS NULL` so it is only a migration aid; backfill only where the name
-resolves to exactly one account; refuse an unknown id with a 400; and declare the
-column in **all** places the table is created (`ensureTable`, `server.js` boot
-migration, `schema.sql`). Applied to `admissions.houseparentUserId` (item 51) and
-`accessRequests.reviewedById` (item 50). The failure mode is always silent — the
-wrong list is returned — so it needs tests, not a smoke test.
+Where a link is stored as a printed name: add an id column *beside* the name;
+read the id first; gate the old name comparison on `<idColumn> IS NULL` so it is
+only a migration aid; backfill only where the name resolves to exactly one
+account; refuse an unknown id with a 400; and declare the column in **all**
+places the table is created (`ensureTable`, `server.js` boot migration,
+`schema.sql`). Applied to `admissions.houseparentUserId` (item 51) and
+`accessRequests.reviewedById` (item 50). The failure is always silent — the
+wrong list comes back — so it needs tests, not a smoke test.
 
-### A controller test needs no database when validation precedes I/O
-If the code under test rejects bad input before its first query, drive the
-controller with fake `req`/`res` and a `next` that captures the error, and assert
-the **real status code**. Stronger than a text assertion, and it needs no pool
-stub: `config/database` builds a pool at import, but `createPool` does not
-connect. Pattern in `tests/notifications.test.js`.
+### Windows traps when scripting
+- **Python text-mode writes convert LF → CRLF.** A test locating a block by a
+  multi-line marker containing `\n` stops matching: `indexOf` gives `-1` and
+  `slice(-1)` yields a one-character block, which fails or passes for the wrong
+  reason. Normalize on read and write LF deliberately with `newline=''`.
+- **Python resolves `/tmp` as `C:\tmp`.** A helper written to `/tmp/x.py` is not
+  readable by `python /tmp/x.py` under Git Bash. Use `"$(cygpath -w /tmp)/x.py"`.
 
 ## Frontend build / bundling
 
-- Route-level lazy loading lives in `App.tsx` via
-  `@/app/utils/lazyComponent` — it handles the codebase's mix of named and
-  default exports. Add new routes that way, not with static imports.
+- Route-level lazy loading lives in `App.tsx` via `@/app/utils/lazyComponent`
+  (it handles the mix of named and default exports). Add new routes that way.
 - **Never add `pdfjs-dist` to `manualChunks`.** It emits its own async worker and
-  CMaps chunks resolved at runtime by URL; pinning it breaks the worker. See the
-  comment in `vite.config.ts`.
-- Entry-chunk budget: keep it near **142 kB gzip**. If it grows much beyond that,
-  a heavy import has leaked into the shell or `LoginPage`.
+  CMaps chunks resolved at runtime by URL; pinning it breaks the worker.
+- Entry-chunk budget: keep it near **142 kB gzip** (currently ~110 kB / 32 kB
+  gzip). Growth means a heavy import leaked into the shell or `LoginPage`.
 - `vite build` does **not** run `tsc`. There are 9 long-standing type errors in
-  `AssessmentDetail.tsx`, `Assessments.tsx`, `ChildDetail.tsx`,
-  `ChildRecords.tsx`; they do not block the build. Do not "fix" them casually —
-  check the change does not alter the pinned text those components' tests read.
+  `AssessmentDetail.tsx` (4), `Assessments.tsx` (1), `ChildDetail.tsx` (3),
+  `ChildRecords.tsx` (1); they do not block the build. Do not "fix" them
+  casually — check the change does not alter pinned text.
+- **`vite build` cannot finish in this sandbox**: the safe-delete shim refuses to
+  let vite empty `dist/assets` (`SAFE_DELETE_BULK_CONFIRM_REQUIRED`). It
+  transforms all ~1973 modules first, so the code is verified; for a real
+  artifact build to a throwaway dir —
+  `vite build --outDir /c/tmp/dist-verify --emptyOutDir`.
 
 ## Deployment invariants
 
-- All uploaded files are **base64 inside MySQL `LONGTEXT` columns**. There is no
-  filesystem or S3 layer. Database size is therefore the primary free-tier
-  constraint, and MySQL is mandatory (the code uses `ON DUPLICATE KEY UPDATE`,
-  `INFORMATION_SCHEMA`, `max_allowed_packet`).
+- All uploaded files are **base64 inside MySQL `LONGTEXT`**. No filesystem or S3
+  layer, so DB size is the primary free-tier constraint. MySQL is mandatory
+  (`ON DUPLICATE KEY UPDATE`, `INFORMATION_SCHEMA`, `max_allowed_packet`).
 - The backend reads PDF templates and the logo from the **frontend tree** at
   runtime (`../../../frontend/public/forms`, `frontend/src/assets/sch-logo.png`).
-  The Docker build context must be the **repository root** and the image must
-  carry those files. Do not "fix" the context to `backend/`.
+  The Docker build context must be the **repository root**. Do not "fix" it to
+  `backend/`.
 - `frontend/vercel.json`'s SPA rewrite excludes a whitelist of root paths. Any
-  new file added to `frontend/public/` **must** be added to that exclusion, or it
-  is served as `index.html` in production. `pdf.worker.mjs` is the one that
-  breaks everything visibly if missed.
+  new file in `frontend/public/` **must** be added to that exclusion or it is
+  served as `index.html`. `pdf.worker.mjs` is the one that breaks everything.
+- **`/pdf.worker.mjs` must NOT be cached `immutable`.** It sits at an unhashed
+  URL, so a long cache means the next pdfjs upgrade leaves every returning
+  visitor with a worker that does not match the library — which presents as
+  "Unable to display the report form." for everyone who had visited before. It
+  is `max-age=0, must-revalidate` now; the file has an ETag, so the cost is a
+  304. `vercel.json` is JSON and cannot carry this comment, hence this entry.
 - PDF form templates live in `frontend/public/forms/` (18 referenced, 20 on
   disk). If a generated PDF is blank in production, check the Docker context
-  before anything else.
+  first.
+- `VITE_API_URL` is baked at build time and **must** be set on Vercel. The
+  baseline hardcoded `'/api'` in production, which broke every request on the
+  split deployment. `api.ts` exports `API_BASE_URL`/`apiUrl` for the callers
+  that cannot use `request()`.
 
-## Access model summary
+## Access model
 
 Roles: `centerhead` (fullAccess), `admin`, `nurse`, `psychologist`, `educator`,
 `socialworker`, `houseparent`. Effective access = `accessibleModules` +
-`subModules` + `permissions` on the user row, resolved through
-`buildAccessSnapshot()`.
+`subModules` + `permissions` on the user row, via `buildAccessSnapshot()`.
 
-**Known trap:** `buildAccessSnapshot()` treats an *empty* `accessibleModules`
-array as "fall back to the role's full matrix". Code that decides redaction must
-read the **role definition** (`getRoleDefinition(role)`), never the stored grant,
-or an account seeded with `[]` gains everything. `childController.js` has the
-correct pattern in `roleCanReachMedicalTab` / `roleCanReachHealth`.
+**Known trap:** `buildAccessSnapshot()` treats an *empty* `accessibleModules` as
+"fall back to the role's full matrix". Code deciding redaction must read the
+**role definition** (`getRoleDefinition(role)`), never the stored grant, or an
+account seeded with `[]` gains everything. `childController.js` has the correct
+pattern in `roleCanReachMedicalTab` / `roleCanReachHealth`.
 
 **The write path for `accessibleModules` is `accessDefaults.canonicalizeModules`**
 (`userController` 209/366/544/666, `server.js:1324`). It must delegate to
 `rbac.normalizeModuleKey` — the single place that knows every legacy spelling —
-and then order by `MODULE_ORDER`. It used to carry its own alias table and
-mishandled four of the five aliases: it sent `Intervention` to the legacy
-spelling `Intervention Tracker` instead of `Violations`, and dropped
-`Case Progress` / `Education Progress` outright. Because it is the write path, a
-dropped alias is a silent revocation, and `MODULE_ORDER` doubling as the
-allow-list is what let a legacy name be persisted as a module. `MODULE_ORDER`
-must name canonical modules only. The frontend copy already delegated correctly;
-only the backend had the parallel table.
+then order by `MODULE_ORDER`. It used to carry a parallel alias table and
+mishandled 4 of the 5 aliases: `Intervention` went to the legacy spelling
+`Intervention Tracker` instead of `Violations`, and `Case Progress` /
+`Education Progress` were dropped. Because it is the write path, a dropped alias
+is a silent revocation, and `MODULE_ORDER` doubling as the allow-list is what let
+a legacy name be persisted as a module. `MODULE_ORDER` must name canonical
+modules only.
 
 **Read `[]` carefully.** The boot migration only refills `accessibleModules` for
 `nurse` / `educator` / `houseparent`, so `centerhead` / `socialworker` /
 `psychologist` hold `[]` from the original seed. A `[]` on those three is *not*
-evidence that a repair ran — check `nurse`/`educator` instead.
+evidence a repair ran — check `nurse`/`educator` instead.
 
-**`/alerts` has no module guard.** It is mounted as
-`router.use('/alerts', authenticate, alertRoutes)` — no `requireModule` — so every
-authenticated account reaches the whole alert surface. That makes
-`DELETE /api/alerts/:id` cross-user destructive: `notificationService.remove()`
-deletes the row itself plus its `alertReads`, and the only check is `findVisible`
-("can I see it"), so any one recipient can delete a role-addressed alert for
-everyone sharing it. This contradicts the per-user read state the module was
-built around. `DataContext.tsx` → `deleteResource('alerts', id)` reaches it from
-the UI for every role. Unresolved: fixing it needs an `alertDismissals` table
-(per-user, consistent with `alertReads`) or a manager-only delete, and both
-change UX. `/violations` and `/phaseProgress` are likewise mounted without a
-module guard.
+**`/alerts` has no module guard.** `router.use('/alerts', authenticate,
+alertRoutes)` — no `requireModule` — so every authenticated account reaches the
+whole alert surface. That makes `DELETE /api/alerts/:id` cross-user destructive:
+`notificationService.remove()` deletes the row plus its `alertReads` and the only
+check is `findVisible` ("can I see it"), so any one recipient can delete a
+role-addressed alert for everyone sharing it, contradicting the per-user read
+state the module is built around. `DataContext.tsx` → `deleteResource('alerts',
+id)` reaches it from the UI for every role. Unresolved: fixing it needs an
+`alertDismissals` table (per-user, consistent with `alertReads`) or a
+manager-only delete, and both change UX. `/violations` and `/phaseProgress` are
+likewise mounted without a module guard.
 
 **Caseload scope:** only `houseparent` is scoped (`utils/residentScope.js`), and
-the seed now writes `assignmentType = 'houseparent'` — the one value every reader
-grants scope on. The old `'household'` seed value was a **typo, fixed 2026-09-24
-(commit `effd62d`)**. Never widen a reader to accept `'household'`: the seed
-creates the full houseparent × child cross product, so accepting it would hand
-every Houseparent every resident. `/violations` and `/phaseProgress` are
-deliberately **facility-wide** for Houseparents, so `tests/caseload-scope.test.js`
-no longer asserts those two controllers consult the scope.
+the seed writes `assignmentType = 'houseparent'` — the one value every reader
+grants scope on. The old `'household'` seed value was a typo, fixed 2026-09-24
+(`effd62d`). Never widen a reader to accept `'household'`: the seed creates the
+full houseparent × child cross product, so accepting it would hand every
+Houseparent every resident. `/violations` and `/phaseProgress` are deliberately
+**facility-wide** for Houseparents.
 
-**That seed fix is forward-only.** `seedResidentAssignments` keys its
-idempotency check on `(userId, residentId)` and ignores `assignmentType`, so on
-an already-seeded database every pair is present (with the old value) and no
-corrected row is inserted — the change only lands on a fresh seed. The live demo
-still shows seeded Houseparents an empty caseload until those rows are rewritten,
-which is a deliberate access change awaiting a decision. Note also that the seed
-never writes `admissions.houseparentOnDuty`, so the legacy fallback in
+**That seed fix is forward-only.** `seedResidentAssignments` keys its idempotency
+on `(userId, residentId)` and ignores `assignmentType`, so on an already-seeded
+database every pair is present with the old value and no corrected row is
+inserted. The live demo still shows seeded Houseparents an empty caseload until
+those rows are rewritten — a deliberate access change awaiting a decision. The
+seed also never writes `admissions.houseparentOnDuty`, so the legacy fallback in
 `residentScope.js` does not cover seeded Houseparents.
 
 ## Traps that make a failure look like a non-failure
 
 **One shared try/catch in `seedDatabase()` made the whole seed skippable.** The
-steps used to run inside a single try/catch, so the first failure silently
-skipped every later step. Measured on production: `seedDefaultUsers` threw
-`Duplicate entry 'UHP01'` because the seed looks users up *by username* but
-inserts *by id*, and an operator had renamed `HP 1` → `HP1` (freeing the
-username, keeping the id). That one error meant `reconcileSeededAccessGrants`,
-`seedResidentAssignments` and the violation-guide sync **never ran on any boot**
-— shipped, deployed, and inert. Fixed in `5b68857`: `runSeedStep` isolates each
-step, the id is treated as the account's identity (a rename is reported, not
-thrown), and the reconciliation runs **first**. If a seed step's effect is ever
-missing again, check the boot log for `Seeding step failed (...)` before
+steps ran inside a single try/catch, so the first failure silently skipped every
+later one. On production `seedDefaultUsers` threw `Duplicate entry 'UHP01'` —
+the seed looks users up *by username* but inserts *by id*, and an operator had
+renamed `HP 1` → `HP1`, freeing the username while keeping the id. That one
+error meant `reconcileSeededAccessGrants`, `seedResidentAssignments` and the
+violation-guide sync **never ran on any boot**. Fixed in `5b68857`:
+`runSeedStep` isolates each step, the id is the account's identity (a rename is
+reported, not thrown), and the reconciliation runs **first**. If a seed step's
+effect is ever missing, check the boot log for `Seeding step failed (...)` before
 suspecting the deploy.
 
-**`/store` swallows per-table errors.** Each table in the bulk load is wrapped in
-try/catch and assigned `[]` on error, logged only server-side. So a *broken*
-table and a genuinely *empty* one are indistinguishable from outside — both
-render as "no records". To tell them apart, compare `/store` against the
-individual endpoint for the same table. All 19 resources currently agree.
+**`/store` swallows per-table errors.** Each table is wrapped in try/catch and
+assigned `[]` on error, logged only server-side, so a *broken* table and a
+genuinely *empty* one are indistinguishable from outside — both render "no
+records". Compare `/store` against the individual endpoint for the same table.
 
 **A literal route declared after a `/:param` sibling is unreachable.** Express
 matches in declaration order, so `router.get('/:id')` above
 `router.get('/daily-data')` meant the literal path could never be called — it
-404'd as "report not found" for its whole life, while the route file advertised
-it. Fixed in `reportRoutes.js`; guarded generally by
-`tests/route-shadowing.test.js`. Keep literal paths above catch-alls.
+404'd as "report not found" for its whole life while the route file advertised
+it. Fixed in `reportRoutes.js`; guarded by `tests/route-shadowing.test.js`. Keep
+literal paths above catch-alls.
 
-**The live deployment's database is confirmed working** (measured 2026-09-24, not
-assumed): ~147 read probes across the whole API, zero 5xx. Railway holds both the
-backend and the MySQL; Vercel serves the SPA. The seeded `centerhead` login in
-`scripts/seedDatabase.js` works against it, which is enough to reach every module.
+**Checking the deployment without logging in:** `GET /api/health/db` →
+`200 {database:'connected', latencyMs}` or `503 {database:'unreachable'}`. It is
+the *readiness* check; `/api/health` stays a dependency-free *liveness* check and
+must stay that way — pointing it at the database would let a DB blip
+restart-loop the service (`tests/health-readiness.test.js` pins the separation).
+`railway.toml`'s `healthcheckPath` is still `/api/health`; moving it is a
+deliberate restart-on-DB-loss choice that has not been made.
 
-**Checking the deployment's database without logging in:** `GET /api/health/db`
-→ `200 {database:'connected', latencyMs}` or `503 {database:'unreachable'}`. It
-is the *readiness* check; `/api/health` stays a dependency-free *liveness* check
-and must stay that way — pointing it at the database would let a DB blip
-restart-loop the service, and `tests/health-readiness.test.js` pins the
-separation. `railway.toml`'s `healthcheckPath` is still `/api/health`; changing it
-to `/api/health/db` is a deliberate choice (restart-on-DB-loss) that has not been
-made.
-
-## Inspecting the Railway deployment (read the build log, don't guess)
-
-The deploy state is **not** inferrable from the live API. "The behaviour did not
-change after my push" is consistent with *both* "the deploy failed" and "the code
-ran and did nothing" — and on 2026-09-25 I picked the wrong one and told the user
-the deploy was stuck for 17 hours when it had been building fine all along. What
-settled it was the **runtime log**, which is only reachable through Railway's API.
+## Inspecting the Railway deployment (read the log, don't guess)
 
 Endpoint `https://backboard.railway.com/graphql/v2`. A **workspace** token uses
-`Authorization: Bearer <t>`; a project token uses `Project-Access-Token` instead.
-`me` is unavailable to a workspace token by design, so start from
-`projects(first: 20)` rather than `me`.
+`Authorization: Bearer <t>`; a project token uses `Project-Access-Token`. `me` is
+unavailable to a workspace token by design, so start from `projects(first: 20)`.
 
-Project `fabulous-radiance` `840f2fbc-7579-4294-9715-8c0cfd7d06a7`, service
-`SCH-PATH` `b5fb305f-e348-4f2f-982b-49fbd38e929f`, environment `production`
-`655addcf-10cf-4feb-b720-b2b5775790d1`. (`MySQL` is a second service in the same
-project.)
+Project `fabulous-radiance` `840f2fbc-7579-4294-9715-8c0cfd7d06a7`; services
+`SCH-PATH` `b5fb305f-e348-4f2f-982b-49fbd38e929f` and `MySQL`
+`350dae90-e97f-497d-939b-14e25e3500e3`; environment `production`
+`655addcf-10cf-4feb-b720-b2b5775790d1`. (The project is named
+`fabulous-radiance`, not "SCH-PATH".)
 
 ```
 deployments(input: {projectId, environmentId, serviceId}, first: N)
@@ -260,7 +253,24 @@ deploymentLogs(deploymentId: $id, limit: 1000) { timestamp message severity }
 buildLogs(deploymentId: $id) { ... }
 ```
 
-The helpers are `C:/tmp/railway*.js`; they read the token from
-`C:/tmp/.railway-token`. **Delete that file and revoke the token when finished.**
-Note a deployment list shows only the newest as live — older entries read
-`REMOVED`, which looks like a stall but is just supersession.
+Helpers are `C:/tmp/railway*.js`, reading the token from `C:/tmp/.railway-token`.
+**Delete that file and revoke the token when finished.** A deployment list shows
+only the newest as live; older entries read `REMOVED` (superseded), which looks
+like a stall but is not.
+
+## Local tooling
+
+- Node binary moves between patch releases:
+  `C:/Users/Administrator/.workbuddy-ai/binaries/node/versions/`. Check the
+  directory before assuming a script is broken — a stale path fails with a bare
+  "No such file or directory".
+- Playwright lives in the managed node workspace, not the frontend project.
+  `channel: 'msedge'` uses the installed Edge; its own Firefox needs
+  `node node_modules/playwright/cli.js install firefox` and must be launched as
+  `pw.firefox.launch()` — `chromium.launch({ channel: 'firefox' })` is rejected.
+- The user's screenshots are recoverable from
+  `~/.workbuddy-ai/clipboard-images/`. Check them before guessing what was seen.
+- **6 tests fail in this sandbox and fail identically at HEAD** (5 in
+  `jwt-secret.test.js`, 1 dialog-guard): `spawnSync … node.exe EBUSY`. The
+  sandbox refuses to spawn the managed node binary as a child. Prove it by
+  stashing and running clean before blaming a change.
