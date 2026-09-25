@@ -142,6 +142,16 @@ const STORE_MODULE_BY_RESOURCE = {
 function rowResidentIds(resourceName, row) {
   if (row?.residentId) return [String(row.residentId)];
 
+  // A `children` row IS the resident, so it is keyed by `id` and carries no
+  // `residentId`. Falling through to the JSON-field scan below therefore
+  // returned `[]` for every resident, and the Houseparent caseload filter in
+  // /store matched nothing — a Houseparent's store payload came back with
+  // `children: []` while `GET /children` returned their real caseload. The
+  // store has to apply the same boundary, not a stricter one.
+  if (resourceName === 'children') {
+    return row?.id ? [String(row.id)] : [];
+  }
+
   const candidates = [];
   const jsonFields = {
     activities: ['selectedResidentIds', 'recommendedResidentIds', 'notRecommendedResidentIds', 'participants'],
