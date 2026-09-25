@@ -96,6 +96,9 @@ const FORM08_SIGNATURE_BOXES = {
   endorsedTo: { x: 387, top: 654, width: 158, height: 32 },
   checkedBy: { x: 36, top: 722, width: 138, height: 32 },
   notedBy: { x: 360, top: 722, width: 167, height: 32 },
+  // Psychological Support Staff — below "SWO I - Case Manager" in the blank
+  // part of the page: signature, then the printed name, a rule, and the role.
+  psychStaff: { x: 36, top: 804, width: 140, height: 30 },
 };
 
 /**
@@ -112,11 +115,16 @@ const FORM08_SIGNATURE_BOXES = {
  * The `endorsedTo` column is still stored (see the INSERT/UPDATE below) so no
  * existing record loses what it held; it is simply no longer what gets printed.
  */
-const FORM08_ENDORSED_TO_NAME = "Ma'am Joyce";
+// "Endorsed to" is a fillable name: the typed `endorsedTo` is what prints. This
+// is only the value older records were saved with when nothing was typed, kept
+// so an old record re-saved without a name is not blanked.
+const FORM08_ENDORSED_TO_NAME = '';
 const FORM08_CHECKED_BY_NAME = 'Francis C. Patricio, RSW';
 const FORM08_CHECKED_BY_ROLE = 'SWO I - Case Manager';
-const FORM08_NOTED_BY_NAME = 'Sir Francis';
+const FORM08_NOTED_BY_NAME = 'MARICOR C. NAVARRO, RSW';
 const FORM08_NOTED_BY_ROLE = 'SWO II - Center Head';
+const FORM08_PSYCH_STAFF_NAME = 'Joyce Anne D.C. Tenorio';
+const FORM08_PSYCH_STAFF_ROLE = 'Psychological Support Staff';
 
 /**
  * Fills the exact official incident-report.pdf template. The source page is
@@ -126,6 +134,7 @@ async function buildForm08Pdf({
   childName, incidentDateTime, reportTypes, othersSpecify, summary, actionTaken, result,
   reportedBy, endorsedTo, checkedBy, notedBy,
   reportedBySignature, endorsedToSignature, checkedBySignature, notedBySignature,
+  psychStaffSignature,
 }) {
   const template = await fs.promises.readFile(findIncidentReportTemplate());
   const pdfDoc = await PDFDocument.load(template);
@@ -215,13 +224,23 @@ async function buildForm08Pdf({
   drawMultilineTop(result, 38, 573.2, 8.5, 537, 16.8, 5);
 
   drawTextTop(reportedBy, 99, 687.6, 8.5, false, { maxWidth: 150 });
-  // The endorsement line is pre-printed, so the typed `endorsedTo` is not what
-  // lands on the form — the same person endorses every Form 08.
-  drawTextTop(FORM08_ENDORSED_TO_NAME, 388, 687.6, 8.5, true, { maxWidth: 155 });
+  // "Endorsed to" is filled in on each report.
+  drawTextTop(endorsedTo, 388, 687.6, 8.5, true, { maxWidth: 155 });
   drawTextTop(FORM08_CHECKED_BY_NAME, 37, 776.4, 8.5, true, { maxWidth: 180 });
   drawTextTop(FORM08_CHECKED_BY_ROLE, 37, 789.0, 8.5, false, { maxWidth: 180 });
   drawTextTop(FORM08_NOTED_BY_NAME, 361, 776.4, 8.5, true, { maxWidth: 180 });
   drawTextTop(FORM08_NOTED_BY_ROLE, 361, 789.0, 8.5, false, { maxWidth: 180 });
+
+  // Psychological Support Staff sign-off, below "SWO I - Case Manager":
+  // printed name, a signature line under it, and the role under the line.
+  drawTextTop(FORM08_PSYCH_STAFF_NAME, 37, 836.0, 8.5, true, { maxWidth: 180 });
+  page.drawLine({
+    start: { x: 36, y: height - 848.5 },
+    end: { x: 176, y: height - 848.5 },
+    thickness: 0.8,
+    color: rgb(0, 0, 0),
+  });
+  drawTextTop(FORM08_PSYCH_STAFF_ROLE, 37, 851.5, 8.5, false, { maxWidth: 180 });
 
   // The four sign-offs, each stamped above its own printed name. A line with no
   // signature drawn simply keeps the printed name, exactly as before.
@@ -229,6 +248,7 @@ async function buildForm08Pdf({
   await drawSignatureTop(endorsedToSignature, FORM08_SIGNATURE_BOXES.endorsedTo);
   await drawSignatureTop(checkedBySignature, FORM08_SIGNATURE_BOXES.checkedBy);
   await drawSignatureTop(notedBySignature, FORM08_SIGNATURE_BOXES.notedBy);
+  await drawSignatureTop(psychStaffSignature, FORM08_SIGNATURE_BOXES.psychStaff);
 
   return Buffer.from(await pdfDoc.save());
 }
@@ -245,6 +265,7 @@ async function create(req, res, next) {
       violationId, residentId, reportTypes, othersSpecify, incidentDateTime,
       summary, actionTaken, result, reportedBy, endorsedTo, checkedBy, notedBy,
       reportedBySignature, endorsedToSignature, checkedBySignature, notedBySignature,
+      psychStaffSignature,
     } = req.body || {};
 
     if (!violationId) throw new ApiError(400, 'violationId is required');
@@ -313,6 +334,7 @@ async function create(req, res, next) {
         childName, incidentDateTime, reportTypes, othersSpecify, summary, actionTaken, result,
         reportedBy, endorsedTo, checkedBy, notedBy,
         reportedBySignature, endorsedToSignature, checkedBySignature, notedBySignature,
+        psychStaffSignature,
       });
       const pdfFileName = `Incident-Report-${incidentId}.pdf`;
       const [docRows] = await pool.query('SELECT id FROM documents');
@@ -335,14 +357,15 @@ async function create(req, res, next) {
         `INSERT INTO incidentReports
           (id, violationId, residentId, interventionTrackerId, reportTypes, othersSpecify, incidentDateTime,
            summary, actionTaken, result, reportedBy, endorsedTo, checkedBy, notedBy,
-           reportedBySignature, endorsedToSignature, checkedBySignature, notedBySignature,
+           reportedBySignature, endorsedToSignature, checkedBySignature, notedBySignature, psychStaffSignature,
            status, pdfDocumentId)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Submitted', ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Submitted', ?)`,
         [
           incidentId, violationId, residentId, completedInterventionId, JSON.stringify(reportTypes || []), othersSpecify || null,
           incidentDateTime, summary || null, actionTaken || null, result || null,
-          reportedBy || null, endorsedTo || FORM08_ENDORSED_TO_NAME, FORM08_CHECKED_BY_NAME, FORM08_NOTED_BY_NAME,
+          reportedBy || null, endorsedTo || null, FORM08_CHECKED_BY_NAME, FORM08_NOTED_BY_NAME,
           reportedBySignature || null, endorsedToSignature || null, checkedBySignature || null, notedBySignature || null,
+          psychStaffSignature || null,
           docId,
         ]
       );
@@ -391,7 +414,16 @@ async function resubmit(req, res, next) {
     const [rows] = await pool.query('SELECT * FROM incidentReports WHERE id = ? LIMIT 1', [id]);
     if (!rows.length) throw new ApiError(404, 'Incident report not found');
     const existing = rows[0];
-    if (!['Failed', 'Reassessment'].includes(existing.status)) {
+    // The linked document's decision counts too: a report marked Failed before
+    // the reject route synchronised the incident still reads 'Submitted' here
+    // while its document is 'Rejected', and it must still be possible to fill it
+    // out again rather than leaving it stuck.
+    let documentStatus = null;
+    if (existing.pdfDocumentId) {
+      const [docRows] = await pool.query('SELECT status FROM documents WHERE id = ? LIMIT 1', [existing.pdfDocumentId]);
+      documentStatus = docRows[0]?.status || null;
+    }
+    if (!['Failed', 'Reassessment', 'Rejected', 'For Reassessment'].includes(existing.status) && !['Rejected', 'Reassessment'].includes(documentStatus)) {
       throw new ApiError(409, 'Only failed or reassessment Incident Reports can be resubmitted.');
     }
     if (!await canEditIncidentReport(req.user, existing)) {
@@ -402,6 +434,7 @@ async function resubmit(req, res, next) {
       reportTypes, othersSpecify, incidentDateTime, summary, actionTaken, result,
       reportedBy, endorsedTo, checkedBy, notedBy,
       reportedBySignature, endorsedToSignature, checkedBySignature, notedBySignature,
+      psychStaffSignature,
     } = req.body || {};
     if (!Array.isArray(reportTypes) || reportTypes.length === 0) throw new ApiError(400, 'At least one report type is required');
     if (reportTypes.includes('Other') && !String(othersSpecify || '').trim()) throw new ApiError(400, 'Please specify the "Other" type of report.');
@@ -421,6 +454,7 @@ async function resubmit(req, res, next) {
       childName, incidentDateTime, reportTypes, othersSpecify, summary, actionTaken, result,
       reportedBy, endorsedTo, checkedBy, notedBy,
       reportedBySignature, endorsedToSignature, checkedBySignature, notedBySignature,
+      psychStaffSignature,
     });
     const pdfFileName = `Incident-Report-${existing.id}.pdf`;
 
@@ -429,16 +463,18 @@ async function resubmit(req, res, next) {
        SET reportTypes = ?, othersSpecify = ?, incidentDateTime = ?, summary = ?, actionTaken = ?, result = ?,
            reportedBy = ?, endorsedTo = ?, checkedBy = ?, notedBy = ?,
            reportedBySignature = ?, endorsedToSignature = ?, checkedBySignature = ?, notedBySignature = ?,
-           status = 'Submitted', interventionType = NULL, interventionScheduleDate = NULL,
+           psychStaffSignature = ?,
+           status = 'Submitted',
            verifiedBy = NULL, verifiedAt = NULL,
            psychVerifiedBy = NULL, psychVerifiedAt = NULL,
            swVerifiedBy = NULL, swVerifiedAt = NULL,
            updatedAt = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [JSON.stringify(reportTypes), othersSpecify || null, String(incidentDateTime).replace('T', ' '), summary || null,
-       actionTaken || null, result || null, reportedBy || null, endorsedTo || FORM08_ENDORSED_TO_NAME,
-       checkedBy || FORM08_CHECKED_BY_NAME, notedBy || FORM08_NOTED_BY_NAME,
-       reportedBySignature || null, endorsedToSignature || null, checkedBySignature || null, notedBySignature || null, id]
+       actionTaken || null, result || null, reportedBy || null, endorsedTo || null,
+       FORM08_CHECKED_BY_NAME, FORM08_NOTED_BY_NAME,
+       reportedBySignature || null, endorsedToSignature || null, checkedBySignature || null, notedBySignature || null,
+       psychStaffSignature || null, id]
     );
 
     if (existing.pdfDocumentId) {
@@ -726,6 +762,7 @@ module.exports = {
   create, getByViolationId, getByResidentId, verify, resubmit, buildForm08Pdf,
   FORM08_ENDORSED_TO_NAME, FORM08_CHECKED_BY_NAME, FORM08_CHECKED_BY_ROLE,
   FORM08_NOTED_BY_NAME, FORM08_NOTED_BY_ROLE,
+  FORM08_PSYCH_STAFF_NAME, FORM08_PSYCH_STAFF_ROLE, FORM08_SIGNATURE_BOXES,
   // Exported so the dual-verification rule can be asserted directly: which side a
   // caller signs, and which columns each side writes.
   VERIFICATION_SIDES, resolveVerificationSide,

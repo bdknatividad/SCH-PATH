@@ -15,6 +15,7 @@ const {
 const notifications = require('../services/notificationService');
 const { canAccessResident } = require('./assignmentController');
 const BODY_MARKINGS = require('../config/bodyMarkings.json');
+const { ABSCONDED_STATUS } = require('../utils/abscond');
 
 const MARKING_TYPES = BODY_MARKINGS.markingTypes;
 const MARKING_LOCATIONS = BODY_MARKINGS.locations;
@@ -331,6 +332,10 @@ async function create(req, res, next) {
       let residentId = body.residentId || null;
       let existingResident = null;
       let isNewResident = false;
+      // Set below when this admission is a resident returning from Abscond —
+      // used to force the classification and to know the old admission was
+      // deliberately closed here rather than beforehand.
+      let reAdmittedFromAbscond = false;
 
       /*
        * If residentId was supplied, this is a new admission
@@ -347,14 +352,26 @@ async function create(req, res, next) {
         }
 
         existingResident = rows[0];
+        reAdmittedFromAbscond = existingResident.status === ABSCONDED_STATUS;
 
         /*
          * Never create another admission while the latest admission is active.
          * Returning residents are allowed when the previous admission was
-         * properly closed (status = 'Closed').
+         * properly closed (status = 'Closed') — and an Absconded resident is
+         * also allowed back in, even though their last admission is still
+         * 'Active'.
+         *
+         * Absconding freezes the record instead of closing the admission (see
+         * utils/abscond.js: the Phase Timeline stops and nothing can be filed,
+         * but nothing is closed either), so without this exception an
+         * absconded resident could never be admitted again. The old admission
+         * is closed just below rather than left dangling, so it becomes
+         * read-only history the same way a normal discharge's admission does
+         * (see `update`: only the current 'Active' admission can be edited) and
+         * is never overwritten or deleted.
          */
         const [latestAdmissionRows] = await connection.query(
-          `SELECT status
+          `SELECT id, status
              FROM admissions
             WHERE residentId = ?
             ORDER BY admissionNumber DESC
@@ -362,11 +379,22 @@ async function create(req, res, next) {
           [residentId]
         );
 
-        const latestAdmissionStatus = latestAdmissionRows[0]?.status || null;
-        if (latestAdmissionStatus === 'Active') {
+        const latestAdmission = latestAdmissionRows[0] || null;
+        if (latestAdmission?.status === 'Active' && !reAdmittedFromAbscond) {
           throw new ApiError(
             409,
             'This resident already has an active admission. Open the existing admission instead.'
+          );
+        }
+
+        if (latestAdmission?.status === 'Active' && reAdmittedFromAbscond) {
+          await connection.query(
+            `UPDATE admissions
+                SET status = 'Closed',
+                    closedDate = ?,
+                    modifiedBy = ?
+              WHERE id = ?`,
+            [admission.admissionDate, req.user?.username || 'System', latestAdmission.id]
           );
         }
       } else {
@@ -439,7 +467,13 @@ async function create(req, res, next) {
       );
       const previousAdmissionId = previousAdmissionRows[0]?.id || null;
 
-      const admissionStatus = resolveAdmissionStatus(admissionNumber, admission.admissionStatus);
+      // A resident coming back from Abscond is definitively "Returning Resident
+      // (Abscon/Tumakas)" — unlike an ordinary returning admission, there is no
+      // ambiguity for the Social Worker to resolve, so this overrides whatever
+      // classification the request sent.
+      const admissionStatus = reAdmittedFromAbscond
+        ? DEFAULT_RETURNING_ADMISSION_STATUS
+        : resolveAdmissionStatus(admissionNumber, admission.admissionStatus);
 
       /*
        * Create resident master record only for first admission.

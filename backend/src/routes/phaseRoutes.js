@@ -9,6 +9,8 @@ const router = express.Router();
 const phaseController = require('../controllers/phaseController');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { authenticate, authorize, authorizeNonHouseparent } = require('../middleware/auth');
+// An absconded resident's Phase Timeline is frozen: every write below refuses.
+const { blockAbscondedPhaseWrites } = require('../utils/abscond');
 
 /**
  * GET /api/phases
@@ -46,44 +48,44 @@ router.get('/:id', asyncHandler(phaseController.getById));
  * POST /api/phases
  * Create new phase progress record
  */
-router.post('/', authorizeNonHouseparent, asyncHandler(phaseController.create));
+router.post('/', authorizeNonHouseparent, blockAbscondedPhaseWrites, asyncHandler(phaseController.create));
 
 /**
  * PUT /api/phases/:id
  * Update phase progress
  */
-router.put('/:id', authorizeNonHouseparent, asyncHandler(phaseController.update));
+router.put('/:id', authorizeNonHouseparent, blockAbscondedPhaseWrites, asyncHandler(phaseController.update));
 
 /**
  * POST /api/phases/:id/complete
  * Mark phase as completed
  */
-router.post('/:id/complete', authenticate, authorize('centerhead'), asyncHandler(phaseController.complete));
+router.post('/:id/complete', authenticate, authorize('centerhead'), blockAbscondedPhaseWrites, asyncHandler(phaseController.complete));
 
 /**
  * POST /api/phases/:id/demote
  * Demote child to previous phase due to violations
  */
-router.post('/:id/demote', authenticate, authorize('centerhead'), asyncHandler(phaseController.demote));
+router.post('/:id/demote', authenticate, authorize('centerhead'), blockAbscondedPhaseWrites, asyncHandler(phaseController.demote));
 
-router.post('/:id/return', authenticate, authorize('centerhead'), asyncHandler(phaseController.returnToPhase));
+router.post('/:id/return', authenticate, authorize('centerhead'), blockAbscondedPhaseWrites, asyncHandler(phaseController.returnToPhase));
 
 /**
  * POST /api/phases/:id/validate
  * Validate phase completion
  */
-router.post('/:id/validate', authenticate, authorizeNonHouseparent, asyncHandler(phaseController.validate));
+router.post('/:id/validate', authenticate, authorizeNonHouseparent, blockAbscondedPhaseWrites, asyncHandler(phaseController.validate));
 
 /**
  * POST /api/phases/:id/task
  * Toggle a checklist task on a phase
  */
-router.post('/:id/task', authenticate, asyncHandler(phaseController.toggleTask));
+router.post('/:id/task', authenticate, blockAbscondedPhaseWrites, asyncHandler(phaseController.toggleTask));
 
 /**
  * DELETE /api/phases/:id
  * Delete phase progress record
  */
-router.delete('/:id', authorizeNonHouseparent, asyncHandler(phaseController.delete));
+router.delete('/:id', authorizeNonHouseparent, blockAbscondedPhaseWrites, asyncHandler(phaseController.delete));
 
 module.exports = router;

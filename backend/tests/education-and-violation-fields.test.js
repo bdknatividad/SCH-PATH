@@ -170,8 +170,9 @@ test('the quarterly report is scoped to an educator own learners, and fails open
 // ── Item 2: a Case Load Manager within the first month ───────────────────────
 
 test('the Case Load screen warns about residents a month without a manager', () => {
-  assert.match(CASELOAD_UI, /const ONE_MONTH_MS = 30 \* 24 \* 60 \* 60 \* 1000;/);
-  assert.match(CASELOAD_UI, /const unassignedOverMonth = useMemo\(/);
+  // The deadline is one calendar month after admission.
+  assert.match(CASELOAD_UI, /function caseLoadDueDate\(admissionDay: string\): string/);
+  assert.match(CASELOAD_UI, /const unassignedResidents = useMemo\(/);
 
   // It reads who is assigned from the caseload endpoint's own answer, so the
   // warning cannot contradict the cards rendered beside it.
@@ -181,14 +182,12 @@ test('the Case Load screen warns about residents a month without a manager', () 
     'the warning must take its assignments from the caseload payload'
   );
 
-  // Advisory only, and only where someone can act on it: a Houseparent cannot
-  // assign a case, so the banner is not shown to them.
-  assert.match(CASELOAD_UI, /\{!isHouseparent && unassignedOverMonth\.length > 0 && \(/);
-
-  // An unknown admission date cannot be "over a month", so it is left out rather
-  // than guessed at.
-  assert.match(CASELOAD_UI, /const admitted = c\.admissionDate \|\| c\.createdAt;/);
-  assert.match(CASELOAD_UI, /return Number\.isFinite\(at\) && at <= cutoff;/);
+  // A Houseparent cannot assign a case, so the panel is not shown to them, and
+  // only the Center Head is offered the Assign buttons.
+  assert.match(CASELOAD_UI, /\{!isHouseparent && unassignedResidents\.length > 0 && \(/);
+  assert.match(CASELOAD_UI, /const canAssignCaseLoad = normalizedRole === 'centerhead' \|\| normalizedRole === 'admin';/);
+  assert.match(CASELOAD_UI, /Assign Resident/);
+  assert.match(CASELOAD_UI, /Assign HP/);
 });
 
 test('the one-month warning excludes discharged and already-managed residents', () => {

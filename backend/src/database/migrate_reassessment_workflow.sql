@@ -8,5 +8,5 @@ ALTER TABLE triRecords
   NOT NULL DEFAULT 'Draft';
 
 ALTER TABLE incidentReports
-  MODIFY COLUMN status ENUM('Submitted','Pending Review','Verified','Failed','Reassessment')
+  MODIFY COLUMN status ENUM('Submitted','Pending Review','Verified','Failed','Reassessment','For Reassessment','Rejected')
   NOT NULL DEFAULT 'Submitted';

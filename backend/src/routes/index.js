@@ -37,6 +37,7 @@ const admissionRoutes = require('./admissionRoutes');
 const dischargeRoutes = require('./dischargeRoutes');
 const quarterlyProgressReportRoutes = require('./quarterlyProgressReportRoutes');
 const rbacRoutes = require('./rbacRoutes');
+const dashboardRoutes = require('./dashboardRoutes');
 const { loadDocumentScope, documentVisibleTo } = require('../controllers/documentController');
 const { residentRowFor } = require('../controllers/childController');
 const notifications = require('../services/notificationService');
@@ -307,6 +308,8 @@ router.get('/store', authenticate, async (req, res, next) => {
 //   · `/discharge-plans` — read by both Child Records and Reports.
 //   · `/tri`, `/resident-assignments`, `/admissions`, `/education-*` — each
 //     applies its own role guard in its own router.
+//   · `/dashboard` — the schedule summary gates each kind of schedule by its own
+//     module (and a Houseparent's case load) inside the controller.
 router.use('/auth', userRoutes);
 router.use('/users', userRoutes); // Add /users endpoint for frontend compatibility
 router.use('/children', authenticate, childRoutes);
@@ -344,6 +347,7 @@ router.use('/quarterly-progress-reports', authenticate, requireModule('Reports')
 // that instead of re-deriving the rules, so a role change cannot leave the
 // sidebar and the API disagreeing.
 router.use('/rbac', authenticate, rbacRoutes);
+router.use('/dashboard', authenticate, dashboardRoutes);
 
 // Education module CRUD endpoints. These use the same authenticated CRUD
 // contract as the other modules, but are explicitly allow-listed here so the

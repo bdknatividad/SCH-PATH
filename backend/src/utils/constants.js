@@ -25,7 +25,7 @@ const RESOURCES = {
     prefix: 'CH',
     orderBy: 'createdAt ASC',
     jsonFields: ['previousCases', 'documents', 'medicalRecords', 'behavioralLogs', 'assessments', 'phaseTasksCompleted'],
-    columns: ['id', 'name', 'age', 'gender', 'admissionDate', 'legalCategory', 'caseType', 'status', 'casePhase', 'isRepeatOffender', 'previousCaseDetails', 'previousCases', 'birthDate', 'address', 'documentsComplete', 'documents', 'medicalRecords', 'lastCheckup', 'notes', 'behaviorNotes', 'guardianName', 'guardianContact', 'behavioralLogs', 'assessments', 'phaseTasksCompleted', 'needsPsychAssessment', 'readmissionDate', 'readmissionDatetime', 'lrn', 'traineeNumber', 'createdBy', 'modifiedBy'],
+    columns: ['id', 'name', 'age', 'gender', 'admissionDate', 'legalCategory', 'caseType', 'status', 'casePhase', 'isRepeatOffender', 'previousCaseDetails', 'previousCases', 'birthDate', 'address', 'documentsComplete', 'documents', 'medicalRecords', 'lastCheckup', 'notes', 'behaviorNotes', 'guardianName', 'guardianContact', 'behavioralLogs', 'assessments', 'phaseTasksCompleted', 'needsPsychAssessment', 'readmissionDate', 'readmissionDatetime', 'lrn', 'traineeNumber', 'createdBy', 'modifiedBy', 'abscondedAt', 'abscondedBy'],
   },
     admissions: {
     prefix: 'ADM',
@@ -112,7 +112,7 @@ const RESOURCES = {
     prefix: 'VIO',
     orderBy: 'createdAt DESC',
     jsonFields: [],
-    columns: ['id', 'residentId', 'date', 'type', 'description', 'severity', 'points', 'location', 'bodyLocation', 'witnesses', 'reportedBy', 'reviewedBy', 'actionTaken', 'status', 'requiresAssessment', 'assessmentTriggered', 'assessmentCompleted', 'offenseNumber', 'interventionStartDate', 'interventionMonth', 'clearedBy', 'clearedAt', 'incidentGroupId', 'guideId', 'createdBy', 'modifiedBy'],
+    columns: ['id', 'residentId', 'date', 'type', 'description', 'severity', 'points', 'location', 'bodyLocation', 'witnesses', 'reportedBy', 'reviewedBy', 'psychVerifiedBy', 'psychVerifiedAt', 'swVerifiedBy', 'swVerifiedAt', 'actionTaken', 'status', 'requiresAssessment', 'assessmentTriggered', 'assessmentCompleted', 'offenseNumber', 'interventionStartDate', 'interventionMonth', 'clearedBy', 'clearedAt', 'incidentGroupId', 'guideId', 'createdBy', 'modifiedBy'],
   },
   alerts: {
     prefix: 'ALR',

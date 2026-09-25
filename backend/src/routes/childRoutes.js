@@ -88,6 +88,14 @@ router.post('/', requirePermission('Child Records', 'create'), asyncHandler(chil
 router.put('/:id', requirePermission('Child Records', 'edit'), asyncHandler(childController.update));
 
 /**
+ * POST /api/children/:id/abscond
+ * Mark a resident Absconded (Center Head / Social Worker; the controller checks
+ * the role). Records are kept; the Phase Timeline freezes and the record becomes
+ * view-only.
+ */
+router.post('/:id/abscond', requirePermission('Child Records', 'edit'), asyncHandler(childController.abscond));
+
+/**
  * DELETE /api/children/:id
  * Delete child record
  *

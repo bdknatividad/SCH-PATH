@@ -71,7 +71,10 @@ export interface Child {
   admissionDate: string;
   legalCategory: string;
   caseType: string;
-  status: 'Active' | 'Discharged';
+  status: 'Active' | 'Discharged' | 'Absconded';
+  /** When and by whom the resident was marked Absconded. */
+  abscondedAt?: string | null;
+  abscondedBy?: string | null;
   casePhase: string;
   isRepeatOffender: boolean;
   previousCaseDetails?: string;

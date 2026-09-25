@@ -497,7 +497,7 @@ async function runMigrations() {
       name VARCHAR(150) NOT NULL,
       age INT NOT NULL DEFAULT 0,
       gender ENUM('Male', 'Female') NOT NULL DEFAULT 'Male',
-      status ENUM('Active', 'Discharged') NOT NULL DEFAULT 'Active',
+      status ENUM('Active', 'Discharged', 'Absconded') NOT NULL DEFAULT 'Active',
       createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
@@ -781,6 +781,17 @@ async function runMigrations() {
   // VARCHAR(100) logging any of those violations failed with ER_DATA_TOO_LONG —
   // which the user sees as "Database error occurred" with no column named.
   await ensureColumnLength('violations', 'type', 500, 'VARCHAR(500) NOT NULL');
+
+  // Dual verification of a logged incident: the Psychological Support Staff and
+  // the Social Worker each verify it, and it proceeds only when both have.
+  // `psychVerification` keeps the clinical decision the Psychological Staff made
+  // (action taken, schedule, psychosocial activities) until the second
+  // verification completes the review.
+  await ensureColumn('violations', 'psychVerifiedBy', 'VARCHAR(100) NULL', 'reviewedBy');
+  await ensureColumn('violations', 'psychVerifiedAt', 'DATETIME NULL', 'psychVerifiedBy');
+  await ensureColumn('violations', 'psychVerification', 'LONGTEXT NULL', 'psychVerifiedAt');
+  await ensureColumn('violations', 'swVerifiedBy', 'VARCHAR(100) NULL', 'psychVerification');
+  await ensureColumn('violations', 'swVerifiedAt', 'DATETIME NULL', 'swVerifiedBy');
 
   console.log('Migration: violations table ensured.');
 
@@ -1211,6 +1222,33 @@ async function runMigrations() {
     console.warn('Migration warning (residentAssignments):', err.message);
   }
 
+  // End every Houseparent Case Load assignment that was created automatically
+  // rather than by a person in the Houseparent Module:
+  //   - source 'system'                     the boot seed that assigned every
+  //                                         Active resident to every Houseparent
+  //   - source 'admission' / 'admission-update'
+  //                                         the old Admission Slip code that turned
+  //                                         the HP on Duty into the Case Load Manager
+  // Neither writer exists any more. The rows are ended (status 'Ended'), not
+  // deleted, so the history stays. Idempotent: once ended there is nothing left
+  // to match, and manual assignments (source 'caseload' / 'manual') are untouched.
+  try {
+    const [result] = await pool.query(
+      `UPDATE residentAssignments
+          SET status = 'Ended', endAt = COALESCE(endAt, NOW()), updatedBy = 'system-cleanup',
+              notes = CONCAT(COALESCE(notes, ''), CASE WHEN notes IS NULL OR notes = '' THEN '' ELSE ' ' END,
+                             '[Ended: automatic assignment, not made in the Houseparent Module]')
+        WHERE status = 'Active'
+          AND LOWER(TRIM(assignmentType)) = 'houseparent'
+          AND source IN ('system', 'admission', 'admission-update')`
+    );
+    if (result?.affectedRows) {
+      console.log(`Migration: ended ${result.affectedRows} automatic Houseparent assignment(s); assign Case Load Managers from the Houseparent Module.`);
+    }
+  } catch (err) {
+    console.warn('Migration warning (automatic Houseparent assignments):', err.message);
+  }
+
   try {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS triRecords (
@@ -1534,7 +1572,7 @@ async function runMigrations() {
         admissionDate DATE NULL,
         legalCategory VARCHAR(150) NULL,
         caseType VARCHAR(150) NULL,
-        status ENUM('Active', 'Discharged') NOT NULL DEFAULT 'Active',
+        status ENUM('Active', 'Discharged', 'Absconded') NOT NULL DEFAULT 'Active',
         casePhase VARCHAR(150) NULL,
         isRepeatOffender BOOLEAN NOT NULL DEFAULT FALSE,
         previousCaseDetails TEXT NULL,
@@ -1574,7 +1612,7 @@ async function runMigrations() {
         admissionDate: 'DATE NULL',
         legalCategory: 'VARCHAR(150) NULL',
         caseType: 'VARCHAR(150) NULL',
-        status: "ENUM('Active', 'Discharged') NOT NULL DEFAULT 'Active'",
+        status: "ENUM('Active', 'Discharged', 'Absconded') NOT NULL DEFAULT 'Active'",
         casePhase: 'VARCHAR(150) NULL',
         isRepeatOffender: 'BOOLEAN NOT NULL DEFAULT FALSE',
         previousCaseDetails: 'TEXT NULL',
@@ -1599,6 +1637,9 @@ async function runMigrations() {
         modifiedBy: 'VARCHAR(100) NULL',
         createdAt: 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP',
         updatedAt: 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
+        // When and by whom a resident was marked Absconded.
+        abscondedAt: 'DATETIME NULL',
+        abscondedBy: 'VARCHAR(100) NULL',
       };
       for (const [column, definition] of Object.entries(childColumnDefinitions)) {
         if (!existingChildColumns.has(column)) {
@@ -1606,6 +1647,9 @@ async function runMigrations() {
           console.log(`Migration: added children.${column}.`);
         }
       }
+      // An existing database has the two-value status; widen it so a resident
+      // can be marked Absconded. Idempotent, and no existing value changes.
+      await pool.query(`ALTER TABLE children MODIFY COLUMN status ENUM('Active', 'Discharged', 'Absconded') NOT NULL DEFAULT 'Active'`);
     }
   } catch (err) {
     console.warn('Migration warning (childRecordTabs):', err.message);
@@ -2110,7 +2154,7 @@ async function runMigrations() {
         endorsedTo VARCHAR(100) NULL,
         checkedBy VARCHAR(100) NULL,
         notedBy VARCHAR(100) NULL,
-        status ENUM('Submitted', 'Pending Review', 'Verified', 'Failed', 'Reassessment') NOT NULL DEFAULT 'Submitted',
+        status ENUM('Submitted', 'Pending Review', 'Verified', 'Failed', 'Reassessment', 'For Reassessment', 'Rejected') NOT NULL DEFAULT 'Submitted',
         interventionType VARCHAR(100) NULL,
         interventionScheduleDate DATE NULL,
         verifiedBy VARCHAR(100) NULL,
@@ -2134,7 +2178,7 @@ async function runMigrations() {
   // Form 08 is unlocked by a completed intervention and must retain that
   // exact tracker relationship for resident/violation isolation.
   try {
-    await pool.query(`ALTER TABLE incidentReports MODIFY COLUMN status ENUM('Submitted','Pending Review','Verified','Failed','Reassessment') NOT NULL DEFAULT 'Submitted'`);
+    await pool.query(`ALTER TABLE incidentReports MODIFY COLUMN status ENUM('Submitted','Pending Review','Verified','Failed','Reassessment','For Reassessment','Rejected') NOT NULL DEFAULT 'Submitted'`);
   } catch (err) {
     console.warn('Migration warning (incidentReports.status):', err.message);
   }
@@ -2154,7 +2198,7 @@ async function runMigrations() {
   }
   // Form 08's four sign-offs used to be printed names only. Each now also keeps
   // the signature that was drawn for it, stored beside the name it belongs to.
-  for (const column of ['reportedBySignature', 'endorsedToSignature', 'checkedBySignature', 'notedBySignature']) {
+  for (const column of ['reportedBySignature', 'endorsedToSignature', 'checkedBySignature', 'notedBySignature', 'psychStaffSignature']) {
     try {
       await ensureColumn('incidentReports', column, 'LONGTEXT NULL', 'notedBy');
     } catch (err) {
