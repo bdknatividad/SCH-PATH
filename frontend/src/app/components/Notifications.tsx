@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import { useData, Alert } from '../state/DataContext';
 import { useAuth } from '../state/AuthContext';
 import { MODULE_TREE, canOpenModule } from '../config/moduleAccess';
+import { streamAlerts } from '@/services/api';
 
 /**
  * Which module a route belongs to, derived from the RBAC hierarchy.
@@ -43,9 +44,48 @@ export function Notifications() {
   // Poll only the notification feed. The old handler re-fetched every
   // collection in the system (children, documents, base64 file data) once every
   // 30 seconds just to notice a new alert.
+  //
+  // This is now the *fallback*. The stream below is what makes a notification
+  // arrive immediately; this stays because it is the only thing that still works
+  // if a proxy buffers or blocks the stream, and a bell that silently stops
+  // updating is worse than a slow one.
   useEffect(() => {
     const interval = setInterval(() => { void refreshAlerts(); }, 30000);
     return () => clearInterval(interval);
+  }, [refreshAlerts]);
+
+  // The live channel. The server pushes a frame whenever something addressed to
+  // this user is written, and we answer it by re-reading the feed — which is the
+  // only place visibility is decided, so a signal for the wrong person costs a
+  // wasted request and never a disclosure.
+  //
+  // Reconnects with capped backoff: a dropped stream (a deploy, a sleeping
+  // laptop, a flaky network) must not leave the bell frozen for the rest of the
+  // session. A clean end resets the backoff so a redeploy reconnects at once.
+  useEffect(() => {
+    const controller = new AbortController();
+    let attempt = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const connect = async () => {
+      try {
+        await streamAlerts(() => { void refreshAlerts(); }, controller.signal);
+        attempt = 0;
+      } catch {
+        // Aborted by the cleanup below, or the connection dropped — either way
+        // the retry decision is made after this block.
+      }
+      if (controller.signal.aborted) return;
+      attempt += 1;
+      const delay = Math.min(1000 * 2 ** (attempt - 1), 30000);
+      timer = setTimeout(() => { void connect(); }, delay);
+    };
+
+    void connect();
+    return () => {
+      controller.abort();
+      if (timer) clearTimeout(timer);
+    };
   }, [refreshAlerts]);
 
   // Refreshing on window focus means switching back to the app shows what

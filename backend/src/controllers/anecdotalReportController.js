@@ -68,7 +68,16 @@ async function ensureTable() {
 }
 
 function role(req) { return normalizeRole(req.user?.role); }
-function isReviewer(req) { return ['socialworker','centerhead','admin'].includes(role(req)); }
+/**
+ * Who may review and approve an Anecdotal Report.
+ *
+ * One definition, used both to gate the reviewer actions and to decide who is
+ * told a report is waiting. Those two must not disagree: when the notification
+ * named only the Social Worker role, a Center Head could approve a report they
+ * were never told about.
+ */
+const REVIEWER_ROLES = ['socialworker', 'centerhead', 'admin'];
+function isReviewer(req) { return REVIEWER_ROLES.includes(role(req)); }
 // Roles the UI treats as able to author and submit a report (AnecdotalReports.tsx
 // `isReportAuthor`). The backend used to allow only 'houseparent', so a
 // centerhead or social worker could fill the form in, see an enabled Submit
@@ -125,32 +134,42 @@ function missingRequiredFields(report) {
 }
 
 /**
- * Notifies the reviewers that a Houseparent's report is waiting for review.
+ * Notifies every reviewer that a Houseparent's report is waiting for review.
  *
- * Delivered through the Notifications module. The report is addressed to the
- * reviewer role, and the notification service resolves who that is, applies the
- * resident scope and makes sure the author is not notified of their own
- * submission.
+ * **Addressed one row per user, not by role.** A single alert row carries one
+ * `targetRole`, so a role-addressed row can only ever reach one role — which is
+ * how a Center Head was never told an Anecdotal Report was waiting, even though
+ * `isReviewer` lets them approve one. `triController.submit` carries the same fix
+ * with the same reviewer set; this was the remaining half of it.
  *
- * `relatedRecordType`/`relatedRecordId` are what let the notification's View
- * action open the exact report (see Notifications.tsx `getNavigationPath`).
+ * The dedupe key is per user as well (`notifyUsers` appends the user id), so a
+ * retried submission cannot double-notify anyone, and one reviewer having already
+ * seen it does not suppress another's copy.
+ *
+ * Runs on the caller's executor so the status flip and the notifications commit
+ * together. `relatedRecordType`/`relatedRecordId` are what let the notification's
+ * View action open the exact report (see Notifications.tsx `getNavigationPath`).
  */
-async function notifySocialWorkersForReview(executor, report, actor) {
+async function notifyReviewersForReview(executor, report, actor) {
   const childName = (await notifications.residentName(report.residentId, executor)) || report.residentId;
   const period = `${MONTH_NAMES[Number(report.reportMonth) - 1] || report.reportMonth} ${report.reportYear}`;
-  return notifications.notify({
-    type: 'Anecdotal Report',
-    title: 'Anecdotal Report needs review',
-    message: `${childName} — ${period} Anecdotal Report was submitted by ${actor} and is waiting for Social Worker review.`,
-    priority: 'High',
-    actionRequired: 'Review the Anecdotal Report',
-    residentId: report.residentId,
-    relatedRecordType: 'Anecdotal Report',
-    relatedRecordId: report.id,
-    targetRole: 'socialworker',
-    actorUsername: actor,
-    dedupeKey: `anecdotal:${report.id}:submitted`,
-  }, executor);
+  const reviewers = await notifications.usersWithAnyRole(REVIEWER_ROLES, executor);
+  return notifications.notifyUsers(
+    reviewers.map((reviewer) => reviewer.id),
+    {
+      type: 'Anecdotal Report',
+      title: 'Anecdotal Report needs review',
+      message: `${childName} — ${period} Anecdotal Report was submitted by ${actor} and is waiting for review.`,
+      priority: 'High',
+      actionRequired: 'Review the Anecdotal Report',
+      residentId: report.residentId,
+      relatedRecordType: 'Anecdotal Report',
+      relatedRecordId: report.id,
+      actorUsername: actor,
+      dedupeKey: `anecdotal:${report.id}:submitted`,
+    },
+    executor
+  );
 }
 
 /**
@@ -434,7 +453,7 @@ async function submit(req, res, next) {
       if (result.affectedRows === 0) {
         throw new ApiError(409, 'This Anecdotal Report has already been submitted.');
       }
-      await notifySocialWorkersForReview(connection, row, actor);
+      await notifyReviewersForReview(connection, row, actor);
     });
 
     res.json({ success: true, data: map(await getOne(row.id)) });

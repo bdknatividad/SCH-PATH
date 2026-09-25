@@ -42,6 +42,7 @@ const { pool } = require('../config/database');
 const { insertWithGeneratedId } = require('../utils/helpers');
 const { normalizeRole } = require('../utils/authorization');
 const { loadResidentScope, residentInScope } = require('../utils/residentScope');
+const alertStream = require('./alertStream');
 
 /** Roles with facility-wide supervisory visibility. */
 const MANAGER_ROLES = ['centerhead', 'admin'];
@@ -172,7 +173,7 @@ async function notify(event, executor = pool) {
   }
 
   try {
-    return await insertWithGeneratedId(executor, {
+    const id = await insertWithGeneratedId(executor, {
       table: 'alerts',
       prefix: 'ALR',
       insert: (id) => executor.query(
@@ -187,6 +188,18 @@ async function notify(event, executor = pool) {
           actorUsername, dedupeKey]
       ),
     });
+
+    // Wake the addressee's open stream so the feed updates now rather than at the
+    // next poll. This runs only after a row was actually written: a suppressed
+    // duplicate (the `ER_DUP_ENTRY` branch below) is not news, and signalling it
+    // would make every re-open of a page look like an event.
+    //
+    // The frame is a bare signal — the client re-reads `GET /api/alerts`, which
+    // owns the visibility rule. See `services/alertStream.js` for why the body is
+    // deliberately not sent.
+    alertStream.publish({ targetUserId, targetRole: targetRole ? normalizeRole(targetRole) : null });
+
+    return id;
   } catch (error) {
     // A repeated business event. The unique index on dedupeKey is what makes
     // "refreshing the page must not create a second notification" true even

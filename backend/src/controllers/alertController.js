@@ -17,6 +17,7 @@ const { hasRole, isSupportedRole } = require('../utils/authorization');
 const { ROLE_KEYS } = require('../config/rbac');
 const { loadResidentScope, residentInScope } = require('../utils/residentScope');
 const notifications = require('../services/notificationService');
+const alertStream = require('../services/alertStream');
 
 /** How many notifications the panel shows by default. */
 const DEFAULT_LIMIT = 50;
@@ -227,6 +228,45 @@ async function remove(req, res, next) {
   }
 }
 
+/**
+ * GET /api/alerts/stream — the notification push channel.
+ *
+ * Holds the response open and writes a frame whenever something addressed to
+ * this user is written. The frame carries no alert data: the client answers it by
+ * re-reading `GET /api/alerts`, which is the only place the visibility rule is
+ * implemented. Keeping it that way is what stops this endpoint becoming a second,
+ * weaker definition of who may see what.
+ *
+ * `X-Accel-Buffering: no` matters behind a reverse proxy — without it the proxy
+ * buffers the response and the "real time" channel delivers nothing until the
+ * connection closes. There is no compression middleware in this app, which would
+ * otherwise hold frames back as well.
+ */
+function stream(req, res) {
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-cache, no-transform');
+  res.setHeader('Connection', 'keep-alive');
+  res.setHeader('X-Accel-Buffering', 'no');
+  // Disable Nagle for this response so small frames go out immediately.
+  if (typeof res.socket?.setNoDelay === 'function') res.socket.setNoDelay(true);
+  res.flushHeaders?.();
+
+  // An immediate frame, so the client knows it is connected rather than waiting
+  // for the first real event to prove the channel works.
+  res.write('event: ready\ndata: {}\n\n');
+
+  const client = alertStream.subscribe(req.user, res);
+  alertStream.startHeartbeat();
+
+  const close = () => {
+    alertStream.unsubscribe(client);
+    if (alertStream.stats().connections === 0) alertStream.stopHeartbeat();
+  };
+  req.on('close', close);
+  req.on('error', close);
+  // Nothing more to send; the response stays open until the client goes away.
+}
+
 module.exports = {
   getAll,
   getById,
@@ -238,4 +278,5 @@ module.exports = {
   getUnreadCount,
   getByResident,
   getUrgent,
+  stream,
 };

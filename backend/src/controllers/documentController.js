@@ -89,6 +89,19 @@ function revisionSnapshot(document) {
  */
 const MEDICAL_RECORD_ROLES = new Set(['nurse', 'centerhead', 'admin']);
 
+/**
+ * Who may approve, reject or send a document back for reassessment.
+ *
+ * Declared here, above every user of it, because it is now the single answer to
+ * two questions that must not disagree: who is *allowed* to decide a document
+ * (the guard in `update()`), and who is *told* a document is waiting for a
+ * decision. They were separate lists, so a psychological assessment was
+ * addressed to `targetRole: 'socialworker'` while a Center Head — who can
+ * approve it — was never told it existed. Same defect the TRI and the Anecdotal
+ * Report each carried.
+ */
+const APPROVER_ROLES = ['centerhead', 'socialworker', 'admin'];
+
 const DOCUMENT_READ_ROLES_BY_CATEGORY = {
   medical: ['nurse', 'centerhead', 'admin'],
   health: ['nurse', 'centerhead', 'admin'],
@@ -730,12 +743,19 @@ async function create(req, res, next) {
       await recordRevision(rows[0], { action: 'Submitted', actor: req.user, status: uploadStatus });
     }
 
-    // Auto-notify Social Workers when Psychological Staff uploads a Psychological Assessment
+    // Auto-notify the reviewers when Psychological Staff uploads a Psychological
+    // Assessment.
+    //
+    // Addressed one row per user against `APPROVER_ROLES`, not `targetRole:
+    // 'socialworker'`. A role-addressed row reaches exactly one role, so a Center
+    // Head — who `update()` permits to approve this document — was never told it
+    // was waiting. The recipient set is now the same constant as the guard.
     if (docTitle === 'Psychological Assessment' && uploaderRole === 'psychologist' && data.residentId) {
       try {
         const [childRows] = await pool.query('SELECT name FROM children WHERE id = ?', [data.residentId]);
         const childName = childRows[0]?.name || data.residentId;
-        await notifications.notify({
+        const reviewers = await notifications.usersWithAnyRole(APPROVER_ROLES);
+        await notifications.notifyUsers(reviewers.map((reviewer) => reviewer.id), {
           type: 'Assessment Completed',
           residentId: data.residentId,
           title: `Psychological Assessment Uploaded - ${childName}`,
@@ -744,7 +764,6 @@ async function create(req, res, next) {
           actionRequired: 'Review and approve Psychological Assessment document',
           relatedRecordType: 'documents',
           relatedRecordId: newId,
-          targetRole: 'socialworker',
           actorUsername: req.user?.username,
           dedupeKey: `document:${newId}:psych-assessment-uploaded`,
         });
@@ -824,7 +843,7 @@ async function submit(req, res, next) {
 
     // Put the resubmission back in the same reviewer queue as a new submission.
     try {
-      const reviewerUsers = await notifications.usersWithAnyRole(['centerhead', 'socialworker']);
+      const reviewerUsers = await notifications.usersWithAnyRole(APPROVER_ROLES);
       if (reviewerUsers.length) {
         const residentName = existing.residentId ? await notifications.residentName(existing.residentId) : null;
         await notifications.notifyUsers(reviewerUsers.map(u => u.id), {
@@ -1115,8 +1134,11 @@ async function getAllowedForRole(req, res, next) {
  * not actually enforced — the UI performs approvals via PUT /documents/:id.
  * Apply the same rule here: only approver roles may move a document into an
  * approved / rejected / reassessment / under-review state.
+ *
+ * `APPROVER_ROLES` is declared near the top of this file so the notification
+ * that announces a pending document can address the same people this guard lets
+ * decide it.
  */
-const APPROVER_ROLES = ['centerhead', 'socialworker', 'admin'];
 const APPROVAL_STATUSES = ['Approved', 'Rejected', 'Reassessment', 'Under Review'];
 
 /**
@@ -1364,7 +1386,7 @@ async function update(req, res, next) {
         );
       }
       try {
-        const reviewerUsers = await notifications.usersWithAnyRole(['centerhead', 'socialworker']);
+        const reviewerUsers = await notifications.usersWithAnyRole(APPROVER_ROLES);
         if (reviewerUsers.length) {
           const residentName = document.residentId ? await notifications.residentName(document.residentId) : null;
           await notifications.notifyUsers(reviewerUsers.map(u => u.id), {

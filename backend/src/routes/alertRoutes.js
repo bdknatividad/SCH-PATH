@@ -10,6 +10,24 @@ const alertController = require('../controllers/alertController');
 const { asyncHandler } = require('../middleware/errorHandler');
 
 /**
+ * Deliberately not wrapped in `asyncHandler`.
+ *
+ * The stream handler never resolves — it owns the response for the life of the
+ * connection — so `asyncHandler` would await a promise that settles only when the
+ * client disconnects, and any throw would reach the error middleware, which would
+ * try to write a JSON body onto a response already committed as
+ * `text/event-stream`.
+ */
+const alertStreamHandler = (req, res) => {
+  try {
+    alertController.stream(req, res);
+  } catch (error) {
+    console.error('[alerts] opening the notification stream failed:', error.message);
+    res.end();
+  }
+};
+
+/**
  * GET /api/alerts
  * Get all alerts
  */
@@ -32,6 +50,15 @@ router.get('/urgent', asyncHandler(alertController.getUrgent));
  * Get alerts by resident (caller's caseload only)
  */
 router.get('/resident/:residentId', asyncHandler(alertController.getByResident));
+
+/**
+ * GET /api/alerts/stream
+ * Server-Sent Events channel: a frame whenever the caller's feed changes.
+ *
+ * Registered before `/:id` deliberately — Express matches in order, so below the
+ * `/:id` route this path would be read as the id "stream" and answer 404.
+ */
+router.get('/stream', alertStreamHandler);
 
 /**
  * GET /api/alerts/:id

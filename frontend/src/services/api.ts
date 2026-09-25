@@ -295,3 +295,76 @@ export async function deleteResource(resource: string, id: string) {
     method: 'DELETE',
   });
 }
+
+/** The notification stream's path. */
+export const ALERT_STREAM_PATH = '/alerts/stream';
+
+/**
+ * Subscribes to the server's notification stream and calls `onSignal` whenever
+ * the caller's feed changes. Resolves when the stream ends.
+ *
+ * ## Why `fetch` and not `EventSource`
+ *
+ * `EventSource` cannot send an `Authorization` header, so using it would mean
+ * putting the bearer token in a query string — written to every access log on the
+ * way, and into browser history. Reading the body with a `ReadableStream` keeps
+ * the token in the header, where the rest of the app already puts it.
+ *
+ * ## What a signal means
+ *
+ * The frame carries no alert. It means "re-read the feed", and the caller is
+ * expected to re-run its scoped `GET /api/alerts`. The server deliberately does
+ * not decide visibility twice; see `backend/src/services/alertStream.js`.
+ *
+ * @param onSignal called once per frame from the server, including the initial
+ *   `ready` frame, so the caller's first refresh happens on connect.
+ * @param signal aborts the subscription; pass the one from the effect's cleanup.
+ */
+export async function streamAlerts(onSignal: () => void, signal: AbortSignal): Promise<void> {
+  const response = await fetch(apiUrl(ALERT_STREAM_PATH), {
+    headers: authHeaders({ Accept: 'text/event-stream' }),
+    signal,
+  });
+
+  if (!response.ok) {
+    throw new Error(`The notification stream could not be opened (HTTP ${response.status}).`);
+  }
+
+  // The same trap `fetchBinary` guards against: a path that never reaches the API
+  // is answered by the frontend host's SPA rewrite with `index.html` and a 200.
+  // A page is not an event stream, and without this the reader would simply hang.
+  const contentType = (response.headers.get('Content-Type') || '').toLowerCase();
+  if (!contentType.includes('text/event-stream')) {
+    throw new Error('The notification stream did not reach the API — the server answered with something else.');
+  }
+  if (!response.body) {
+    throw new Error('The notification stream returned no body.');
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) return;
+      buffer += decoder.decode(value, { stream: true });
+
+      // Frames are separated by a blank line. A single newline only separates
+      // fields within one frame, so matching on `\n` alone would split a frame
+      // across two signals.
+      let boundary = /\r?\n\r?\n/.exec(buffer);
+      while (boundary) {
+        const frame = buffer.slice(0, boundary.index);
+        buffer = buffer.slice(boundary.index + boundary[0].length);
+        // `: keep-alive` comments are not changes.
+        if (/^(?:event|data):/m.test(frame)) onSignal();
+        boundary = /\r?\n\r?\n/.exec(buffer);
+      }
+    }
+  } finally {
+    // Releasing the lock lets the connection be torn down cleanly on abort.
+    reader.cancel().catch(() => undefined);
+  }
+}

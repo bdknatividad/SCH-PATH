@@ -86,29 +86,44 @@ test('submit() commits the status change and its notification together', () => {
   const body = functionBody(read(CONTROLLER), 'submit', 'review');
   assert.match(body, /runInTransactionWithIdRetry\(pool, async \(connection\)/,
     'the flip and the notification are two writes and must be one transaction');
-  assert.match(body, /notifySocialWorkersForReview\(connection,/,
+  assert.match(body, /notifyReviewersForReview\(connection,/,
     'the notification must run on the transaction connection, not the pool');
 });
 
 // ── The notification ────────────────────────────────────────────────────────
 
-test('the notification is addressed to the Social Worker and links to the report', () => {
+test('the notification reaches every reviewer role, one row per reviewer', () => {
   const source = read(CONTROLLER);
-  const from = source.indexOf('async function notifySocialWorkersForReview');
-  assert.ok(from > 0, 'notifySocialWorkersForReview() is missing');
+  const from = source.indexOf('async function notifyReviewersForReview');
+  assert.ok(from > 0, 'notifyReviewersForReview() is missing');
   const body = source.slice(from, source.indexOf('\nasync function', from + 1));
   const notify = body > '' ? body : source.slice(from, from + 2000);
 
   // The write must go through notificationService, which is the single writer
   // and the single owner of the visibility rule. Hand-rolling an INSERT here is
   // what left half the recipients unreachable in the first place.
-  assert.match(notify, /notifications\.notify\(/, 'must reuse the existing Notifications table via the service');
+  assert.match(notify, /notifications\.notifyUsers\(/, 'must reuse the existing Notifications table via the service');
   assert.doesNotMatch(notify, /INSERT INTO alerts/, 'must not hand-roll SQL — the service owns the write');
-  assert.match(notify, /targetRole[\s\S]*'socialworker'/, 'must target the socialworker role');
+  // A single alert row carries one targetRole, so a role-addressed row can only
+  // ever reach one role. That is exactly how a Center Head — allowed to approve
+  // an Anecdotal Report — was never told one was waiting.
+  assert.doesNotMatch(notify, /targetRole:/, 'the row must be addressed per user, not by role');
+  assert.match(notify, /usersWithAnyRole\(REVIEWER_ROLES/, 'must resolve every reviewer account');
   assert.match(notify, /relatedRecordType[\s\S]*'Anecdotal Report'/, 'must record what the alert is about');
   assert.match(notify, /report\.id/, 'must link to the exact report');
   assert.match(notify, /dedupeKey/, 'must carry a dedupe key so a retry cannot double-notify');
   assert.match(notify, /needs review/i, 'the message must say a report needs review');
+});
+
+test('the roles that may approve a report are the roles that are told about it', () => {
+  // These two must not be able to disagree: when they were separate, the gate
+  // admitted a Center Head and the notification named only the Social Worker.
+  const source = read(CONTROLLER);
+  assert.match(source, /const REVIEWER_ROLES = \[[^\]]*'socialworker'[^\]]*'centerhead'[^\]]*\]/,
+    'the reviewer roles must be declared once, in one place');
+  assert.match(source, /function isReviewer\(req\) \{ return REVIEWER_ROLES\.includes\(/,
+    'the approval gate must read that one declaration');
+  assert.match(source, /usersWithAnyRole\(REVIEWER_ROLES/, 'and so must the notification');
 });
 
 test('the notification opens the report in the reviewer queue', () => {

@@ -374,7 +374,11 @@ test('the dashboard summary counts the caller\'s notifications', () => {
 
 /** Each business event that must produce a notification, and where it lives. */
 const EVENT_SITES = [
-  ['anecdotal submitted for review', 'controllers/anecdotalReportController.js', 'notifySocialWorkersForReview', 'notifyAuthor', /targetRole: 'socialworker'/],
+  // Addressed one row per user against the same REVIEWER_ROLES list that gates
+  // approval. It used to be a single role-addressed row, so a Center Head could
+  // approve a report they were never told about — the defect the TRI entry below
+  // had already been fixed for.
+  ['anecdotal submitted for review', 'controllers/anecdotalReportController.js', 'notifyReviewersForReview', 'notifyAuthor', /usersWithAnyRole\(REVIEWER_ROLES[,)]/, /notifyUsers\(/],
   ['anecdotal returned or finalized', 'controllers/anecdotalReportController.js', 'notifyAuthor', 'returnForRevision', /decision === 'Returned'|targetUserId/],
   // The intervention alerts go through createStaffAlert(), so this one asserts on
   // the caller rather than on a direct call to the service.
