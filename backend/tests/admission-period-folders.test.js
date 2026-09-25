@@ -457,6 +457,52 @@ test('a document cannot be moved to another admission after it is filed', () => 
   );
 });
 
+// ── The link has to reach the browser ──────────────────────────────────────
+
+test('the bulk store delivers every declared document column the folder view needs', () => {
+  // The writers, the resolver and the folder view are each pinned above, and all
+  // three were correct while the feature was still broken in production. The bulk
+  // store is the SPA's only read path for documents, and its `SELECT` is the one
+  // place in that path which names columns explicitly instead of using
+  // `SELECT *`. `admissionId` was added to the table, to `constants.js` and to
+  // every writer, but never to this list — so every document reached the browser
+  // with no link at all. `admissionPeriodKeyFor` then fell through to its
+  // timestamp fallback, which cannot separate two admissions on the same day: the
+  // admission slip a re-intake creates is stamped a moment *before* the
+  // readmission boundary, so it was filed under the admission that had just
+  // closed and the current admission read as empty.
+  //
+  // Asserted against the declared schema rather than a hand-written list, so the
+  // next column added to `documents` cannot be dropped here in silence — which is
+  // exactly how this one was lost.
+  const { RESOURCES } = require(path.join(REPO_ROOT, 'backend', 'src', 'utils', 'constants.js'));
+  const store = read(path.join(REPO_ROOT, 'backend', 'src', 'routes', 'index.js'));
+
+  const at = store.indexOf('SELECT id, residentId');
+  assert.ok(at > 0, 'the store no longer has an explicit column list for documents');
+  const select = store.slice(at, store.indexOf('FROM documents', at));
+
+  // `fileData` is the one deliberate omission: base64, megabytes per file, and
+  // fetched per document by `GET /documents/:id` instead.
+  const missing = RESOURCES.documents.columns.filter(
+    (column) => column !== 'fileData' && !new RegExp(`\\b${column}\\b`).test(select),
+  );
+  assert.deepEqual(
+    missing,
+    [],
+    `the bulk store drops ${missing.join(', ')}, so the Documents module cannot see it`,
+  );
+  assert.doesNotMatch(select, /\bfileData\b/, 'fileData is base64 and must stay out of the bulk load');
+
+  // The other end of the same wire: the resolver reads that column off the
+  // document, so a store which delivers it is actually used.
+  assert.match(
+    read(RESOLVER),
+    /const linked = String\(document\?\.admissionId/,
+    'the resolver no longer reads the admission link, so delivering it would change nothing',
+  );
+});
+
 // ── Placing a document in a period ─────────────────────────────────────────
 
 const PERIODS = admissionPeriodsFor(READMITTED_ONCE);

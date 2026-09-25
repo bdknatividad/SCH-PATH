@@ -206,8 +206,21 @@ router.get('/store', authenticate, async (req, res, next) => {
         if (tableName === 'documents') {
           // Exclude fileData from store load — it's base64 and can be huge (MB per file).
           // fileData is fetched individually via GET /documents/:id when viewing/downloading.
+          //
+          // `admissionId` is listed explicitly because this is the only query in
+          // the whole read path that names columns instead of using `SELECT *`,
+          // and the Documents module cannot group a returning resident's files
+          // without it. It was added to the table, to `constants.js` and to every
+          // writer, but not here — so every document reached the browser with no
+          // link at all and the folder view fell back to comparing timestamps.
+          // That fallback cannot separate two admissions on the same day, so the
+          // admission slip a re-intake creates was filed under the admission that
+          // had just closed and the current admission read as empty.
+          // `backend/tests/admission-period-folders.test.js` now asserts this list
+          // covers the declared schema, so the next column cannot be dropped in
+          // silence.
           [rows] = await pool.query(
-            `SELECT id, residentId, residentName, staffId, assessmentId, title, type, category, documentCategory, description,
+            `SELECT id, residentId, admissionId, residentName, staffId, assessmentId, title, type, category, documentCategory, description,
                     fileName, fileSize, filePath, fileType, uploaderRole, status, revision, phase, requiredFor,
                     submittedBy, submittedAt, uploadedBy, uploadedAt, reviewedBy, reviewedAt,
                     approvedBy, approvedAt, rejectedBy, rejectedAt, rejectionReason, notes, createdBy, modifiedBy,
