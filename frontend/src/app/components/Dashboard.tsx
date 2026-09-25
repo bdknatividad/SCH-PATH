@@ -717,14 +717,23 @@ function NurseDashboard({
     return () => { cancelled = true; };
   }, []);
 
-  /** Follow-ups to act on: overdue first, then anything inside the horizon. */
-  const reminders = useMemo(() => healthRecords
+  /**
+   * Every follow-up to act on: overdue first, then anything inside the horizon.
+   *
+   * Kept whole, and sliced only where it is rendered. The slice used to happen
+   * here, which capped the tile, the card badge *and* `overdueCount` at six — so
+   * a nurse with twenty follow-ups read "6", and "overdue" could never exceed six
+   * however many had actually passed. A count is not a page of a list.
+   */
+  const allReminders = useMemo(() => healthRecords
     .map((record) => ({ record, due: dayOf(record.followUpDate) }))
     .filter(({ due }) => due && due <= horizonIso)
-    .sort((a, b) => a.due.localeCompare(b.due))
-    .slice(0, 6), [healthRecords, horizonIso]);
+    .sort((a, b) => a.due.localeCompare(b.due)), [healthRecords, horizonIso]);
 
-  const overdueCount = reminders.filter(({ due }) => due < today).length;
+  /** The six the card lists. Every count below reads the full set instead. */
+  const reminders = allReminders.slice(0, 6);
+
+  const overdueCount = allReminders.filter(({ due }) => due < today).length;
 
   /** The most recently logged records, newest first. */
   const healthUpdates = useMemo(() => [...healthRecords]
@@ -766,7 +775,7 @@ function NurseDashboard({
   const tiles = [
     {
       title: 'Medical Reminders',
-      value: reminders.length,
+      value: allReminders.length,
       caption: overdueCount ? `${overdueCount} overdue` : 'Follow-ups in 30 days',
       icon: AlertCircle,
       path: '/health',
@@ -839,7 +848,7 @@ function NurseDashboard({
           <CardHeader className="border-b border-gray-100 pb-3">
             <CardTitle className="flex items-center gap-2 text-[#2F3E46]">
               <AlertCircle className="w-5 h-5 text-[#FFD100]" /> Medical Reminders
-              <Badge className="bg-[#2F3E46]/10 text-[#2F3E46]">{reminders.length}</Badge>
+              <Badge className="bg-[#2F3E46]/10 text-[#2F3E46]">{allReminders.length}</Badge>
             </CardTitle>
           </CardHeader>
           <CardContent className="pt-4">

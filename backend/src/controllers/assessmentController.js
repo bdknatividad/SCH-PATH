@@ -8,6 +8,10 @@ const { pool } = require('../config/database');
 const { createController } = require('./baseController');
 const { ApiError } = require('../middleware/errorHandler');
 const { canAccessResident } = require('./assignmentController');
+// The one Manila-date helper. Every "today" in a query has to be the facility's
+// today; `toISOString()` gives UTC's, which is a different day for eight hours
+// of every day here.
+const { manilaToday } = require('../utils/triPeriod');
 
 const baseController = createController('assessments');
 
@@ -113,7 +117,10 @@ async function getByResident(req, res, next) {
  */
 async function getUpcoming(req, res, next) {
   try {
-    const today = new Date().toISOString().split('T')[0];
+    // The facility's today, not UTC's — `toISOString()` is still yesterday in
+    // GMT+8 until 08:00, so the window used to reach a day too far back and the
+    // Nurse's "Upcoming Assessments" tile counted the previous day's sittings.
+    const today = manilaToday();
 
     if (isHouseparent(req.user)) {
       const residentIds = await getAssignedResidentIds(req.user.id);

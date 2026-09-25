@@ -9,6 +9,10 @@ const { insertWithGeneratedId } = require('../utils/helpers');
 const { ApiError } = require('../middleware/errorHandler');
 const { canAccessResident } = require('./assignmentController');
 const { loadResidentScope } = require('../utils/residentScope');
+// The one Manila-date helper. Every "today" in a query has to be the facility's
+// today; `toISOString()` gives UTC's, which is a different day for eight hours
+// of every day here.
+const { manilaToday } = require('../utils/triPeriod');
 // `normalizeRole` is called by the scheduling guard below. It was referenced
 // without ever being imported, so `PUT /intervention-tracker/:id` threw
 // `ReferenceError: normalizeRole is not defined` for any body carrying
@@ -596,7 +600,11 @@ async function assignInterventions(req, res, next) {
  */
 async function getScheduledInterventions(req, res, next) {
   try {
-    const today = new Date().toISOString().slice(0, 10);
+    // The facility's today, not UTC's. `new Date().toISOString()` is the UTC
+    // date, which in GMT+8 is still *yesterday* until 08:00 — so for the first
+    // eight hours of every day the default window was a day behind and the
+    // dashboard's "Assigned Schedules" listed the wrong day's sessions.
+    const today = manilaToday();
     const from = String(req.query.from || today).slice(0, 10);
     const to = String(req.query.to || from).slice(0, 10);
 
