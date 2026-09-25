@@ -154,13 +154,21 @@ function rangeFor(start: string, end: string | null): string {
 }
 
 /**
- * Every admission this resident has had — **the open admission first**, then the
- * closed ones in the order they happened — or `[]` when there is only one,
+ * Every admission this resident has had, **oldest first** — the closed ones in
+ * the order they happened, then the open one — or `[]` when there is only one,
  * because a single admission needs no grouping and the folder view must stay
  * exactly as it was for the common case.
  *
- * Current-first is the contract: the folder view renders this array in order,
- * and the stay staff are working in must never sit below a wall of history.
+ * **The order is a contract, and it is oldest-first deliberately.** This array is
+ * the input to `admissionPeriodKeyFor`, which reads `periods[0]` as the earliest
+ * boundary and the last entry as the open admission. Returning the current
+ * admission first would silently file every document under the wrong admission —
+ * the exact failure this module exists to prevent.
+ *
+ * The folder view does want the current admission at the top, so it reorders a
+ * **copy** (`[...periods].sort(…)` in `DocumentUpload.tsx`) rather than asking for
+ * a different array here. Keeping the stay staff are working in above the wall of
+ * history is a presentation decision, so it is made at the presentation layer.
  */
 export function admissionPeriodsFor(child: AdmissionHistorySource | null | undefined): AdmissionPeriod[] {
   if (!child || typeof child !== 'object') return [];

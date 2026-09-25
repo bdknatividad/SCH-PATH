@@ -762,6 +762,66 @@ test('each admission folder carries its own search over its own files', () => {
   assert.match(source, /No documents filed for this admission\./, 'an empty admission must still say so');
 });
 
+test('each resident folder carries its own search, over its own files only', () => {
+  const source = read(FOLDER_VIEW);
+
+  // Item 4 asks for the search to work per resident *and* per admission. The
+  // admission half is pinned above; this is the resident half, and without it a
+  // search box shared across cards would narrow every resident at once — a
+  // question about one child would silently hide another child's documents.
+  assert.match(
+    source,
+    /const \[folderSearchByChild, setFolderSearchByChild\] = useState<Record<string, string>>\(\{\}\)/,
+    'there is no per-resident search state'
+  );
+  assert.match(
+    source,
+    /setFolderSearchByChild\(prev => \(\{ \.\.\.prev, \[nameKey\]: e\.target\.value \}\)\)/,
+    'the resident search box is not keyed to its own resident'
+  );
+  // Both halves of the keying: a box that writes to its own resident but *reads*
+  // a shared slot still shows every resident the same query.
+  assert.match(
+    source,
+    /const childSearchQuery = folderSearchByChild\[nameKey\] \|\| ''/,
+    'the resident search box must read its own resident\u2019s query'
+  );
+
+  // The narrowing runs over `allDocs`, which is this card's own files — the
+  // residents sharing a nameKey, and no others.
+  assert.match(
+    source,
+    /const allDocs = visibleDocs\.filter\(d => allResidentIds\.includes\(d\.residentId \|\| ''\)\)/,
+    'the resident folder must scope its documents to its own residents'
+  );
+  assert.match(
+    source,
+    /const childDocsMatchingSearch = childSearchQuery\.trim\(\)\s*\?\s*allDocs\.filter\(/,
+    'the resident search must narrow that resident\u2019s own documents'
+  );
+
+  // The card header keeps counting the resident's true total: a narrowed view
+  // must not read as "this resident has one file".
+  assert.ok(
+    source.includes("${allDocs.length} file${allDocs.length !== 1 ? 's' : ''}"),
+    'the resident card header must still count the resident\u2019s own files'
+  );
+  assert.doesNotMatch(
+    source,
+    /\$\{childDocsMatchingSearch\.length\} file/,
+    'the resident card header must count the resident, not the search result'
+  );
+
+  // And a search that matches nothing says so, rather than claiming the
+  // resident has filed nothing.
+  assert.match(source, /No documents match/, 'a search that matches nothing must say so');
+  assert.match(
+    source,
+    /No documents filed for this resident yet\./,
+    'a resident with nothing filed must still say so'
+  );
+});
+
 test('both admissions stay readable — no period is filtered out', () => {
   const source = read(FOLDER_VIEW);
   const block = source.slice(source.indexOf('const displayPeriods'), source.indexOf('const flatGroups'));
