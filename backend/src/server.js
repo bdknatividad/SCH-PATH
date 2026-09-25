@@ -2557,6 +2557,16 @@ async function startServer() {
     // Run schema migrations
     await runMigrations();
 
+    // Then make sure nothing the code uses is still missing — a hosted
+    // database where one migration step failed would otherwise break features
+    // one "Unknown column" at a time. Additive only; never fatal.
+    try {
+      const { syncSchema } = require('./utils/schemaSync');
+      await syncSchema(pool);
+    } catch (error) {
+      console.warn('Schema sync warning:', error.message);
+    }
+
     // ── Fail fast on a missing Anecdotal Report template ──
     // Accepted Anecdotal Reports are published as the official form with the
     // filled-up entries overlaid on it, so the template is a hard dependency of
