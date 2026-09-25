@@ -72,10 +72,10 @@ in `services/alertStream.js` (`GET /api/alerts/stream`, read with `fetch` + `Rea
   Never diagnose a "missing" notification from the actor's own account.
 - `/alerts`, `/violations`, `/phaseProgress` have no module guard; `DELETE /api/alerts/:id` lets any
   recipient delete a role-addressed alert for everyone.
-- **Caseload scope:** only `houseparent` is scoped (`utils/residentScope.js`), forward-only. Seed creds:
-  `centerhead`/`centerhead123`, `socialworker`/`social123`, `psychologist`/`psych123`,
-  `nurse`/`nurse123`, `educator`/`educator123`, `HP n`/`hp n 123`. **There is no `admin` account**; the
-  live `socialworker` password is **not** `social123` — do not reset a real account to get a token.
+- **Caseload scope:** only `houseparent` is scoped (`utils/residentScope.js`), forward-only. Seed creds
+  are in `backend/src/scripts/seedDatabase.js` (`centerhead`/`centerhead123` works live). **There is no
+  `admin` account**, and the live `socialworker` password is **not** the seed — do not reset a real
+  account to get a token.
 - `/store` answers `{success, data}`. `/api/children` is ungated at the mount and scopes Houseparents
   inside the controller; `/store` has no `children` key in `STORE_MODULE_BY_RESOURCE`. `/api/tri` (list)
   is gated by the **Houseparent** module while `/api/tri/monitor` and `/summary` are role-gated. A 404 on
@@ -110,6 +110,5 @@ in `services/alertStream.js` (`GET /api/alerts/stream`, read with `fetch` + `Rea
 
 ## Skills
 
-Deep workflows live in the user-level skills, not here: `sch-path-module` (wiring a new module),
-`sch-path-rbac-role` (a role's permissions), `sch-path-deploy-verify` (proving what the live pair
-serves), `safe-codebase-audit`.
+Deep workflows live there, not here: `sch-path-module`, `sch-path-rbac-role`,
+`sch-path-deploy-verify`, `safe-codebase-audit`.
