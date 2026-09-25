@@ -35,10 +35,13 @@ Next: 10+.
    admin, the same reviewer predicate the module already uses); print **full name plus credentials**.
    Implemented as a separate route over separate columns (`/:id/signature/:line`) so it can never
    reach the Houseparent's line. The cover band that hides the template's example names is
-   `{ y: 646.5, height: 12 }`, derived from the form's own ink. **Guard added:**
-   `backend/tests/tri-designated-signatures.test.js` (17 tests). See the daily log for the page-8
-   coordinate table. **Still open:** the SWO III / Section Chief's real full name — currently
-   `Ma'am HCKSBD` (the user's own wording) at `triLayout.json` → `designatedPersonnel.sectionchief.name`.
+   `{ y: 646.5, height: 12 }`, derived from the form's own ink, and it has to be painted **in the
+   on-screen form too** — page 8 is the template rendered as a background, so an overlay alone
+   prints the two names over each other. **Guard added:**
+   `backend/tests/tri-designated-signatures.test.js` (18 tests). Shipped in `2d28847` + `a8762e3`.
+   See the daily log for the page-8 coordinate table and the live verification. **Still open:** the
+   SWO III / Section Chief's real full name — currently `Ma'am HCKSBD` (the user's own wording) at
+   `triLayout.json` → `designatedPersonnel.sectionchief.name`.
 9. **Anecdotal Report.** Leave open for further details the user will supply. Do not assume or modify
    beyond the explicitly requested changes.
 10. **Admission – Piercing/Tattoo Form.** Add a form/section at admission for documenting piercings and
