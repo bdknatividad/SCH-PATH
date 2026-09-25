@@ -5,10 +5,11 @@ was lost from context once. **This file is the list.** The user sends the items 
 each one, check it against the deployed pair, implement what is missing, and add a guard test for
 anything already done.
 
-Status so far: **4, 5, 6, 7, 8, 10 done** (and the force-discharge → re-intake bug found while
-testing 4). Item 8 was answered, then **corrected by the user** and rebuilt — the block is five lines
-and the template's own second-row names are the right people, so the cover band is gone. **Item 9 is
-a do-not-touch item** (leave open for the user). Next: 11+.
+Status so far: **4, 5, 6, 7, 8, 10 done and verified on the deployed pair** (and the
+force-discharge → re-intake bug found while testing 4). Item 8 was answered, then **corrected by the
+user** and rebuilt — the block is five lines and the template's own second-row names are the right
+people, so the cover band is gone. **Item 9 is a do-not-touch item** (leave open for the user).
+**Next: 11 (Academic Support / Tutorial).**
 
 ## GENERAL / SCH
 
@@ -55,20 +56,30 @@ a do-not-touch item** (leave open for the user). Next: 11+.
    See the daily log for the coordinate table.
 9. **Anecdotal Report.** Leave open for further details the user will supply. Do not assume or modify
    beyond the explicitly requested changes.
-10. **Admission – Piercing/Tattoo Form.** ✅ Built. The user chose **fields on the Admission Slip**
-    (not a Child Records tab, not a Medical record type, not an admission-phase document), **one
-    combined dropdown** for the location, and left the field set to me: `type` (Tattoo/Piercing),
-    `location`, and a free-text note. Stored as `admissions.bodyMarkings` — a TEXT column holding a
-    JSON array, on the *admission* rather than the resident, because a marking belongs to the
-    admission that observed it. The vocabulary is one mirrored JSON
+10. **Admission – Piercing/Tattoo Form.** ✅ Built **and verified on the deployed pair**. The user chose
+    **fields on the Admission Slip** (not a Child Records tab, not a Medical record type, not an
+    admission-phase document), **one combined dropdown** for the location, and left the field set to
+    me: `type` (Tattoo/Piercing), `location`, and a free-text note. Stored as `admissions.bodyMarkings`
+    — a TEXT column holding a JSON array, on the *admission* rather than the resident, because a
+    marking belongs to the admission that observed it. The vocabulary is one mirrored JSON
     (`backend/src/config/bodyMarkings.json` ↔ `frontend/src/app/config/bodyMarkings.json`): 2 types,
     35 side-qualified body parts (`Left Chest`, `Right Ear`, … plus `Other`), and the two bounds.
     `admissionController.normalizeBodyMarkings` is the single validator, used by create **and** edit —
     the edit path must not use the generic bind, which turns `''` into NULL. Nothing recorded is
     stored as **NULL, never `'[]'`** ("checked, and there are none" ≠ "not recorded"), and a new
     admission for a returning resident starts **empty** rather than copying the previous list.
-    **Guard:** `backend/tests/admission-body-markings.test.js` (22 tests); 13 mutations, 13 caught.
-    Shipped in `61ba7f8`.
+    **Where it lives:** the card is on **Part 1** of the admission editor (with Resident
+    Identification and Admission Classification), *not* on the Part 2 slip replica. **Guard:**
+    `backend/tests/admission-body-markings.test.js` (22 tests); 15 mutations, 15 caught.
+    Shipped in `61ba7f8`; guard strengthened in `f8ac812`.
+    **Verified live:** API — 5 invalid payloads → 400 with the validator's messages, and a real
+    marking round-tripped then restored. UI — `C:/tmp/verify-item10-ui.js`, **35/35**, including that
+    the body part is a dropdown and **not also a text box**, and the 35-option list with no unsided
+    `Chest`/`Ear`. The save was intercepted (`page.route`) so nothing was written: captured payload
+    `[{"type":"Piercing","location":"Right Ear","description":"…"}]`, all residents still `null`.
+    **Still open:** the markings are stored and editable but are **not drawn onto the official
+    Admission Slip PDF** — that template has no body-marking area, so printing them needs an overlay
+    position the user has to choose.
 11. **Academic Support / Tutorial.** Residents not enrolled in school (e.g. the enrolment period has
     ended) should have Academic Support Sessions / Tutorial as the appropriate educational activity.
 12. **Education – Quarterly Reports by Role.** Each applicable role gets its own Quarterly Report, with
