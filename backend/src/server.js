@@ -1275,6 +1275,15 @@ async function runMigrations() {
     // "Unknown column 'interventionTrackerId' in 'field list'" when a
     // Psychological Staff verified a violation — violationController.review INSERTs
     // into assessments with exactly that column.
+    //
+    // psychosocialActivities is the same story a second time. It was declared in
+    // schema.sql — which nothing executes — so a fresh database had it and every
+    // deployed one did not, and verifying a violation whose guide prescribes a
+    // Psychosocial Activity died with "Unknown column 'psychosocialActivities' in
+    // 'field list'" (violationController.review INSERTs it into assessments). It
+    // anchors AFTER `type`, which the CREATE TABLE above always provides, so it is
+    // safe to ensure first.
+    await ensureColumn('assessments', 'psychosocialActivities', 'JSON NULL', 'type');
     await ensureColumn('assessments', 'violationIds', 'JSON NULL', 'triggeredBy');
     await ensureColumn('assessments', 'interventionTrackerId', 'VARCHAR(40) NULL', 'violationIds');
     await ensureColumn('assessments', 'interventionRequirementId', 'VARCHAR(40) NULL', 'interventionTrackerId');

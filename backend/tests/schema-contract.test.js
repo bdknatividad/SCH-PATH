@@ -98,12 +98,30 @@ function parseAuditColumns(serverSrc) {
  */
 function parseEnsureColumns(serverSrc) {
   const added = new Map();
-  const re = /ensureColumn\(\s*'([^']+)'\s*,\s*'([^']+)'/g;
-  let match;
-  while ((match = re.exec(serverSrc)) !== null) {
-    const [, table, column] = match;
+  const add = (table, column) => {
     if (!added.has(table)) added.set(table, new Set());
     added.get(table).add(column);
+  };
+
+  const re = /ensureColumn\(\s*'([^']+)'\s*,\s*'([^']+)'/g;
+  let match;
+  while ((match = re.exec(serverSrc)) !== null) add(match[1], match[2]);
+
+  // The same helper called in a loop over a literal list, which the pattern above
+  // cannot see because its second argument is an identifier:
+  //   for (const column of ['a', 'b']) { await ensureColumn('t', column, ...) }
+  // Form 08's four signature columns are added exactly this way, so without this
+  // the runtime check below would report them as drift that does not exist.
+  const loopRe = /for\s*\(\s*const\s+(\w+)\s+of\s+\[([^\]]*)\]\s*\)\s*\{([\s\S]*?)\n\s*\}/g;
+  let loop;
+  while ((loop = loopRe.exec(serverSrc)) !== null) {
+    const [, name, list, body] = loop;
+    const call = body.match(new RegExp(`ensureColumn\\(\\s*'([^']+)'\\s*,\\s*${name}\\s*,`));
+    if (!call) continue;
+    for (const raw of list.split(',')) {
+      const value = raw.trim().replace(/^['"]|['"]$/g, '');
+      if (value) add(call[1], value);
+    }
   }
   return added;
 }
@@ -130,6 +148,53 @@ const knownColumns = mergeInto(
   parseAuditColumns(serverSrc)
 );
 
+/**
+ * Columns an *already-provisioned* database actually ends up with.
+ *
+ * This deliberately omits `schema.sql`. Nothing executes it — server.js says so
+ * itself — so a column declared only there reaches a fresh install and never a
+ * deployed one. Merging it into `knownColumns` above is exactly what let
+ * `assessments.psychosocialActivities` pass this suite while every live
+ * verification of a violation with a Psychosocial Activity failed with
+ *     ER_BAD_FIELD_ERROR: Unknown column 'psychosocialActivities' in 'field list'
+ * `knownColumns` answers "is this column in the project's schema somewhere";
+ * `runtimeColumns` answers "will this column exist on the deployed database".
+ * Only the second question can fail in production.
+ */
+const SRC_DIR = path.resolve(__dirname, '../src');
+
+/**
+ * Every JavaScript source under `src/`. Not every table is created in server.js —
+ * a controller may lazily `CREATE TABLE IF NOT EXISTS` its own (childController
+ * creates childIdSequence, the Anecdotal Report controller creates
+ * anecdotalReports), and those are just as much a runtime migration as a boot one.
+ * Treating only server.js as the runtime would report both as drift.
+ */
+function readSrcSources() {
+  const out = [];
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name.endsWith('.js')) out.push(fs.readFileSync(full, 'utf8'));
+    }
+  };
+  walk(SRC_DIR);
+  return out;
+}
+
+const runtimeColumns = (() => {
+  const merged = new Map();
+  for (const src of readSrcSources()) {
+    mergeInto(merged, parseCreateTables(src));
+    mergeInto(merged, parseAlters(src));
+    mergeInto(merged, parseEnsureColumns(src));
+  }
+  return mergeInto(merged, parseAuditColumns(serverSrc));
+})();
+
+const schemaColumns = parseCreateTables(schemaSrc);
+
 test('schema parser found the expected tables', () => {
   for (const table of ['children', 'staff', 'violations', 'healthRecords', 'documents', 'phaseProgress']) {
     assert.ok(knownColumns.has(table), `expected to parse table "${table}"`);
@@ -140,6 +205,57 @@ test('schema parser found the expected tables', () => {
   assert.ok(
     knownColumns.get('assessments')?.has('interventionTrackerId'),
     'expected to parse ensureColumn("assessments", "interventionTrackerId", ...)'
+  );
+  // The loop form has to parse too, or the runtime check below reports drift for
+  // Form 08's signature columns, which are added that way.
+  assert.ok(
+    knownColumns.get('incidentReports')?.has('reportedBySignature'),
+    'expected to parse ensureColumn("incidentReports", <loop variable>, ...)'
+  );
+});
+
+test('every column the app writes is created by a RUNTIME migration', () => {
+  // The failure this catches: a column added to schema.sql and to the code that
+  // writes it, but never to a boot migration. schema.sql is not executed, so a
+  // fresh database works and every deployed one throws ER_BAD_FIELD_ERROR the
+  // moment that code path runs — which is how `assessments.psychosocialActivities`
+  // broke violation verification in production.
+  const problems = [];
+
+  for (const [resource, config] of Object.entries(RESOURCES)) {
+    const live = runtimeColumns.get(resource);
+    // A table the runtime migration never creates is a different problem; skip it
+    // here rather than reporting every one of its columns.
+    if (!live) continue;
+
+    for (const column of config.columns) {
+      if (live.has(column)) continue;
+      const onlyInSchema = (schemaColumns.get(resource) || new Set()).has(column);
+      problems.push(
+        `${resource}.${column}${onlyInSchema ? '  (declared in schema.sql, which nothing executes)' : ''}`
+      );
+    }
+  }
+
+  assert.deepEqual(
+    problems,
+    [],
+    `These columns are written by the app but no runtime migration creates them,\n` +
+      `so every deployed database is missing them:\n  ${problems.join('\n  ')}`
+  );
+});
+
+test('assessments.psychosocialActivities is added by a runtime migration', () => {
+  // Pinned by name because this one shipped: verification of a violation with a
+  // Psychosocial Activity failed with
+  //   Unknown column 'psychosocialActivities' in 'field list'
+  assert.ok(
+    runtimeColumns.get('assessments')?.has('psychosocialActivities'),
+    'server.js must ensureColumn("assessments", "psychosocialActivities", ...) at boot'
+  );
+  assert.ok(
+    /ensureColumn\(\s*'assessments'\s*,\s*'psychosocialActivities'/.test(serverSrc),
+    'expected the ensureColumn call itself, not just a parsed column name'
   );
 });
 
