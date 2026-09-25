@@ -79,8 +79,9 @@ comparison only = **8-hour skew** (`comparableStamp` vs `comparableBoundary`).
 - **`/pdf.worker.mjs`: never `immutable`, always `?v=${pdfjs.version}`.** Unhashed paths revalidate;
   hashed may be `immutable`.
 - `VITE_API_URL` is baked at build time and **must** be set on Vercel — so a local entry-chunk hash never
-  equals the deployed one; compare the chunk's *content*.
-- **Railway redeploys on every push to `master`** — batch docs/memory commits.
+  equals the deployed one.
+- **Railway redeploys on every push to `master`** — batch docs/memory commits. **Vercel can silently skip a
+  push** — check the commit's statuses, not the bundle.
 - **`schema.sql` is never executed.** Only the boot migrations in `server.js` (and a controller's lazy
   `CREATE TABLE`) shape a deployed DB. `/store` swallows per-table errors into `[]`; a literal route
   after a `/:param` sibling 404s.
@@ -119,7 +120,7 @@ field voids the selection set. Inline GraphQL in `node -e` gets shell-mangled �
 - **Verifying a deployed bundle:** grep the chunk for **property** names — the minifier renames locals, so
   a 0 count proves nothing.
 - **6 tests fail here, identically at HEAD** (5 `jwt-secret.test.js`, 1 dialog-guard): `spawnSync …
-  node.exe EBUSY`. Keep whole-suite backups **outside** the repo.
+  node.exe EBUSY`. Back up outside the repo.
 - **Verifying a push — the remote-tracking ref lies.** The sandbox **discards writes to
   `refs/remotes/`**; ask the server: `git ls-remote origin master`.
 - **Behavioural controller tests without a DB:** stub `src/config/database` in `require.cache` before

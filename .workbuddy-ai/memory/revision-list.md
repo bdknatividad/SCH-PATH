@@ -5,10 +5,10 @@ was lost from context once. **This file is the list.** The user sends the items 
 each one, check it against the deployed pair, implement what is missing, and add a guard test for
 anything already done.
 
-Status so far: **4, 5, 6, 7, 8 done** (and the force-discharge → re-intake bug found while testing 4).
-Item 8 was answered, then **corrected by the user** and rebuilt — the block is five lines and the
-template's own second-row names are the right people, so the cover band is gone. **Item 9 is a
-do-not-touch item** (leave open for the user). Next: 10+.
+Status so far: **4, 5, 6, 7, 8, 10 done** (and the force-discharge → re-intake bug found while
+testing 4). Item 8 was answered, then **corrected by the user** and rebuilt — the block is five lines
+and the template's own second-row names are the right people, so the cover band is gone. **Item 9 is
+a do-not-touch item** (leave open for the user). Next: 11+.
 
 ## GENERAL / SCH
 
@@ -55,8 +55,20 @@ do-not-touch item** (leave open for the user). Next: 10+.
    See the daily log for the coordinate table.
 9. **Anecdotal Report.** Leave open for further details the user will supply. Do not assume or modify
    beyond the explicitly requested changes.
-10. **Admission – Piercing/Tattoo Form.** Add a form/section at admission for documenting piercings and
-    tattoos (Left Chest, Right Ear, etc.) using a **dropdown** for the location, not free text.
+10. **Admission – Piercing/Tattoo Form.** ✅ Built. The user chose **fields on the Admission Slip**
+    (not a Child Records tab, not a Medical record type, not an admission-phase document), **one
+    combined dropdown** for the location, and left the field set to me: `type` (Tattoo/Piercing),
+    `location`, and a free-text note. Stored as `admissions.bodyMarkings` — a TEXT column holding a
+    JSON array, on the *admission* rather than the resident, because a marking belongs to the
+    admission that observed it. The vocabulary is one mirrored JSON
+    (`backend/src/config/bodyMarkings.json` ↔ `frontend/src/app/config/bodyMarkings.json`): 2 types,
+    35 side-qualified body parts (`Left Chest`, `Right Ear`, … plus `Other`), and the two bounds.
+    `admissionController.normalizeBodyMarkings` is the single validator, used by create **and** edit —
+    the edit path must not use the generic bind, which turns `''` into NULL. Nothing recorded is
+    stored as **NULL, never `'[]'`** ("checked, and there are none" ≠ "not recorded"), and a new
+    admission for a returning resident starts **empty** rather than copying the previous list.
+    **Guard:** `backend/tests/admission-body-markings.test.js` (22 tests); 13 mutations, 13 caught.
+    Shipped in `61ba7f8`.
 11. **Academic Support / Tutorial.** Residents not enrolled in school (e.g. the enrolment period has
     ended) should have Academic Support Sessions / Tutorial as the appropriate educational activity.
 12. **Education – Quarterly Reports by Role.** Each applicable role gets its own Quarterly Report, with
