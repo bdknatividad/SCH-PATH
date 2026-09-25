@@ -137,7 +137,15 @@ open for the user). **Next: 12 (Education – Quarterly Reports by Role).**
     school and no date and reads back `Tutorial / school=null / date=null`; `''` and `'   '` both store
     NULL; a real school survives trimmed; all four school levels are refused with the middleware's own
     400; a file-only update is still accepted; the probe record is deleted and none left behind.
+    And `C:/tmp/verify-item11-ui.js` **16/16** on the deployed site: the picker offers
+    `Academic Support Sessions / Tutorial` and **not** the bare `Tutorial`; the School and Enrollment
+    Date labels drop their asterisk for that level and get it back for `High School`; the form shows
+    the "Not enrolled in school" hint; a school placement with both fields empty is refused **in the
+    form** (`School is required`) with **0** requests attempted and the dialog still open.
     Shipped in `6657607` (schema + form), `55474d9` (API enforcement), `1e7c783` (blank → NULL).
+    **Deliberate, flag to the user:** the list's filter chips keep the **short** badge — `Tutorial (0)`,
+    next to `HS`/`SHS`/`ALS-SHS` — because the full label is far too long for a chip. `LEVEL_SHORT`
+    went `'TUT'` → `'Tutorial'`; the *full* label is used in the picker and the detail view.
 12. **Education – Quarterly Reports by Role.** Each applicable role gets its own Quarterly Report, with
     role-specific sections. Example: the Educator's report should drop the sections from the
     Observation Phase down if they do not apply. Do not force identical content on every role.
