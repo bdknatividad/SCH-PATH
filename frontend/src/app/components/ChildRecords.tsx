@@ -301,6 +301,73 @@ const PDF_HEIGHT = 612;
 const PRINT_FONT_SIZE = 11;
 const PRINT_LINE_HEIGHT = 13;
 
+/*
+ * The official Admission Slip template has no body-marking area, so the
+ * piercings and tattoos are printed into the free band that sits between the
+ * "Houseparent on Duty" block and the "Attested by / Checked by / Noted by" row.
+ *
+ * Measured on the template (ink-free from y_top 492.3 to 531.4, full width), so
+ * the four lines below occupy y_top 495.75..528 and clear both neighbours.
+ * Changing any of these without re-measuring can collide with the Houseparent
+ * label above or the Attested-by row below. See `bodyMarkingsSlipText`.
+ */
+const MARKINGS_FONT_SIZE = 7;
+const MARKINGS_LINE_HEIGHT = 8.5;
+const MARKINGS_SLIP_MAX_LINES = 4;
+// 72 + 636 = 708, the right edge of the template's own widest line, so the block
+// lines up with the rest of the form instead of running past it.
+const MARKINGS_SLIP_WIDTH = 636;
+const MARKINGS_SLIP_BASELINE = 111;
+
+/**
+ * The recorded piercings and tattoos as the single string the slip prints.
+ *
+ * Grouped by type so each kind's body parts read together, with a marking's note
+ * following it in parentheses. `dropped` is the number of markings that did not
+ * fit the band — it is printed rather than silently omitted, because a slip that
+ * looks like a complete list when it is not is worse than one that says so.
+ * `noteLimit` shortens the notes when even one marking will not fit.
+ */
+function bodyMarkingsSlipText(
+  entries: BodyMarkingEntry[] | null | undefined,
+  dropped = 0,
+  noteLimit = BODY_MARKING_MAX_DESCRIPTION
+): string {
+  const list = (Array.isArray(entries) ? entries : []).filter(
+    (entry) => entry && String(entry.location || '').trim() !== ''
+  );
+
+  const parts: string[] = [];
+
+  for (const type of BODY_MARKING_TYPES) {
+    const inType = list.filter((entry) => entry.type === type);
+
+    if (inType.length === 0) continue;
+
+    const listed = inType
+      .map((entry) => {
+        const note = String(entry.description || '').trim();
+
+        if (!note) return entry.location;
+
+        const clipped =
+          note.length > noteLimit
+            ? `${note.slice(0, Math.max(1, noteLimit - 1)).trimEnd()}…`
+            : note;
+
+        return `${entry.location} (${clipped})`;
+      })
+      .join(', ');
+
+    parts.push(`${type}: ${listed}`);
+  }
+
+  const body = parts.join('; ');
+  const suffix = dropped > 0 ? `${body ? ' ' : ''}(+${dropped} more)` : '';
+
+  return `Piercings / Tattoos: ${body}${suffix}`;
+}
+
 const EMPTY_FORM: ChildFormState = {
   firstName: '',
   middleName: '',
@@ -3592,6 +3659,86 @@ export function ChildRecords() {
       );
 
       /* ==========================================================
+         PIERCINGS / TATTOOS
+         ========================================================== */
+
+      /*
+       * Printed into the free band between the Houseparent block and the
+       * Attested-by row, because the template has no body-marking area of its
+       * own. Nothing is drawn when nothing is on record, so a slip for a
+       * resident with no markings is byte-for-byte what it was before.
+       *
+       * The band holds MARKINGS_SLIP_MAX_LINES lines. When the whole list will
+       * not fit, whole markings are dropped from the end and the number dropped
+       * is printed; when even one will not fit, its note is shortened instead of
+       * the marking being lost.
+       */
+      const recordedMarkings = (
+        Array.isArray(admission.bodyMarkings)
+          ? admission.bodyMarkings
+          : []
+      ).filter(
+        (entry) => entry && String(entry.location || '').trim() !== ''
+      );
+
+      if (recordedMarkings.length > 0) {
+        const markingFits = (
+          text: string
+        ) =>
+          wrapText(
+            text,
+            font,
+            MARKINGS_FONT_SIZE,
+            MARKINGS_SLIP_WIDTH,
+            MARKINGS_SLIP_MAX_LINES + 1
+          ).length <= MARKINGS_SLIP_MAX_LINES;
+
+        let kept =
+          recordedMarkings.length;
+
+        let noteLimit =
+          BODY_MARKING_MAX_DESCRIPTION;
+
+        let slipMarkings =
+          bodyMarkingsSlipText(
+            recordedMarkings
+          );
+
+        while (
+          !markingFits(slipMarkings)
+        ) {
+          if (kept > 1) {
+            kept -= 1;
+          } else if (noteLimit > 8) {
+            noteLimit =
+              Math.max(
+                8,
+                Math.floor(noteLimit / 2)
+              );
+          } else {
+            break;
+          }
+
+          slipMarkings =
+            bodyMarkingsSlipText(
+              recordedMarkings.slice(0, kept),
+              recordedMarkings.length - kept,
+              noteLimit
+            );
+        }
+
+        drawWrappedText(
+          slipMarkings,
+          72.0,
+          MARKINGS_SLIP_BASELINE,
+          MARKINGS_FONT_SIZE,
+          MARKINGS_SLIP_WIDTH,
+          MARKINGS_LINE_HEIGHT,
+          MARKINGS_SLIP_MAX_LINES
+        );
+      }
+
+      /* ==========================================================
          RESIDENT PHOTO
          ========================================================== */
 
@@ -4722,6 +4869,147 @@ export function ChildRecords() {
                   </div>
                 </div>
 
+                {/* ADMISSION STATUS */}
+                <div className="rounded-2xl border-2 border-[#2F3E46]/10 bg-[#f8f9fa] p-5">
+
+                  <div className="flex items-center justify-between gap-4">
+
+                    <div className="min-w-0">
+
+                      <p className="text-xs uppercase tracking-wider font-bold text-gray-400">
+                        Admission Status
+                      </p>
+
+                      <p className="mt-1 font-bold text-[#2F3E46]">
+                        {
+                          admissionStatus
+                        }
+                      </p>
+
+                      <p className="text-xs text-gray-500 mt-1">
+                        {isReturningAdmission
+                          ? 'This resident already has an admission on record. Choose how this one is classified.'
+                          : editingId
+                            ? 'Kept from the admission on record.'
+                            : 'First admission for this resident.'}
+                      </p>
+
+                    </div>
+
+                    <Badge
+                      className={
+                        admissionStatus === 'New'
+                          ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100'
+                          : 'bg-blue-100 text-blue-700 hover:bg-blue-100'
+                      }
+                    >
+                      {admissionStatus === 'New' ? (
+                        <CheckCircle2
+                          size={13}
+                          className="mr-1"
+                        />
+                      ) : (
+                        <History
+                          size={13}
+                          className="mr-1"
+                        />
+                      )}
+
+                      {
+                        admissionStatus
+                      }
+
+                    </Badge>
+
+                  </div>
+
+                  {/* Only a returning admission has a choice to make: the two
+                      returning classifications are indistinguishable from the
+                      data, so one of them has to be picked by hand. */}
+                  {isReturningAdmission && (
+                    <div className="mt-4 space-y-2">
+                      <p className="text-xs font-semibold text-gray-500">
+                        Classify this admission
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {([
+                          'Returning Resident (Abscon/Tumakas)',
+                          'Relapse',
+                        ] as const).map((option) => (
+                          <button
+                            key={option}
+                            type="button"
+                            onClick={() => setReturningAdmissionStatus(option)}
+                            aria-pressed={returningAdmissionStatus === option}
+                            className={[
+                              'rounded-xl border px-3 py-2 text-left text-xs font-semibold transition-colors',
+                              returningAdmissionStatus === option
+                                ? 'border-[#2F3E46] bg-[#2F3E46] text-white'
+                                : 'border-gray-300 bg-white text-[#2F3E46] hover:border-[#2F3E46]',
+                            ].join(' ')}
+                          >
+                            {option}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* ACTIONS */}
+                <div className="flex justify-end gap-2">
+
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      setIsFormOpen(
+                        false
+                      );
+
+                      resetForm();
+                    }}
+                    className="rounded-xl"
+                  >
+                    Cancel
+                  </Button>
+
+                  <Button
+                    variant="outline"
+                    className="rounded-xl px-4 font-normal"
+                    onClick={() => editingId ? setFormStep(2) : continueFromPartOne()}
+                  >
+                    {editingId ? 'Go to Part 2' : 'Continue to Admission Slip'}
+                    <ArrowRight size={16} className="ml-2" />
+                  </Button>
+
+                </div>
+
+              </div>
+            )}
+
+            {/* ====================================================
+                PART 2
+                ==================================================== */}
+
+            {formStep ===
+              2 && (
+              <div className="space-y-6">
+
+                <AdmissionSlipEditor
+                  form={
+                    form
+                  }
+                  setForm={
+                    setForm
+                  }
+                  formErrors={
+                    formErrors
+                  }
+                  houseparents={
+                    houseparents
+                  }
+                />
+
                 {/* PIERCING / TATTOO */}
                 <div className="rounded-2xl border bg-white p-6">
 
@@ -4903,146 +5191,10 @@ export function ChildRecords() {
 
                 </div>
 
-                {/* ADMISSION STATUS */}
-                <div className="rounded-2xl border-2 border-[#2F3E46]/10 bg-[#f8f9fa] p-5">
-
-                  <div className="flex items-center justify-between gap-4">
-
-                    <div className="min-w-0">
-
-                      <p className="text-xs uppercase tracking-wider font-bold text-gray-400">
-                        Admission Status
-                      </p>
-
-                      <p className="mt-1 font-bold text-[#2F3E46]">
-                        {
-                          admissionStatus
-                        }
-                      </p>
-
-                      <p className="text-xs text-gray-500 mt-1">
-                        {isReturningAdmission
-                          ? 'This resident already has an admission on record. Choose how this one is classified.'
-                          : editingId
-                            ? 'Kept from the admission on record.'
-                            : 'First admission for this resident.'}
-                      </p>
-
-                    </div>
-
-                    <Badge
-                      className={
-                        admissionStatus === 'New'
-                          ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-100'
-                          : 'bg-blue-100 text-blue-700 hover:bg-blue-100'
-                      }
-                    >
-                      {admissionStatus === 'New' ? (
-                        <CheckCircle2
-                          size={13}
-                          className="mr-1"
-                        />
-                      ) : (
-                        <History
-                          size={13}
-                          className="mr-1"
-                        />
-                      )}
-
-                      {
-                        admissionStatus
-                      }
-
-                    </Badge>
-
-                  </div>
-
-                  {/* Only a returning admission has a choice to make: the two
-                      returning classifications are indistinguishable from the
-                      data, so one of them has to be picked by hand. */}
-                  {isReturningAdmission && (
-                    <div className="mt-4 space-y-2">
-                      <p className="text-xs font-semibold text-gray-500">
-                        Classify this admission
-                      </p>
-                      <div className="flex flex-wrap gap-2">
-                        {([
-                          'Returning Resident (Abscon/Tumakas)',
-                          'Relapse',
-                        ] as const).map((option) => (
-                          <button
-                            key={option}
-                            type="button"
-                            onClick={() => setReturningAdmissionStatus(option)}
-                            aria-pressed={returningAdmissionStatus === option}
-                            className={[
-                              'rounded-xl border px-3 py-2 text-left text-xs font-semibold transition-colors',
-                              returningAdmissionStatus === option
-                                ? 'border-[#2F3E46] bg-[#2F3E46] text-white'
-                                : 'border-gray-300 bg-white text-[#2F3E46] hover:border-[#2F3E46]',
-                            ].join(' ')}
-                          >
-                            {option}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* ACTIONS */}
-                <div className="flex justify-end gap-2">
-
-                  <Button
-                    variant="ghost"
-                    onClick={() => {
-                      setIsFormOpen(
-                        false
-                      );
-
-                      resetForm();
-                    }}
-                    className="rounded-xl"
-                  >
-                    Cancel
-                  </Button>
-
-                  <Button
-                    variant="outline"
-                    className="rounded-xl px-4 font-normal"
-                    onClick={() => editingId ? setFormStep(2) : continueFromPartOne()}
-                  >
-                    {editingId ? 'Go to Part 2' : 'Continue to Admission Slip'}
-                    <ArrowRight size={16} className="ml-2" />
-                  </Button>
-
-                </div>
-
-              </div>
-            )}
-
-            {/* ====================================================
-                PART 2
-                ==================================================== */}
-
-            {formStep ===
-              2 && (
-              <div className="space-y-6">
-
-                <AdmissionSlipEditor
-                  form={
-                    form
-                  }
-                  setForm={
-                    setForm
-                  }
-                  formErrors={
-                    formErrors
-                  }
-                  houseparents={
-                    houseparents
-                  }
-                />
+                {/* END PIERCING / TATTOO
+                    Explicit boundary for the guard test's slice. Slicing to the
+                    next element instead would silently start matching whatever
+                    happens to sit below the card after a later edit. */}
 
                 <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-4">
                   <div className="flex items-start gap-3">

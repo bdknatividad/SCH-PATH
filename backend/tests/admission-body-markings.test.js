@@ -323,7 +323,11 @@ test('the edit path accepts the markings and validates them the same way', () =>
 /** The piercing/tattoo card, sliced by its own comment markers. */
 function bodyMarkingsCard() {
   const start = RECORDS.indexOf('{/* PIERCING / TATTOO */}');
-  const end = RECORDS.indexOf('{/* ADMISSION STATUS */}', start);
+  // The card was moved from Part 1 to Part 2 on the user's instruction, so its
+  // end is no longer the ADMISSION STATUS block — it now has its own explicit
+  // end marker. Slicing to the neighbouring element would quietly start
+  // matching whatever sits below the card after any later edit.
+  const end = RECORDS.indexOf('{/* END PIERCING / TATTOO', start);
   assert.ok(start > 0, 'the card is gone from the admission slip');
   assert.ok(end > start, 'the card has no end marker');
   const card = RECORDS.slice(start, end);
@@ -332,6 +336,32 @@ function bodyMarkingsCard() {
   assert.ok(card.length > 1500, `the card sliced to ${card.length} characters`);
   return card;
 }
+
+test('the markings card sits on Part 2, with the slip replica', () => {
+  // The user asked for the card on the "Official Admission Slip", which in this
+  // editor is Part 2 (`formStep === 2`); Part 1 is the Resident Admission
+  // Details step. Moving it back would put the fields somewhere the user did not
+  // ask for, and nothing else would fail.
+  const partTwo = RECORDS.indexOf('{formStep ===\n              2 && (');
+  assert.ok(partTwo > 0, 'the Part 2 block is gone');
+
+  const cardAt = RECORDS.indexOf('{/* PIERCING / TATTOO */}');
+  const editorAt = RECORDS.indexOf('<AdmissionSlipEditor');
+  const partOneAt = RECORDS.indexOf('{formStep ===\n              1 && (');
+
+  assert.ok(cardAt > partTwo, 'the card is not inside the Part 2 block');
+  assert.ok(cardAt > editorAt, 'the card is not after the slip replica');
+  assert.ok(partOneAt < partTwo, 'Part 1 no longer precedes Part 2');
+  assert.ok(
+    cardAt > partTwo,
+    'the card drifted back into Part 1',
+  );
+
+  // Part 1's own tail must no longer carry the card: the last card in Part 1 is
+  // Admission Status, and the card marker must come after Part 2 opens.
+  const partOne = RECORDS.slice(partOneAt, partTwo);
+  assert.doesNotMatch(partOne, /PIERCING \/ TATTOO/, 'the card is still on Part 1');
+});
 
 test('the body part is a dropdown, and it is not also a text box', () => {
   const card = bodyMarkingsCard();
@@ -497,4 +527,107 @@ test('the form state carries the markings through a load', () => {
   const declared = RECORDS.match(/bodyMarkings\??: BodyMarkingEntry\[\] \| null;/g) || [];
   assert.equal(declared.length, 1, 'AdmissionRecord does not carry the markings');
   assert.match(RECORDS, /bodyMarkings: BodyMarkingEntry\[\];/, 'ChildFormState has no markings field');
+});
+
+test('the printed Admission Slip carries the markings', () => {
+  // The user asked for the piercings and tattoos to appear on the generated
+  // slip. Three links have to hold, and each fails differently: the form data
+  // reaching `buildSlipData`, the slip data reaching the generator, and the
+  // generator actually drawing it.
+  const slipData = RECORDS.slice(
+    RECORDS.indexOf('const buildSlipData ='),
+    RECORDS.indexOf('const buildSlipData =') + 4000,
+  );
+  assert.ok(slipData.length > 1000, 'buildSlipData sliced to nothing');
+  assert.match(
+    slipData,
+    /bodyMarkings:\s*bodyMarkingsForPayload\(\s*form\.bodyMarkings\s*\)/,
+    'the slip data does not carry the markings, so the PDF can never show them',
+  );
+
+  const generator = RECORDS.slice(
+    RECORDS.indexOf('const generateAdmissionSlipPdf ='),
+    RECORDS.indexOf('const generateAdmissionSlipPdf =') + 12000,
+  );
+  assert.ok(generator.length > 5000, 'the slip generator sliced to nothing');
+  assert.match(generator, /Array\.isArray\(admission\.bodyMarkings\)/, 'the generator ignores the markings');
+  assert.match(generator, /bodyMarkingsSlipText\(/, 'the generator never builds the markings text');
+  assert.match(generator, /drawWrappedText\(\s*slipMarkings/, 'the markings text is built but never drawn');
+
+  // Only when there is something to print: a resident with no markings must
+  // produce the same slip it produced before this feature existed.
+  assert.match(
+    generator,
+    /if \(recordedMarkings\.length > 0\) \{/,
+    'the block would draw even with nothing on record',
+  );
+});
+
+test('the slip text names the type, keeps the note, and admits what it dropped', () => {
+  const helper = RECORDS.slice(
+    RECORDS.indexOf('function bodyMarkingsSlipText('),
+    RECORDS.indexOf('const EMPTY_FORM'),
+  );
+  assert.ok(helper.length > 400, 'the helper sliced to nothing');
+
+  // The vocabulary is iterated, not restated, so the printed grouping cannot
+  // drift from the dropdown's list.
+  assert.ok(helper.includes('for (const type of BODY_MARKING_TYPES)'), 'the list is not grouped by type');
+  // The note follows its own marking, so a note can never be read as belonging
+  // to the next body part in the list.
+  assert.ok(helper.includes('entry.location} (${clipped})'), 'a note is not printed with its marking');
+  assert.ok(helper.includes('(+${dropped} more)'), 'the dropped count is not printed');
+  assert.ok(helper.includes('Piercings / Tattoos: ${body}${suffix}'), 'the block has no label');
+
+  // A slip that lists fewer markings than are on record must say so — silently
+  // printing a short list reads as a complete one.
+  assert.ok(helper.includes('dropped > 0 ?'), 'nothing distinguishes a truncated list from a full one');
+  // And an empty note must not leave stray punctuation behind.
+  assert.ok(helper.includes('if (!note) return entry.location;'), 'an absent note is not handled');
+});
+
+test('the printed block stays inside the free band on the template', () => {
+  // The template has no body-marking area, so the block is overlaid on the band
+  // between the Houseparent block and the Attested-by row. Measured on
+  // frontend/public/forms/admission-slip.pdf at 150 dpi: ink-free from y_top
+  // 492.3 to 531.4 across the full width. Moving the block, growing the font or
+  // adding a line can collide with either neighbour, and no other test would
+  // notice — the PDF would simply print on top of a signature line.
+  const num = (name) => {
+    const m = RECORDS.match(new RegExp(`const ${name} = ([0-9.]+);`));
+    assert.ok(m, `${name} is gone from the component`);
+    return Number(m[1]);
+  };
+
+  const size = num('MARKINGS_FONT_SIZE');
+  const leading = num('MARKINGS_LINE_HEIGHT');
+  const lines = num('MARKINGS_SLIP_MAX_LINES');
+  const baseline = num('MARKINGS_SLIP_BASELINE');
+  const width = num('MARKINGS_SLIP_WIDTH');
+
+  assert.ok(leading > size, `line height ${leading} is not greater than font size ${size}`);
+  assert.ok(lines >= 1 && lines <= 6, `the block claims ${lines} lines`);
+
+  // PDF y grows upward; the measured bands are quoted top-down.
+  const PAGE_HEIGHT = 612;
+  const houseparentEdge = PAGE_HEIGHT - 492.3; // 119.7
+  const attestedEdge = PAGE_HEIGHT - 531.4; // 80.6
+
+  // `drawWrappedText` draws line `index` at `y - index * lineHeight`, so the
+  // first line is the highest and the last is the lowest.
+  const highest = baseline + size * 0.75;
+  const lowest = baseline - (lines - 1) * leading - size * 0.25;
+
+  assert.ok(
+    highest <= houseparentEdge - 2,
+    `the block reaches y=${highest.toFixed(2)}, into the Houseparent block at ${houseparentEdge}`,
+  );
+  assert.ok(
+    lowest >= attestedEdge + 2,
+    `the block drops to y=${lowest.toFixed(2)}, into the Attested-by row at ${attestedEdge}`,
+  );
+
+  // It is drawn at x=72 with this width, and must stay on the page and within
+  // the template's own right margin (its widest line ends at 708.3).
+  assert.equal(72 + width <= 708, true, `the block runs to x=${72 + width}, past the form's right margin`);
 });
