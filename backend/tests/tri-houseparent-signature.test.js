@@ -176,11 +176,26 @@ test('the generator stamps the saved signature onto the Houseparent line', () =>
   const source = read(PDF);
 
   assert.match(source, /const HOUSEPARENT_SIGNATURE_BOX/, 'the signature box is not defined');
-  assert.match(source, /await drawHouseparentSignature\(/, 'the signature is never stamped');
+  // The Houseparent's line is the first entry of the one line list the writer
+  // iterates, so there is a single stamping path for all five lines.
+  assert.match(source, /const SIGNATURE_LINES = \[/, 'the writer has no line list');
   assert.match(
     source,
-    /record\.houseparentSignature/,
-    'the generator never reads the stored signature'
+    /key: 'houseparent',[\s\S]*?signatureColumn: 'houseparentSignature'/,
+    "the Houseparent's line is not in the writer's line list",
+  );
+  assert.match(source, /await drawLineSignature\(pdf, pages, record, line, nameWidth\)/, 'the signature is never stamped');
+  // The drawing is read through the line's own column, so a signature can never be
+  // stamped from another line's field.
+  assert.match(
+    source,
+    /String\(\(record && record\[line\.signatureColumn\]\) \|\| ''\)/,
+    'the generator never reads the stored signature',
+  );
+  assert.match(
+    source,
+    /key: 'houseparent',[\s\S]*?signatureColumn: 'houseparentSignature'/,
+    "the Houseparent's line no longer reads the Houseparent signature column",
   );
   assert.match(source, /page\.drawImage\(/, 'the signature image is never drawn');
   assert.match(
@@ -192,7 +207,7 @@ test('the generator stamps the saved signature onto the Houseparent line', () =>
 
 test('an unsigned or unreadable signature leaves the line blank instead of aborting', () => {
   const source = read(PDF);
-  const helper = source.match(/async function drawHouseparentSignature\(([\s\S]*?)\n\}/);
+  const helper = source.match(/async function drawLineSignature\(([\s\S]*?)\n\}/);
   assert.ok(helper, 'the stamping helper was not found');
 
   // No signature at all is the normal case for a draft.
@@ -205,18 +220,20 @@ test('the signature box sits in the blank band above the printed underscore rule
   const box = parseBox(read(PDF), 'HOUSEPARENT_SIGNATURE_BOX');
 
   // Measured from the template's own text layer: the "Houseparent" signature rule
-  // is a run of underscores whose baseline sits at y = 772.75, and the line of
-  // text above the block ends at y = 804. The band between them is blank.
-  const RULE_BASELINE = 772.75;
-  const TEXT_ABOVE_BOTTOM = 804;
+  // is a run of underscores whose baseline sits at y = 772.75 and whose ink occupies
+  // 770.57–772.5; the descenders of the line above the block ("The Rehabilitation
+  // Team together with the resident:", baseline 813.58) reach down to y = 811.40.
+  // The band between them is blank.
+  const RULE_INK_TOP = 772.5;
+  const TEXT_ABOVE_DESCENDER = 811.4;
 
   assert.ok(
-    box.y >= RULE_BASELINE,
-    `the signature box starts at y=${box.y}, which is on or below the printed rule at y=${RULE_BASELINE}`
+    box.y >= RULE_INK_TOP,
+    `the signature box starts at y=${box.y}, which is on or below the printed rule's ink at y=${RULE_INK_TOP}`
   );
   assert.ok(
-    box.y + box.height <= TEXT_ABOVE_BOTTOM,
-    `the signature box ends at y=${box.y + box.height}, overlapping the text above at y=${TEXT_ABOVE_BOTTOM}`
+    box.y + box.height <= TEXT_ABOVE_DESCENDER,
+    `the signature box ends at y=${box.y + box.height}, overlapping the text above whose descenders reach y=${TEXT_ABOVE_DESCENDER}`
   );
   // It must be a signature-shaped space, not a sliver.
   assert.ok(box.height >= 18, `a ${box.height}pt tall box is too small to sign in`);
@@ -236,11 +253,11 @@ test('the signature box stays inside the width of the Houseparent rule', () => {
   );
 });
 
-test('the printed Houseparent name is drawn above the signature rule', () => {
+test('the printed Houseparent name is drawn below the signature, above the rule', () => {
   const source = read(PDF);
 
   assert.match(source, /const HOUSEPARENT_NAME_POS/, 'the name position is not defined');
-  assert.match(source, /drawHouseparentName\(pages, record, bold\)/, 'the name is never drawn');
+  assert.match(source, /drawLineName\(pages, layout, line, record, bold\)/, 'the name is never drawn');
   assert.match(
     source,
     /record\.houseparentSignedBy \|\| record\.submittedBy/,
@@ -249,17 +266,18 @@ test('the printed Houseparent name is drawn above the signature rule', () => {
   assert.match(source, /module\.exports[\s\S]*HOUSEPARENT_NAME_POS/, 'the name position is not exported');
 });
 
-test('the printed name clears both the signature box and the text above it', () => {
+test('the printed name sits below the signature box and clear of the rule', () => {
   const source = read(PDF);
   const name = parseBox(source, 'HOUSEPARENT_NAME_POS');
   const box = parseBox(source, 'HOUSEPARENT_SIGNATURE_BOX');
 
-  // Measured from the template's text layer: the descenders of the line above the
-  // block ("The Rehabilitation Team together with the resident:") reach down to
-  // y = 811.40, and the printed rule's ink occupies 770.57–772.5.
-  const TEXT_ABOVE_DESCENDER = 811.40;
-  // The extremes of an 8pt Helvetica-Bold glyph box around its baseline, taken from
-  // the generated PDF rather than assumed.
+  // The requirement: on the TRI the assigned Houseparent's name goes BELOW the
+  // signature, so the printed rule reads as the underline of the name.
+  //
+  // Measured from the template's text layer: the printed rule's ink occupies
+  // 770.57–772.5. The extremes of an 8pt Helvetica-Bold glyph box around its baseline
+  // are taken from the generated PDF rather than assumed.
+  const RULE_INK_TOP = 772.5;
   const NAME_ASCENT = 8.56;
   const NAME_DESCENT = 2.46;
 
@@ -267,12 +285,12 @@ test('the printed name clears both the signature box and the text above it', () 
   const nameBottom = name.y - NAME_DESCENT;
 
   assert.ok(
-    nameTop <= TEXT_ABOVE_DESCENDER,
-    `the name reaches y=${nameTop.toFixed(2)}, into the text above at y=${TEXT_ABOVE_DESCENDER}`
+    nameTop <= box.y,
+    `the name reaches y=${nameTop.toFixed(2)}, into the signature box which starts at y=${box.y} — the name must go below the signature`,
   );
   assert.ok(
-    nameBottom >= box.y + box.height,
-    `the name drops to y=${nameBottom.toFixed(2)}, into the signature box which ends at y=${box.y + box.height}`
+    nameBottom >= RULE_INK_TOP,
+    `the name drops to y=${nameBottom.toFixed(2)}, through the printed rule whose ink tops out at y=${RULE_INK_TOP}`,
   );
   assert.equal(name.page, box.page, 'the name and the signature must be on the same page');
 });
@@ -284,8 +302,8 @@ test('the stamp lands on the last page, where the signature block is printed', (
   assert.equal(box.page, 7, `the signature is stamped on page index ${box.page}, not the signature page`);
   assert.match(
     read(PDF),
-    /HOUSEPARENT_SIGNATURE_BOX\.page/,
-    'the stamp ignores the box page and always draws on page 1'
+    /pages\[line\.box\.page\]/,
+    'the stamp ignores the line\'s box page and always draws on page 1'
   );
 });
 
@@ -294,29 +312,30 @@ test('the exported document says which lines carry a signature', () => {
 
   // The subject has to describe the page it is attached to. It used to be a fixed
   // sentence naming the Houseparent's line and calling the rest blank; that stopped
-  // being true once the two designated officials could sign as well, so the wording
-  // is now built from what was actually drawn.
+  // being true once all five lines could be signed, so the wording is now built from
+  // what was actually drawn.
   assert.match(source, /pdf\.setSubject\(/, 'the PDF subject is gone');
   assert.match(
     source,
     /signedRoles\.length[\s\S]*?Left blank:[\s\S]*?blankRoles\.join/,
     'the subject no longer says which lines are signed and which are still blank',
   );
+  // Every line is classified by what the stamping call actually returned, so a line
+  // cannot be reported as signed when no drawing was placed.
   assert.match(
     source,
-    /const blankRoles = \['Administrative Officer', 'SWO I\/Case Manager', \.\.\.blankDesignated\]/,
-    'the two lines that are never signed are no longer named as blank',
+    /const stamped = await drawLineSignature\(pdf, pages, record, line, nameWidth\)/,
+    'the stamping result is not captured, so the subject cannot report it',
   );
   assert.match(
     source,
-    /const signedDesignated = \[\][\s\S]*?const blankDesignated = \[\]/,
-    'the subject is not derived from which signatures were actually drawn',
-  );
-  assert.match(
-    source,
-    /stamped \? signedDesignated : blankDesignated/,
+    /\(stamped \? signedRoles : blankRoles\)\.push\(line\.label\)/,
     'a stamped line is not being recorded as signed',
   );
+  // And the labels come from the line list, so a rename cannot leave the subject
+  // naming a line the form no longer has.
+  assert.match(source, /label: 'Houseparent'/, 'the Houseparent line has no label for the subject');
+  assert.match(source, /label: 'SWO I\/Case Manager'/, 'the SWO I line has no label for the subject');
 });
 
 /* ================================================================
@@ -417,7 +436,7 @@ test('the signing surfaces are one per signable line, each gated to its own role
   const source = read(TRI_UI);
 
   // Two literal pads in the source: the Houseparent's own, and one rendered inside
-  // `TRI_DESIGNATED_LINES.map(...)` for the two official lines. Not more — a third
+  // `TRI_OFFICIAL_LINES.map(...)` for the four official lines. Not more — a third
   // literal pad would be a line nothing ever writes to.
   assert.equal(
     (source.match(/<SignaturePadModal/g) || []).length,
@@ -431,12 +450,12 @@ test('the signing surfaces are one per signable line, each gated to its own role
     /canSignHouseparent=\{isHouseparent\}/,
     'the Houseparent pad is not limited to a Houseparent'
   );
-  // ...and the two official lines are gated to the reviewing roles instead, which is
+  // ...and the four official lines are gated to the reviewing roles instead, which is
   // a separate switch — one gate cannot express both rules.
   assert.match(
     source,
-    /canSignOfficial && TRI_DESIGNATED_LINES\.map\(/,
-    'the two official lines are not gated separately from the Houseparent line'
+    /canSignOfficial && TRI_OFFICIAL_LINES\.map\(/,
+    'the official lines are not gated separately from the Houseparent line'
   );
   assert.match(
     source,
@@ -510,20 +529,27 @@ test('the browser export stamps the signature, not just the server copy', () => 
     /record\.houseparentSignature/,
     'the export no longer reads the stored signature'
   );
-  // The print view inlines the drawing above the Houseparent rule.
+  // The print view inlines the drawing above the Houseparent rule. Both the
+  // Houseparent's line and the four official lines go through the one builder, so the
+  // shape check and the "signed" slot cannot exist for one line and not another.
   assert.match(
     source,
-    /SIGNATURE_DATA_URL\.test\(signatureDataUrl\)/,
-    'the print view no longer validates the signature before inlining it'
+    /SIGNATURE_DATA_URL\.test\(dataUrl\)/,
+    'the print view no longer validates a signature before inlining it'
   );
   assert.match(
     source,
-    /<div class="rule">Houseparent<\/div>/,
-    'the printed signature block lost the Houseparent rule the drawing sits on'
+    /const signatureCellHtml = \(label: string, name: string, dataUrl: string\)/,
+    'the printed signature block no longer has one builder for its lines'
   );
   assert.match(
     source,
-    /class="signed"/,
+    /<div class="rule">\$\{escapeHtml\(label\)\}<\/div>/,
+    'the printed signature block lost the rule each drawing sits on'
+  );
+  assert.match(
+    source,
+    /const slot = img \|\| name \? 'signed' : ''/,
     'the printed signature block no longer has a slot for the drawing and the name'
   );
 });
@@ -533,15 +559,17 @@ test('the browser export reads the same signature geometry as the server', () =>
   const layout = JSON.parse(read(path.resolve(__dirname, '../../frontend/src/shared/triLayout.json')));
 
   // One copy of the coordinates, or the downloaded PDF and the published one would
-  // place the signature differently on the same form.
+  // place the signature differently on the same form. Measured from the template:
+  // the Houseparent rule's ink tops out at y 772.5, its underscore run spans
+  // x 72.02 .. 162.26, and the name goes below the signature at baseline y 777.
   assert.deepEqual(
     { page: layout.houseparentSignatureBox.page, x: layout.houseparentSignatureBox.x, y: layout.houseparentSignatureBox.y, width: layout.houseparentSignatureBox.width, height: layout.houseparentSignatureBox.height },
-    { page: 7, x: 72.02, y: 774, width: 90.24, height: 22 },
+    { page: 7, x: 72.02, y: 786, width: 90.24, height: 20 },
     'triLayout.json no longer matches the box the server stamps'
   );
   assert.deepEqual(
     { page: layout.houseparentNamePos.page, x: layout.houseparentNamePos.x, y: layout.houseparentNamePos.y, size: layout.houseparentNamePos.size, width: layout.houseparentNamePos.width },
-    { page: 7, x: 72.02, y: 800, size: 8, width: 90.24 },
+    { page: 7, x: 72.02, y: 777, size: 8, width: 90.24 },
     'triLayout.json no longer matches the name position the server draws'
   );
   assert.match(ui, /triLayout\.houseparentSignatureBox/, 'the export does not read the shared signature box');

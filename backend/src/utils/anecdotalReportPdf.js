@@ -289,13 +289,37 @@ function anecdotalReportFileName(report = {}) {
 const HOUSEPARENT_SIGNATURE_BOX = { x: 58, top: 446, width: 220, height: 26 };
 
 /**
- * Stamps a drawn signature into `box` (top-left coordinates), scaled to fit and
- * centred.
+ * The Houseparent's printed name, and the band the writer clears before drawing it.
+ *
+ * `top`/`height` are in top-left coordinates (the band's upper edge, extending
+ * down); `baseline` is in PDF coordinates, which is what `drawText` takes. The name
+ * sits BELOW the signature band and directly above the form's own "Houseparent"
+ * caption, so the block reads signature, name, caption — the same order as the TRI's
+ * Houseparent line.
+ *
+ * Measured against the template: the form's own example name (`SADIC C. ABDULNASSER`)
+ * has its baseline at top-left y 483.30, and the caption "Houseparent" at 497.10. The
+ * band covers the example so the real name does not print over it.
+ *
+ * The overlay in `AnecdotalReports.tsx` positions its input against this same line —
+ * its `pdfTop(444.4, 19)` is this band expressed the other way up — so the name on
+ * screen and the name in the file sit in the same place.
+ */
+const HOUSEPARENT_NAME = { top: 473.6, height: 15, baseline: 452.4 };
+
+/**
+ * Stamps a drawn signature into `box` (top-left coordinates), scaled to fit.
+ *
+ * `anchorWidth` is the width of the printed name the signature belongs to. The
+ * drawing is centred over the name rather than over the box: the name is left-aligned
+ * and usually much narrower than the 220pt slot, so centring on the slot would leave
+ * the signature floating away from the name it belongs to. The result is clamped to
+ * the slot, so a wide drawing beside a short name still starts inside it.
  *
  * A missing or unusable value is skipped rather than thrown: one unsigned
  * report must not stop the rest of the document being produced.
  */
-async function drawSignature(pdf, page, dataUrl, box) {
+async function drawSignature(pdf, page, dataUrl, box, anchorWidth) {
   const value = String(dataUrl || '');
   const match = value.match(/^data:image\/(png|jpeg|jpg);base64,/i);
   if (!match || !box) return false;
@@ -309,8 +333,12 @@ async function drawSignature(pdf, page, dataUrl, box) {
     const drawWidth = image.width * fit;
     const drawHeight = image.height * fit;
 
+    const anchor = Number(anchorWidth) > 0 ? Math.min(Number(anchorWidth), box.width) : box.width;
+    const centred = box.x + (anchor - drawWidth) / 2;
+    const x = Math.min(Math.max(centred, box.x), Math.max(box.x, box.x + box.width - drawWidth));
+
     page.drawImage(image, {
-      x: box.x + (box.width - drawWidth) / 2,
+      x,
       y: PDF_HEIGHT - box.top - drawHeight - (box.height - drawHeight) / 2,
       width: drawWidth,
       height: drawHeight,
@@ -391,9 +419,14 @@ async function buildAnecdotalReportPdf(report = {}) {
 
   // ── Page 2 — who assessed the child
   if (pages[1]) {
-    whiteOut(pages[1], 55, 473.6, 220, 15);
-    draw(pages[1], report.houseparentName, 58, 452.4, HEADER_SIZE, bold);
-    await drawSignature(pdf, pages[1], report.houseparentSignature, HOUSEPARENT_SIGNATURE_BOX);
+    whiteOut(pages[1], 55, HOUSEPARENT_NAME.top, 220, HOUSEPARENT_NAME.height);
+    draw(pages[1], report.houseparentName, 58, HOUSEPARENT_NAME.baseline, HEADER_SIZE, bold);
+    // The signature is centred over the name, so its width has to be measured with
+    // the same font and size the name was just drawn with — and over the sanitized
+    // text, which is what actually went into the stream.
+    const drawnName = sanitize(report.houseparentName);
+    const nameWidth = drawnName ? bold.widthOfTextAtSize(drawnName, HEADER_SIZE) : 0;
+    await drawSignature(pdf, pages[1], report.houseparentSignature, HOUSEPARENT_SIGNATURE_BOX, nameWidth);
   }
 
   return Buffer.from(await pdf.save());
@@ -440,8 +473,11 @@ module.exports = {
   clearTemplateCache,
   FIELDS,
   HOUSEPARENT_SIGNATURE_BOX,
+  HOUSEPARENT_NAME,
+  drawSignature,
   PDF_WIDTH,
   PDF_HEIGHT,
+  HEADER_SIZE,
   WRAP_CHARS,
   MONTH_NAMES,
 };

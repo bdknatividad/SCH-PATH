@@ -19,7 +19,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const zlib = require('node:zlib');
 
-const { PDFDocument, PDFName, PDFRawStream } = require('pdf-lib');
+const { PDFDocument, PDFName, PDFRawStream, StandardFonts } = require('pdf-lib');
 
 const {
   buildAnecdotalReportPdf,
@@ -35,6 +35,9 @@ const {
   clearTemplateCache,
   FIELDS,
   WRAP_CHARS,
+  HOUSEPARENT_SIGNATURE_BOX,
+  HOUSEPARENT_NAME,
+  HEADER_SIZE,
 } = require('../src/utils/anecdotalReportPdf');
 
 const CONTENT = {
@@ -339,4 +342,163 @@ test('the template cache can be cleared, so a missing template is detectable', (
   assert.ok(loadTemplateBytes().length > 0);
   clearTemplateCache();
   assert.ok(loadTemplateBytes().length > 0, 'the template must be re-readable after clearing');
+});
+
+// ── The Houseparent's signature ──────────────────────────────────────────────
+// The drawing has to sit over the printed name it belongs to. The name is
+// left-aligned in a 220pt slot, so centring the drawing on the slot (which is what
+// this used to do) leaves it floating ~60pt to the right of the name — visible on a
+// published document and invisible to every type check.
+
+/** A 1x1 PNG: a real, decodable image with a square aspect, so the fit is height-bound. */
+const PNG_1X1 = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==';
+
+/**
+ * Where a signature was stamped, read back from the page content stream.
+ *
+ * pdf-lib emits `q` then `1 0 0 1 x y cm` (the origin) then `w 0 0 h 0 0 cm` (the
+ * scale) then `/Image-N Do`. The template's own artwork uses a different shape, so
+ * this matches only a stamped drawing — and returns nothing when none was drawn.
+ */
+function stampedImages(buffer) {
+  return [...decodedStreams(buffer).matchAll(
+    /q\s*\n1 0 0 1 ([\d.-]+) ([\d.-]+) cm\s*\n1 0 0 1 0 0 cm\s*\n([\d.-]+) 0 0 ([\d.-]+) 0 0 cm\s*\n1 0 0 1 0 0 cm\s*\n\/Image-[\d]+ Do/g,
+  )].map((match) => ({
+    x: Number(match[1]),
+    y: Number(match[2]),
+    width: Number(match[3]),
+    height: Number(match[4]),
+  }));
+}
+
+test('the stamp only matches a drawn signature, so the checks below cannot pass vacuously', async () => {
+  const unsigned = await buildAnecdotalReportPdf({ houseparentName: 'Maria Santos', content: {} });
+  assert.equal(
+    stampedImages(unsigned).length,
+    0,
+    "the template's own artwork is being mistaken for a stamped signature",
+  );
+
+  const signed = await buildAnecdotalReportPdf({
+    houseparentName: 'Maria Santos',
+    houseparentSignature: PNG_1X1,
+    content: {},
+  });
+  assert.equal(stampedImages(signed).length, 1, 'exactly one signature should be stamped');
+});
+
+test('the signature is centred over the printed name, not over the empty slot', async () => {
+  const buffer = await buildAnecdotalReportPdf({
+    houseparentName: 'Maria Santos',
+    houseparentSignature: PNG_1X1,
+    content: {},
+  });
+  const [stamp] = stampedImages(buffer);
+  assert.ok(stamp, 'no signature was stamped');
+
+  const measure = await PDFDocument.create();
+  const bold = await measure.embedFont(StandardFonts.HelveticaBold);
+  const nameWidth = bold.widthOfTextAtSize('Maria Santos', HEADER_SIZE);
+
+  const centre = stamp.x + stamp.width / 2;
+  const nameCentre = HOUSEPARENT_SIGNATURE_BOX.x + nameWidth / 2;
+  assert.ok(
+    Math.abs(centre - nameCentre) < 0.01,
+    `the signature is centred at x=${centre}, not over the name whose centre is x=${nameCentre}`,
+  );
+
+  // The slot is 220pt wide, so centring on it is a different answer for this name.
+  // Proving they differ is what stops this test passing for the old behaviour.
+  const slotCentre = HOUSEPARENT_SIGNATURE_BOX.x + HOUSEPARENT_SIGNATURE_BOX.width / 2;
+  assert.ok(
+    Math.abs(centre - slotCentre) > 1,
+    'the signature is still centred on the empty slot rather than on the name it belongs to',
+  );
+});
+
+test('the signature stays inside the slot even beside a name wider than it', async () => {
+  const buffer = await buildAnecdotalReportPdf({
+    houseparentName: 'Bartholomew Emmanuel Villanueva-Rodriguez',
+    houseparentSignature: PNG_1X1,
+    content: {},
+  });
+  const [stamp] = stampedImages(buffer);
+  assert.ok(stamp, 'no signature was stamped');
+
+  assert.ok(
+    stamp.x >= HOUSEPARENT_SIGNATURE_BOX.x - 0.01
+      && stamp.x + stamp.width <= HOUSEPARENT_SIGNATURE_BOX.x + HOUSEPARENT_SIGNATURE_BOX.width + 0.01,
+    `the stamp spans x ${stamp.x}..${stamp.x + stamp.width}, outside the ${HOUSEPARENT_SIGNATURE_BOX.width}pt slot`,
+  );
+});
+
+test('the name sits below the signature band and clear of the caption underneath', () => {
+  // Measured from the template's own text layer: "Assessed by:" has its baseline at
+  // top-left y 441.90, the form's own example name (SADIC C. ABDULNASSER) at 483.30,
+  // and the caption "Houseparent" at 497.10.
+  const ASSESSED_BY_BASELINE = 441.9;
+  const EXAMPLE_NAME_BASELINE = 483.3;
+  const CAPTION_BASELINE = 497.1;
+  const GLYPH_ASCENT = 8.7;
+
+  const bandTop = HOUSEPARENT_NAME.top;
+  const bandBottom = HOUSEPARENT_NAME.top + HOUSEPARENT_NAME.height;
+  const signatureBottom = HOUSEPARENT_SIGNATURE_BOX.top + HOUSEPARENT_SIGNATURE_BOX.height;
+
+  // Below the signature band — the same order as the TRI's Houseparent line.
+  assert.ok(
+    bandTop >= signatureBottom,
+    `the name band starts at ${bandTop}, inside the signature band which ends at ${signatureBottom}`,
+  );
+  // Clear of the label above the signature.
+  assert.ok(
+    bandTop >= ASSESSED_BY_BASELINE + GLYPH_ASCENT,
+    'the name band reaches up into the "Assessed by:" label',
+  );
+  // The band has to cover the form's own example name, or the real name prints on
+  // top of it.
+  assert.ok(
+    bandTop <= EXAMPLE_NAME_BASELINE - GLYPH_ASCENT && bandBottom >= EXAMPLE_NAME_BASELINE,
+    `the band ${bandTop}..${bandBottom} does not cover the example name at ${EXAMPLE_NAME_BASELINE}`,
+  );
+  // And it must stop above the caption, the next thing below it.
+  assert.ok(
+    bandBottom <= CAPTION_BASELINE,
+    `the name band ends at ${bandBottom}, into the "Houseparent" caption at ${CAPTION_BASELINE}`,
+  );
+  // The baseline the writer actually draws at is inside that band.
+  const drawnTop = 936 - HOUSEPARENT_NAME.baseline - GLYPH_ASCENT;
+  assert.ok(
+    drawnTop >= bandTop && drawnTop <= bandBottom,
+    `the name is drawn at top ${drawnTop}, outside the band ${bandTop}..${bandBottom} cleared for it`,
+  );
+});
+
+test('the on-screen overlay still positions the name and the pad on the writer\'s lines', () => {
+  const source = fs.readFileSync(FRONTEND_COMPONENT, 'utf8');
+
+  assert.match(
+    source,
+    /const HOUSEPARENT_SIGNATURE_BOX = \{ x: 58, top: 446, width: 220, height: 26 \}/,
+    'the on-screen pad no longer sits on the band the writer stamps into',
+  );
+  assert.match(
+    source,
+    /aria-label="Houseparent Assessed By"[\s\S]*?top: pdfTop\(444\.4, 19\)/,
+    'the on-screen name is no longer on the line the writer draws it on',
+  );
+
+  // The overlay's own numbers, read the other way up, land on the writer's band. A
+  // tolerance of 2pt allows for the input's own padding without letting the two drift
+  // onto different lines.
+  const overlayTop = 936 - 444.4 - 19;
+  assert.ok(
+    Math.abs(overlayTop - HOUSEPARENT_NAME.top) <= 2,
+    `the on-screen name starts at ${overlayTop} but the writer clears from ${HOUSEPARENT_NAME.top}`,
+  );
+  assert.deepEqual(
+    HOUSEPARENT_SIGNATURE_BOX,
+    { x: 58, top: 446, width: 220, height: 26 },
+    'the writer no longer stamps into the band the overlay draws on',
+  );
 });

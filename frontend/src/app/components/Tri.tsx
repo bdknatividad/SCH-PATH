@@ -45,10 +45,23 @@ interface TriRecord {
   houseparentSignedBy?: string | null;
   houseparentSignedAt?: string | null;
   /**
-   * The two designated officials on the same "Assessed by" block — SWO II/Center
-   * Head and SWO III/Section Chief. Each line keeps its own signature and signer,
-   * so a drawing can never be attributed to the wrong official.
+   * The four designated officials on the same "Assessed by" block — Administrative
+   * Officer, SWO I/Case Manager, SWO II/Center Head and SWO III/Section Chief. Each
+   * line keeps its own signature and signer, so a drawing can never be attributed to
+   * the wrong official.
+   *
+   * The column names name the LINE, not the office-holder, because the people on them
+   * change: the printed names live in `shared/triLayout.json`. `centerhead*` and
+   * `sectionchief*` keep the names they shipped with — they are the SWO II/Center Head
+   * and SWO III/Section Chief lines — so the signatures already stored on live records
+   * are not moved.
    */
+  adminOfficerSignature?: string | null;
+  adminOfficerSignedBy?: string | null;
+  adminOfficerSignedAt?: string | null;
+  swo1Signature?: string | null;
+  swo1SignedBy?: string | null;
+  swo1SignedAt?: string | null;
   centerheadSignature?: string | null;
   centerheadSignedBy?: string | null;
   centerheadSignedAt?: string | null;
@@ -388,43 +401,72 @@ const TRI_HOUSEPARENT_SIGNATURE_BOX = triLayout.houseparentSignatureBox;
 const TRI_HOUSEPARENT_NAME_POS = triLayout.houseparentNamePos;
 
 /**
- * The page-8 second row: the facility's two designated officials, SWO II/Center
- * Head and SWO III/Section Chief.
+ * The page-8 "Assessed by" block's four official lines: Administrative Officer and
+ * SWO I/Case Manager on the first row, SWO II/Center Head and SWO III/Section Chief
+ * on the second.
  *
  * Same one-copy-of-the-facts rule as the Houseparent line above — the boxes, the
  * name baselines and the printed names all come from `triLayout.json`, which the
  * backend writer reads too, so the downloaded copy and the published one cannot
  * place a signature or spell a name differently.
  *
- * `signatureField` names the column on the record, and the backend's
- * OFFICIAL_SIGNATURE_LINES uses the same keys as the URL segment, so a line is
- * addressed by one name end to end.
+ * `signatureField` names the column on the record and `key` is the URL segment the
+ * signature route takes, so a line is addressed by one name end to end. They differ
+ * for the last two lines only: the keys are `swo2`/`swo3` but the columns kept the
+ * names they shipped with (`centerheadSignature`/`sectionchiefSignature`), which is
+ * what keeps the signatures already stored on live records readable.
+ *
+ * `namePos` is null for the two second-row lines because the template already prints
+ * those names itself, correctly — the app draws no name for them and only stamps a
+ * signature. `nameInkWidth` is the template's own measured extent, used to centre
+ * that signature over the name it belongs to, since there is no drawn name to measure.
  */
-const TRI_DESIGNATED_LINES = [
+interface TriOfficialLine {
+  /** The URL segment the signature route takes, matching the backend's map key. */
+  key: string;
+  label: string;
+  signatureBox: { page: number; x: number; y: number; width: number; height: number };
+  /** null when the template already prints the name, so the app draws none. */
+  namePos: { page: number; x: number; y: number; size: number; width: number } | null;
+  signatureField: 'adminOfficerSignature' | 'swo1Signature' | 'centerheadSignature' | 'sectionchiefSignature';
+  /** The template's own name extent, used to centre a signature with no drawn name. */
+  nameInkWidth: number;
+}
+
+const TRI_OFFICIAL_LINES: TriOfficialLine[] = [
   {
-    key: 'centerhead',
-    label: 'SWO II / Center Head',
-    signatureBox: (triLayout as any).centerheadSignatureBox,
-    namePos: (triLayout as any).centerheadNamePos,
-    signatureField: 'centerheadSignature' as const,
+    key: 'adminofficer',
+    label: 'Administrative Officer',
+    signatureBox: triLayout.adminOfficerSignatureBox,
+    namePos: triLayout.adminOfficerNamePos,
+    signatureField: 'adminOfficerSignature' as const,
+    nameInkWidth: 0,
   },
   {
-    key: 'sectionchief',
+    key: 'swo1',
+    label: 'SWO I / Case Manager',
+    signatureBox: triLayout.swo1SignatureBox,
+    namePos: triLayout.swo1NamePos,
+    signatureField: 'swo1Signature' as const,
+    nameInkWidth: 0,
+  },
+  {
+    key: 'swo2',
+    label: 'SWO II / Center Head',
+    signatureBox: triLayout.swo2SignatureBox,
+    namePos: null,
+    signatureField: 'centerheadSignature' as const,
+    nameInkWidth: 179.32,
+  },
+  {
+    key: 'swo3',
     label: 'SWO III / Section Chief',
-    signatureBox: (triLayout as any).sectionchiefSignatureBox,
-    namePos: (triLayout as any).sectionchiefNamePos,
+    signatureBox: triLayout.swo3SignatureBox,
+    namePos: null,
     signatureField: 'sectionchiefSignature' as const,
+    nameInkWidth: 188.12,
   },
 ];
-
-/**
- * The band painted white before a designated name is printed, so the template's own
- * example name underneath does not show through.
- *
- * Mirrors `DESIGNATED_NAME_COVER` in `backend/src/utils/triReportPdf.js`, which
- * pins the pair: the downloaded copy and the published one must hide the same text.
- */
-const TRI_DESIGNATED_NAME_COVER = { y: 646.5, height: 12 };
 
 /** The designated official's printed name, from the shared layout. */
 function designatedLineName(key: string): string {
@@ -462,9 +504,14 @@ async function drawTriHouseparentSignature(pdf: any, pages: any[], record: TriRe
   const name = houseparentLineName(record);
   const namePos = TRI_HOUSEPARENT_NAME_POS;
   const namePage = pages[namePos.page];
+  // The width the name actually renders at, which is what the signature is centred
+  // over. The name is left-aligned in a slot wider than it usually needs, so centring
+  // on the slot would leave the drawing floating away from the name it belongs to.
+  let nameWidth = 0;
   if (namePage && name) {
     let size = namePos.size;
     while (size > 4 && font.widthOfTextAtSize(name, size) > namePos.width) size -= 0.25;
+    nameWidth = font.widthOfTextAtSize(name, size);
     namePage.drawText(name, { x: namePos.x, y: namePos.y, size, font, color: rgb(0.08, 0.08, 0.08) });
   }
 
@@ -481,8 +528,9 @@ async function drawTriHouseparentSignature(pdf: any, pages: any[], record: TriRe
     const scale = Math.min(box.width / image.width, box.height / image.height);
     const width = image.width * scale;
     const height = image.height * scale;
+    const anchorWidth = nameWidth || box.width;
     page.drawImage(image, {
-      x: box.x + (box.width - width) / 2,
+      x: box.x + (anchorWidth - width) / 2,
       y: box.y + (box.height - height) / 2,
       width,
       height,
@@ -494,34 +542,33 @@ async function drawTriHouseparentSignature(pdf: any, pages: any[], record: TriRe
 }
 
 /**
- * Stamps the two designated officials' printed names and drawn signatures onto the
- * page-8 second row of an exported PDF.
+ * Stamps the four official lines' printed names and drawn signatures onto the page-8
+ * "Assessed by" block of an exported PDF.
  *
- * Mirrors `drawDesignatedName` / `drawDesignatedSignature` in the backend writer.
- * The template already prints an example name on each of those two lines, so the
- * band is painted white first — otherwise the real name and the example would be
- * printed on top of each other. The signature is drawn above the name it belongs to.
+ * Mirrors `SIGNATURE_LINES` / `drawLineName` / `drawLineSignature` in the backend
+ * writer. On the first row the template is blank, so the name is drawn below the
+ * signature — the same order as the Houseparent's line, so each rule reads as the
+ * underline of its name. The second row is the template's own exception: it already
+ * prints both names correctly below the rule, so nothing is drawn there and only the
+ * signature is stamped. Nothing is ever painted white; there is no stale text to hide.
  *
  * A line with no signature, or one that cannot be decoded, is not an error: it is
  * simply left blank, exactly as on the server.
  */
-async function drawTriDesignatedSignatures(pdf: any, pages: any[], record: TriRecord, font: any) {
-  for (const line of TRI_DESIGNATED_LINES) {
+async function drawTriOfficialSignatures(pdf: any, pages: any[], record: TriRecord, font: any) {
+  for (const line of TRI_OFFICIAL_LINES) {
     const namePos = line.namePos;
-    const namePage = pages[namePos.page];
     const name = designatedLineName(line.key);
+    let nameWidth = 0;
 
-    if (namePage && name) {
-      namePage.drawRectangle({
-        x: namePos.x,
-        y: TRI_DESIGNATED_NAME_COVER.y,
-        width: namePos.width,
-        height: TRI_DESIGNATED_NAME_COVER.height,
-        color: rgb(1, 1, 1),
-      });
-      let size = namePos.size;
-      while (size > 4 && font.widthOfTextAtSize(name, size) > namePos.width) size -= 0.25;
-      namePage.drawText(name, { x: namePos.x, y: namePos.y, size, font, color: rgb(0.08, 0.08, 0.08) });
+    if (namePos && name) {
+      const namePage = pages[namePos.page];
+      if (namePage) {
+        let size = namePos.size;
+        while (size > 4 && font.widthOfTextAtSize(name, size) > namePos.width) size -= 0.25;
+        nameWidth = font.widthOfTextAtSize(name, size);
+        namePage.drawText(name, { x: namePos.x, y: namePos.y, size, font, color: rgb(0.08, 0.08, 0.08) });
+      }
     }
 
     const dataUrl = String((record as any)[line.signatureField] || '');
@@ -537,8 +584,9 @@ async function drawTriDesignatedSignatures(pdf: any, pages: any[], record: TriRe
       const scale = Math.min(box.width / image.width, box.height / image.height);
       const width = image.width * scale;
       const height = image.height * scale;
+      const anchorWidth = nameWidth || line.nameInkWidth || box.width;
       page.drawImage(image, {
-        x: box.x + (box.width - width) / 2,
+        x: box.x + (anchorWidth - width) / 2,
         y: box.y + (box.height - height) / 2,
         width,
         height,
@@ -606,11 +654,11 @@ async function openFormalPdfReport(record: TriRecord, child: any, onError?: (mes
     drawPdfText(summary, exportedRating, 482, 189, 9, bold);
     drawPdfText(summary, record.previousRating || '', 482, 168, 9, font);
 
-    // The block's three filled-in lines: the Houseparent's, and the two designated
-    // officials' on the row below. Stamped here as well as in the published copy so
-    // an export is never missing a signature the record actually carries.
+    // All five lines of the block: the Houseparent's, and the four designated
+    // officials'. Stamped here as well as in the published copy so an export is never
+    // missing a signature the record actually carries.
     await drawTriHouseparentSignature(pdf, pages, record, bold);
-    await drawTriDesignatedSignatures(pdf, pages, record, bold);
+    await drawTriOfficialSignatures(pdf, pages, record, bold);
 
     const bytes = await pdf.save();
     const safeBytes = new Uint8Array(bytes.byteLength);
@@ -877,11 +925,12 @@ function OfficialTriEditor({
               the Houseparent's line is not part of that, so for them this stays a
               read-only record of what was signed.
 
-              The two boxes mirror the generator's measured constants in
-              `backend/src/utils/triReportPdf.js`: the name sits in the 797.5–808.6
-              band (a baseline of 800, so its box centres on 803) and the pad fills
-              the 774–796 signature box. Move one without the other and the on-screen
-              form stops matching the exported PDF.
+              The boxes mirror the generator's measured constants in
+              `backend/src/utils/triReportPdf.js`, read through `triLayout.json`: the
+              name sits below the signature and directly above the rule, so the rule
+              reads as the underline of the name (baseline y 777), and the pad fills
+              the blank band above it (y 786-806). Move one without the other and the
+              on-screen form stops matching the exported PDF.
             */}
             {houseparentName && (
               <span
@@ -889,9 +938,9 @@ function OfficialTriEditor({
                 data-tri-houseparent-name={houseparentName}
                 className="pointer-events-none absolute z-10 truncate font-bold leading-none text-black"
                 style={{
-                  left: pdfPercentX(72.02),
-                  top: pdfPercentTop(803, 11),
-                  width: pdfPercentX(90.24),
+                  left: pdfPercentX(TRI_HOUSEPARENT_NAME_POS.x),
+                  top: pdfPercentTop(TRI_HOUSEPARENT_NAME_POS.y + 3, 11),
+                  width: pdfPercentX(TRI_HOUSEPARENT_NAME_POS.width),
                   height: `${11 / 936 * 100}%`,
                   fontSize: 'clamp(6px, 1vw, 11px)',
                 }}
@@ -903,10 +952,13 @@ function OfficialTriEditor({
               <div
                 className="absolute z-20"
                 style={{
-                  left: pdfPercentX(72.02),
-                  top: pdfPercentTop(785, 22),
-                  width: pdfPercentX(90.24),
-                  height: `${22 / 936 * 100}%`,
+                  left: pdfPercentX(TRI_HOUSEPARENT_SIGNATURE_BOX.x),
+                  top: pdfPercentTop(
+                    TRI_HOUSEPARENT_SIGNATURE_BOX.y + TRI_HOUSEPARENT_SIGNATURE_BOX.height / 2,
+                    TRI_HOUSEPARENT_SIGNATURE_BOX.height,
+                  ),
+                  width: pdfPercentX(TRI_HOUSEPARENT_SIGNATURE_BOX.width),
+                  height: `${(TRI_HOUSEPARENT_SIGNATURE_BOX.height / 936) * 100}%`,
                 }}
               >
                 <SignaturePadModal
@@ -919,51 +971,36 @@ function OfficialTriEditor({
               </div>
             )}
             {/*
-              The block's second row: the two designated officials. Same pad, same
-              page, coordinates from triLayout.json so the on-screen form, the
-              downloaded copy and the published one agree.
+              The block's four official lines. Same pad, same page, coordinates from
+              triLayout.json so the on-screen form, the downloaded copy and the
+              published one agree.
 
               Gated on `canSignOfficial` — the reviewing roles — because those are the
-              accounts the facility named for these two lines. The Houseparent's line
-              above stays gated to the Houseparent alone.
+              accounts the facility named for these lines. The Houseparent's line above
+              stays gated to the Houseparent alone.
+
+              On the first row the template is blank, so the app prints the name below
+              the signature — the same order as the Houseparent's line. The second row
+              already carries the facility's two names, printed correctly by the form
+              itself, so no name is drawn there and only a signature is stamped. Nothing
+              is painted white: there is no stale text to hide, and the template's row-2
+              names are the right people.
             */}
-            {canSignOfficial && TRI_DESIGNATED_LINES.map((line) => {
+            {canSignOfficial && TRI_OFFICIAL_LINES.map((line) => {
               const value = String((record as any)?.[line.signatureField] || '');
               const box = line.signatureBox;
+              const namePos = line.namePos;
               return (
                 <React.Fragment key={line.key}>
-                  {/*
-                    Page 8 is the template PDF rendered underneath, and the template
-                    already prints an example name on this row (MARICOR C. NAVARRO for
-                    the Center Head, NICOLAS Q. REGALARIO for the Section Chief). The
-                    real name has to be painted over it, so the band goes down first —
-                    same rectangle, same coordinates and same order as the writer in
-                    `drawTriDesignatedSignatures` and `triReportPdf.js`. Without it the
-                    two names print on top of each other and neither can be read.
-                    Unconditional, because the writer paints it unconditionally too.
-                  */}
-                  <div
-                    aria-hidden="true"
-                    className="pointer-events-none absolute z-[9] bg-white"
-                    style={{
-                      left: pdfPercentX(line.namePos.x),
-                      top: pdfPercentTop(
-                        TRI_DESIGNATED_NAME_COVER.y + TRI_DESIGNATED_NAME_COVER.height / 2,
-                        TRI_DESIGNATED_NAME_COVER.height,
-                      ),
-                      width: pdfPercentX(line.namePos.width),
-                      height: `${(TRI_DESIGNATED_NAME_COVER.height / 936) * 100}%`,
-                    }}
-                  />
-                  {designatedLineName(line.key) && (
+                  {namePos && designatedLineName(line.key) && (
                     <span
                       aria-label={`${line.label} name`}
                       data-tri-designated-name={line.key}
                       className="pointer-events-none absolute z-10 truncate font-bold leading-none text-black"
                       style={{
-                        left: pdfPercentX(line.namePos.x),
-                        top: pdfPercentTop(line.namePos.y + 3, 11),
-                        width: pdfPercentX(line.namePos.width),
+                        left: pdfPercentX(namePos.x),
+                        top: pdfPercentTop(namePos.y + 3, 11),
+                        width: pdfPercentX(namePos.width),
                         height: `${11 / 936 * 100}%`,
                         fontSize: 'clamp(6px, 1vw, 11px)',
                       }}
@@ -1117,28 +1154,33 @@ function openPrintReport(record: TriRecord, child: any, onError?: (message: stri
       }).join('')
     : '<tr><td colspan="3" class="sm">No offenses recorded for this period.</td></tr>';
 
-  // The signature block is part of the form, so it prints here too. The data URL is
-  // inlined only after the strict shape check above — nothing else can reach the
-  // attribute.
+  // The signature block is part of the form, so it prints here too. This is a
+  // generated HTML summary rather than the official template, so it prints the
+  // printed name on every line — including the two the template itself carries. The
+  // data URL is inlined only after the strict shape check, so nothing else can reach
+  // the src attribute.
   const signatureDataUrl = String(record.houseparentSignature || '');
-  const signatureImg = SIGNATURE_DATA_URL.test(signatureDataUrl)
-    ? `<img src="${signatureDataUrl}" alt="Houseparent signature" />`
-    : '';
   const signatureName = houseparentLineName(record);
 
-  // The two designated officials' lines, on the block's second row. Same rule as the
-  // Houseparent's: the printed name comes from the shared layout, and the drawing is
-  // inlined only after the strict shape check, so nothing else can reach the src
-  // attribute.
-  const designatedLinesHtml = TRI_DESIGNATED_LINES.map((line) => {
-    const raw = String((record as any)[line.signatureField] || '');
-    const img = SIGNATURE_DATA_URL.test(raw)
-      ? `<img src="${raw}" alt="${escapeHtml(line.label)} signature" />`
+  const signatureCellHtml = (label: string, name: string, dataUrl: string) => {
+    const img = SIGNATURE_DATA_URL.test(dataUrl)
+      ? `<img src="${dataUrl}" alt="${escapeHtml(label)} signature" />`
       : '';
-    const name = designatedLineName(line.key);
     const slot = img || name ? 'signed' : '';
-    return `<div class="${slot}">${img}${name ? `<div class="name">${escapeHtml(name)}</div>` : ''}<div class="rule">${escapeHtml(line.label)}</div></div>`;
-  }).join('');
+    return `<div class="${slot}">${img}${name ? `<div class="name">${escapeHtml(name)}</div>` : ''}<div class="rule">${escapeHtml(label)}</div></div>`;
+  };
+
+  // Row 1 is the Houseparent plus the block's first two officials; row 2 is the two
+  // the official form prints itself. One builder, so a line cannot print its name but
+  // not its signature.
+  const officialCellHtml = (key: string) => {
+    const line = TRI_OFFICIAL_LINES.find(l => l.key === key)!;
+    return signatureCellHtml(line.label, designatedLineName(line.key), String((record as any)[line.signatureField] || ''));
+  };
+  const signatureRowOne = signatureCellHtml('Houseparent', signatureName, signatureDataUrl)
+    + officialCellHtml('adminofficer')
+    + officialCellHtml('swo1');
+  const signatureRowTwo = officialCellHtml('swo2') + officialCellHtml('swo3');
 
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>TRI ${escapeHtml(getPeriodLabel(record.reportingYear, record.reportingMonth))}</title>
 <style>
@@ -1196,16 +1238,11 @@ ${sectionsHtml}
   <div class="sm" style="text-align:center;margin-top:6px">Previous Adjectival Rating: ${escapeHtml(record.previousRating || '—')}</div>
 </div>
 <div class="sign">
-  <div class="signed">
-    ${signatureImg}
-    ${signatureName ? `<div class="name">${escapeHtml(signatureName)}</div>` : ''}
-    <div class="rule">Houseparent</div>
-  </div>
-  <div><div class="rule">Administrative Officer</div></div>
-  <div><div class="rule">SWO I / Case Manager</div></div>
+  ${signatureRowOne}
 </div>
 <div class="sign" style="margin-top:12px">
-  ${designatedLinesHtml}
+  ${signatureRowTwo}
+  <div></div>
 </div>
 </body></html>`;
 

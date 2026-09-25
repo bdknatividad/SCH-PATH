@@ -778,10 +778,22 @@ CREATE TABLE triRecords (
   houseparentSignature LONGTEXT NULL,
   houseparentSignedBy VARCHAR(100) NULL,
   houseparentSignedAt DATETIME NULL,
-  -- The two designated personnel on the TRI's "Assessed by" block: the SWO II /
-  -- Center Head and the SWO III / Section Chief. Each signs their own line, so
-  -- each keeps its own triple — a single shared pair of columns could not say
-  -- which official a signature came from. Same PNG-data-URL contract as above.
+  -- The designated personnel on the TRI's "Assessed by" block. Each signs their
+  -- own line, so each keeps its own triple — a single shared pair of columns
+  -- could not say which official a signature came from. Same PNG-data-URL
+  -- contract as above.
+  --
+  -- The column names name the LINE, not the office-holder, because the people on
+  -- them change: the printed names live in frontend/src/shared/triLayout.json.
+  -- `centerhead*` and `sectionchief*` keep the names they shipped with (they are
+  -- the SWO II/Center Head and SWO III/Section Chief lines) so the signatures
+  -- already stored on live records are not moved.
+  adminOfficerSignature LONGTEXT NULL,
+  adminOfficerSignedBy VARCHAR(100) NULL,
+  adminOfficerSignedAt DATETIME NULL,
+  swo1Signature LONGTEXT NULL,
+  swo1SignedBy VARCHAR(100) NULL,
+  swo1SignedAt DATETIME NULL,
   centerheadSignature LONGTEXT NULL,
   centerheadSignedBy VARCHAR(100) NULL,
   centerheadSignedAt DATETIME NULL,

@@ -1412,32 +1412,42 @@
     }
   ],
   "houseparentSignatureBox": {
-    "$comment": "The blank band above the page-8 \"Houseparent\" rule. Measured against the template: the underscore run is 90.24pt wide at x 72.02 with its baseline at y 772.75, the caption sits 20.6pt below it, and the line above the block ends at y 804. Shared so the on-screen overlay, the browser export and the backend PDF writer stamp the signature in the same place.",
-    "page": 7, "x": 72.02, "y": 774, "width": 90.24, "height": 22
+    "$comment": "The blank band above the page-8 \"Houseparent\" rule. Measured against the template: the underscore run is 90.24pt wide at x 72.02 with its ink at y 770.57-772.5, and the line above the block (\"The Rehabilitation Team together with the resident:\") has its descenders at y 811.40. The box fills 786-806, which clears the printed name below it by ~3pt and that heading by ~5pt. Shared so the on-screen overlay, the browser export and the backend PDF writer stamp the signature in the same place.",
+    "page": 7, "x": 72.02, "y": 786, "width": 90.24, "height": 20
   },
   "houseparentNamePos": {
-    "$comment": "Where the Houseparent's printed name goes, directly above their signature rule. Baseline y 800 clears the 774-796 signature box below and the descenders of the block heading above.",
-    "page": 7, "x": 72.02, "y": 800, "size": 8, "width": 90.24
+    "$comment": "The Houseparent's printed name. It goes BELOW the signature and directly above the rule, so the rule reads as the underline of the name: signature, name, rule, then the form's own \"Houseparent\" caption. Baseline y 777 puts the 8pt ascenders at 782.7 (clear of the 786 box bottom) and the descenders at 775.3 (clear of the rule's ink at 772.5).",
+    "page": 7, "x": 72.02, "y": 777, "size": 8, "width": 90.24
   },
-  "centerheadSignatureBox": {
-    "$comment": "The blank band above the page-8 second row's LEFT rule, captioned SWO II/Center Head. Measured against the template: that row's rules have their baseline at y 670 (left rule spans x 72.02 to about 247), the printed example name sits at baseline y 650, and the caption at y 638. The box sits just above the rule and the printed name is below it, so the signature is above the name it belongs to. Same 90.24 x 20 footprint as the Houseparent's box so all three lines look alike.",
-    "page": 7, "x": 72.02, "y": 672, "width": 90.24, "height": 20
+  "adminOfficerSignatureBox": {
+    "$comment": "The blank band above the page-8 first row's MIDDLE rule, captioned \"Administrative Officer\". Same row and same baselines as the Houseparent's line: the underscore run is 95.03pt wide at x 223.75 with its ink at y 770.57-772.5, and the caption sits at y 752.11.",
+    "page": 7, "x": 223.75, "y": 786, "width": 95.03, "height": 20
   },
-  "centerheadNamePos": {
-    "$comment": "The designated SWO II/Center Head's printed name, on the template's own name baseline for that row (y 650). The width is wider than the rule on purpose: the template already prints an example name there (MARICOR C. NAVARRO, RSW, MSSW, spanning x 72.02 to about 251), and the writer paints this rectangle out before drawing the real name. Narrower and the stale name would still show.",
-    "page": 7, "x": 72.02, "y": 650, "size": 8, "width": 185
+  "adminOfficerNamePos": {
+    "$comment": "The Administrative Officer's printed name, below their signature and directly above their rule - the same shape as the Houseparent's line. Baseline y 777.",
+    "page": 7, "x": 223.75, "y": 777, "size": 8, "width": 95.03
   },
-  "sectionchiefSignatureBox": {
-    "$comment": "The blank band above the page-8 second row's RIGHT rule, captioned SWO III/Section Chief. Same row and same baselines as the Center Head line: rule at y 670 (right rule spans x 326.76 to about 538), printed example name at y 650, caption at y 638.",
-    "page": 7, "x": 326.76, "y": 672, "width": 90.24, "height": 20
+  "swo1SignatureBox": {
+    "$comment": "The blank band above the page-8 first row's RIGHT rule, captioned \"SWO I/Case Manager\". That rule is printed as three underscore runs (x 346.2 w 65.04, x 411.26 w 30, x 441.29 w 20.16), so the line spans x 346.2 to 461.45 - 115.25pt.",
+    "page": 7, "x": 346.2, "y": 786, "width": 115.25, "height": 20
   },
-  "sectionchiefNamePos": {
-    "$comment": "The designated SWO III/Section Chief's printed name, on the same baseline as the Center Head's. Wide enough to paint out the template's example name there (NICOLAS Q. REGALARIO, RSW, MSSW, spanning x 329.88 to about 519).",
-    "page": 7, "x": 326.76, "y": 650, "size": 8, "width": 200
+  "swo1NamePos": {
+    "$comment": "The SWO I/Case Manager's printed name, below their signature and directly above their rule. Baseline y 777.",
+    "page": 7, "x": 346.2, "y": 777, "size": 8, "width": 115.25
+  },
+  "swo2SignatureBox": {
+    "$comment": "The blank band above the page-8 second row's LEFT rule, captioned SWO II/Center Head. This row is laid out differently from the first: the rules have their ink at y 668-670.25 and the printed names sit BELOW them, so the box goes just above the rule. The x and width are the template's own printed name extent (MARICOR C. NAVARRO, RSW, MSSW, spanning x 72.02 to 251.34) and not the rule's, because the signature is centred over the printed name - see nameInkWidth in triReportPdf.js.",
+    "page": 7, "x": 72.02, "y": 672, "width": 179.32, "height": 20
+  },
+  "swo3SignatureBox": {
+    "$comment": "The blank band above the page-8 second row's RIGHT rule, captioned SWO III/Section Chief. Same row and baselines as the SWO II line. x and width are the template's printed name extent (NICOLAS Q. REGALARIO, RSW, MSSW, spanning x 329.88 to 518.0), not the rule's.",
+    "page": 7, "x": 329.88, "y": 672, "width": 188.12, "height": 20
   },
   "designatedPersonnel": {
-    "$comment": "The two officials the facility named for the TRI's 'Assessed by' block, in the same one-copy-of-the-facts spirit as the coordinates above: the backend PDF writer and the browser print view both read this, so a name can never differ between the published copy and the printed one. The Houseparent's line is not here because it is not fixed - it is whoever prepared and signed the report. The SWO II/Center Head name matches FORM08_CHECKED_BY_NAME in incidentReportController.js; the SWO III name is the facility's own wording and is the one value still awaiting a full name plus credentials.",
-    "centerhead": { "name": "Francis C. Patricio, RSW", "role": "SWO II / Center Head" },
-    "sectionchief": { "name": "Ma'am HCKSBD", "role": "SWO III / Section Chief" }
+    "$comment": "The four officials the facility named for the TRI's \"Assessed by\" block, in the same one-copy-of-the-facts spirit as the coordinates above: the backend PDF writer and the browser print view both read this, so a name can never differ between the published copy and the printed one. The Houseparent's line is not here because it is not fixed - it is whoever prepared and signed the report. adminofficer and swo1 are printed by the app on the first row, which the template leaves blank; swo2 and swo3 are already printed correctly by the template itself on the second row, so the app draws no name for those two and only stamps a signature. 'nameInkWidth' is the template's own measured extent, used to centre each signature over the name it belongs to.",
+    "adminofficer": { "name": "PERCILA S. VILLA", "role": "Administrative Officer" },
+    "swo1": { "name": "FRANCIS C. PATRICIO, RSW", "role": "SWO I / Case Manager" },
+    "swo2": { "name": "MARICOR C. NAVARRO, MSSW, RSW", "role": "SWO II / Center Head", "nameInkWidth": 179.32 },
+    "swo3": { "name": "NICOLAS Q. REGALARIO, MSSW, RSW", "role": "SWO III / Section Chief", "nameInkWidth": 188.12 }
   }
 }

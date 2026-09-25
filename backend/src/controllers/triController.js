@@ -99,33 +99,46 @@ function canReview(user) {
 }
 
 /**
- * The two official signature lines on the TRI's "Assessed by" block, and where
+ * The four official signature lines on the TRI's "Assessed by" block, and where
  * each one's drawing is stored.
  *
- * The block has five lines. Two are never signed here — "Administrative Officer"
- * and "SWO I/Case Manager" stay blank on every export. The other three carry the
- * people the facility designated: the Houseparent who prepared the report, and
- * the two officials on the block's second row, the SWO II/Center Head and the
- * SWO III/Section Chief.
+ * The block has five lines. The fifth is the Houseparent's own, which is a
+ * separate route over separate columns because it is gated to `houseparent` alone:
+ * a reviewer who could write it would be signing the document they are reviewing.
+ * Here the reviewing roles *are* the signers — the facility has no separate account
+ * for each office — so the gate is `canReview`, and these four lines are a separate
+ * route rather than a wider one.
  *
- * These two are kept out of the Houseparent's handler on purpose. That one is
- * gated to `houseparent` alone, because a reviewer who could write it would be
- * signing the document they are reviewing. Here the reviewing roles *are* the
- * signers — there is no separate Section Chief account to hold the third line —
- * so the gate is `canReview`, and the two lines are separate routes rather than
- * a wider one.
+ * The keys name the LINE, not the office-holder, because the people on them change:
+ * the printed names live in `frontend/src/shared/triLayout.json` under
+ * `designatedPersonnel`, shared with the PDF writers, and are not repeated here.
  *
- * Column names are read from this map and never from the request, so a caller
- * cannot name a column to write.
+ * `swo2` and `swo3` keep the column names they shipped with (`centerhead*`,
+ * `sectionchief*`) so the signatures already stored on live records are not moved.
+ * A later migration may rename them; until then the mapping is this table, and the
+ * column names are read from here and never from the request, so a caller cannot
+ * name a column to write.
  */
 const OFFICIAL_SIGNATURE_LINES = {
-  centerhead: {
+  adminofficer: {
+    label: 'Administrative Officer',
+    signature: 'adminOfficerSignature',
+    signedBy: 'adminOfficerSignedBy',
+    signedAt: 'adminOfficerSignedAt',
+  },
+  swo1: {
+    label: 'SWO I / Case Manager',
+    signature: 'swo1Signature',
+    signedBy: 'swo1SignedBy',
+    signedAt: 'swo1SignedAt',
+  },
+  swo2: {
     label: 'SWO II / Center Head',
     signature: 'centerheadSignature',
     signedBy: 'centerheadSignedBy',
     signedAt: 'centerheadSignedAt',
   },
-  sectionchief: {
+  swo3: {
     label: 'SWO III / Section Chief',
     signature: 'sectionchiefSignature',
     signedBy: 'sectionchiefSignedBy',

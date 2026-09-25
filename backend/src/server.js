@@ -1220,6 +1220,12 @@ async function runMigrations() {
         houseparentSignature LONGTEXT NULL,
         houseparentSignedBy VARCHAR(100) NULL,
         houseparentSignedAt DATETIME NULL,
+        adminOfficerSignature LONGTEXT NULL,
+        adminOfficerSignedBy VARCHAR(100) NULL,
+        adminOfficerSignedAt DATETIME NULL,
+        swo1Signature LONGTEXT NULL,
+        swo1SignedBy VARCHAR(100) NULL,
+        swo1SignedAt DATETIME NULL,
         centerheadSignature LONGTEXT NULL,
         centerheadSignedBy VARCHAR(100) NULL,
         centerheadSignedAt DATETIME NULL,
@@ -2019,14 +2025,26 @@ async function runMigrations() {
   // The signature lines on the TRI. Added so an existing database gets the columns
   // on boot instead of failing the first signature save with ER_BAD_FIELD_ERROR.
   //
-  // The Houseparent's own line was the first one; the two official lines below it
-  // ("SWO II/Center Head" and "SWO III/Section Chief") carry the designated
-  // personnel, who sign their own lines. Each signer keeps their own triple so a
-  // signature can never be attributed to the wrong official.
+  // Five lines sign the block. The Houseparent's own line was the first one; the
+  // four official lines carry the designated personnel, who sign their own lines.
+  // Each signer keeps their own triple so a signature can never be attributed to
+  // the wrong official.
+  //
+  // The column names name the LINE, not the office-holder, because the people on
+  // them change: the printed names live in frontend/src/shared/triLayout.json.
+  // `centerhead*` and `sectionchief*` keep the names they shipped with (the SWO
+  // II/Center Head and SWO III/Section Chief lines) so the signatures already
+  // stored on live records are not moved.
   for (const [column, definition] of [
     ['houseparentSignature', 'LONGTEXT NULL'],
     ['houseparentSignedBy', 'VARCHAR(100) NULL'],
     ['houseparentSignedAt', 'DATETIME NULL'],
+    ['adminOfficerSignature', 'LONGTEXT NULL'],
+    ['adminOfficerSignedBy', 'VARCHAR(100) NULL'],
+    ['adminOfficerSignedAt', 'DATETIME NULL'],
+    ['swo1Signature', 'LONGTEXT NULL'],
+    ['swo1SignedBy', 'VARCHAR(100) NULL'],
+    ['swo1SignedAt', 'DATETIME NULL'],
     ['centerheadSignature', 'LONGTEXT NULL'],
     ['centerheadSignedBy', 'VARCHAR(100) NULL'],
     ['centerheadSignedAt', 'DATETIME NULL'],

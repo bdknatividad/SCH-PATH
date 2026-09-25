@@ -220,8 +220,13 @@ test('the generator stamps the captured Houseparent signature and nothing else',
   // "the signature is missing from the download" defect.
   assert.match(
     GENERATOR,
-    /drawHouseparentSignature/,
+    /drawLineSignature/,
     'the generator no longer stamps the captured Houseparent signature, so exports print a blank line'
+  );
+  assert.match(
+    GENERATOR,
+    /key: 'houseparent',[\s\S]*?signatureColumn: 'houseparentSignature'/,
+    "the Houseparent's line is no longer in the generator's line list"
   );
   assert.match(
     GENERATOR,
