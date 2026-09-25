@@ -21,8 +21,9 @@ file under ~10 KB — the injection budget truncates it silently.**
   (`execFileSync` throws with `status: null`).
 - **`errorHandler` masks every MySQL error** — all `ER_*` → "Database error occurred", `err.message`
   dropped in production; the Railway runtime log is the only source of truth. A **bare identifier not in
-  scope is a live 500, not a load error** (`violationGuideController` called `normalizeRole`
-  unimported; `accessDefaults.js` is the same shape).
+  scope is a live 500, not a load error** (`violationGuideController` did it; `accessDefaults.js` is the
+  same shape). `toISOString()` bound to a DATETIME hides here too — bind `toMysqlDateTime()`;
+  `normalizeDatetimes` walks `req.body` only, so a **server-generated** instant needs it explicitly.
 - **A plain `Error` from a service is a 500, not a 400.** Only `ApiError`, `ER_*`, `ValidationError` and
   the JWT errors map to a status; the rest fall to `err.statusCode || 500`. Validate in the
   **controller** with `ApiError(400, …)`; grep `throw new Error(` under `services/`.
@@ -81,10 +82,10 @@ from `toISOString()`** — use `getCurrentPHDate()` / `getCurrentPHDateTime()` (
   hash can never equal the deployed one** — compare the chunk's *content*.
 - **Railway redeploys on every push to `master`** — a docs-only commit restarts production. Batch
   memory/comment commits.
-- **`schema.sql` is never executed.** Only the boot migrations in `server.js` (and a controller's own
-  lazy `CREATE TABLE`) shape a deployed database. `seedDatabase()`'s one shared try/catch made the first
-  failure skip every later step (fixed `5b68857`); `/store` swallows per-table errors into `[]`; a
-  literal route after a `/:param` sibling 404s for its whole life.
+- **`schema.sql` is never executed.** Only the boot migrations in `server.js` (and a controller's lazy
+  `CREATE TABLE`) shape a deployed database. `seedDatabase()`'s one shared try/catch let the first
+  failure skip every later step; `/store` swallows per-table errors into `[]`; a literal route after a
+  `/:param` sibling 404s.
 
 ## Notifications and access model
 
@@ -115,12 +116,12 @@ Roles: `centerhead` (fullAccess), `admin`, `nurse`, `psychologist`, `educator`, 
 `backboard.railway.com/graphql/v2`. A **workspace** token uses `Authorization: Bearer <t>`; a project
 token uses `Project-Access-Token`. **Never probe a workspace token with `me` or `projectToken`** — one
 unauthorised field invalidates the whole selection set. Project/service/env ids and log helpers:
-`C:/tmp/railway-deploy.js`, `wait-migration.js` (list deployments, dump the runtime log, grep the boot
-log for a migration line). **`deploymentLogs` carries request-time errors** with stack and path.
+`C:/tmp/railway-deploy.js`, `wait-migration.js` (list deployments, dump the runtime log).
+**`deploymentLogs` carries request-time errors** with stack and path.
 
 - Playwright is in the managed node workspace (`channel: 'msedge'`). **Never re-login in
-  a loop** — the login route rate-limits (429); a poll that fetches a token per attempt then sends
-  `Bearer undefined` → a burst of `401 Invalid token`. Cache the token to a file, across scripts.
+  a loop** — the login route rate-limits (429); a per-attempt token fetch then sends `Bearer undefined`.
+  Cache the token to a file, across scripts.
 - **6 tests fail in this sandbox, identically at HEAD** (5 in `jwt-secret.test.js`, 1 dialog-guard):
   `spawnSync … node.exe EBUSY`. Keep whole-suite backups **outside** the repo.
 - **Verifying a push — the remote-tracking ref lies.** The sandbox **discards writes to
