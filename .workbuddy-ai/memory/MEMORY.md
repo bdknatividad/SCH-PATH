@@ -31,9 +31,7 @@ lazy route's fix lands in a *route chunk*, not the entry chunk), the **real UI**
   `violationGuideController` called `normalizeRole` without importing it, so every
   `PUT /intervention-tracker/:id` carrying `scheduledAt` threw `ReferenceError` → 500
   while `{status}` and `{}` kept working; `accessDefaults.js` is the same shape
-  (`rbac.CHILD_RECORD_TABS_MODULE`). `tests/intervention-schedule.test.js` walks
-  `src/**` and checks every `utils/authorization.js` export a file *calls* is imported
-  or defined there.
+  (`rbac.CHILD_RECORD_TABS_MODULE`). Pinned by `tests/intervention-schedule.test.js`.
 - **A plain `Error` from a service is a 500, not a 400.** `errorHandler` maps only
   `ApiError`, `ER_*`, `ValidationError` and the JWT errors; the rest fall to
   `err.statusCode || 500`, and production masks the message. Validate in the
@@ -54,18 +52,25 @@ lazy route's fix lands in a *route chunk*, not the entry chunk), the **real UI**
 
 ## Column widths — a copy must be as wide as its source
 
-`errorHandler` maps **every** `ER_*` to the generic "Database error occurred" and
-drops `err.message` in production, so a failing column is never named in the UI —
-read the Railway runtime log. `ER_DATA_TOO_LONG` is the trap that hides there: the
-width must be compared against what the code *writes*, and a sample row cannot reveal
-it, because the row that breaks it is the one nobody has created yet. So derive the
-bound from the **declared width of the source column** — a column that copies another
-must be at least as wide as the column it copies. `ensureColumnLength()` widens
-idempotently at boot and logs
+`errorHandler` maps **every** `ER_*` to the generic "Database error occurred" and drops
+`err.message` in production, so a failing column is never named in the UI — read the
+Railway runtime log. `ER_DATA_TOO_LONG` is the trap that hides there: compare the width
+against what the code *writes*, never a sample row, because the row that breaks it is
+the one nobody has created yet. Derive the bound from the **declared width of the source
+column**. `ensureColumnLength()` widens idempotently at boot and logs
 `Migration: <table>.<column> widened to <def> (was <n>).` only **after** the ALTER
 succeeds, so that line is the proof. Pinned by
 `tests/assessments-column-widths.test.js`; the widths live in `schema.sql` **and** the
 `server.js` CREATE TABLEs, which must agree.
+
+## Idempotence — compare what you *write*
+
+`seedOfficialViolationGuide()` compared stored rows against the **raw** source text, but
+`parseGuideRequirement()` blanks `officialText` for a `Psychosocial Activity`
+requirement — so 52 of the 99 sets were deleted and re-created on **every boot**, silent
+until an `ON DELETE RESTRICT` FK aborted the sync. Run the check through the **writer's
+own transform**, and order the rows it reads deterministically.
+`tests/official-guide-seed-idempotence.test.js`.
 
 ## Time on the wire
 
@@ -105,12 +110,12 @@ formatter runs after `new Date()` has already committed to the wrong instant.
   size is the free-tier constraint. MySQL is mandatory (`ON DUPLICATE KEY UPDATE`,
   `INFORMATION_SCHEMA`).
 - The backend reads PDF templates and the logo from the **frontend tree** at runtime,
-  so the Docker context is the **repository root**, not `backend/`.
-  `COPY backend/src ./backend/src` is a **directory** copy, so a new
-  controller/service/route needs no Dockerfile change. The frontend tree is copied
-  file-by-file, so **every frontend file the backend resolves at request time needs a
-  `COPY` line and the build will not tell you** (omitting `triLayout.json` made every
-  TRI approval throw ENOENT silently — `tests/tri-docker-assets.test.js`).
+  so the Docker context is the **repository root**, not `backend/`. `COPY backend/src`
+  is a **directory** copy, so a new controller/service/route needs no Dockerfile
+  change; the frontend tree is copied file-by-file, so **every frontend file the
+  backend resolves at request time needs a `COPY` line and the build will not tell
+  you** (omitting `triLayout.json` made every TRI approval throw ENOENT silently —
+  `tests/tri-docker-assets.test.js`).
 - **A publisher with a non-fatal catch needs a retry path.** TRI `finalize` swallows
   a render failure so an approval is never rolled back, so
   `publishMissingTriDocuments()` (at boot) finishes the job; the Anecdotal Report
@@ -119,12 +124,11 @@ formatter runs after `new Date()` has already committed to the wrong instant.
 - `frontend/vercel.json`'s SPA rewrite excludes a whitelist of root paths; a new file
   in `frontend/public/` **must** be added or it is served as `index.html`.
 - **`/pdf.worker.mjs` must not be `immutable`, and its URL must carry a version
-  query.** It sits at an **unhashed** URL, so `immutable` is a one-way door: served
-  once with a bad Content-Type it stayed broken for a year, and fixing the header
-  changed nothing — only a **new URL** cures it. Every
-  `GlobalWorkerOptions.workerSrc` must be `` `/pdf.worker.mjs?v=${pdfjs.version}` ``
-  (`tests/pdf-worker-cache-key.test.js`). **Unhashed paths must revalidate; hashed
-  ones may be `immutable`.**
+  query.** An **unhashed** URL makes `immutable` a one-way door — served once with a
+  bad Content-Type it stayed broken for a year, and fixing the header changed nothing;
+  only a **new URL** cures it. `GlobalWorkerOptions.workerSrc` must be
+  `` `/pdf.worker.mjs?v=${pdfjs.version}` `` (`tests/pdf-worker-cache-key.test.js`).
+  **Unhashed paths must revalidate; hashed ones may be `immutable`.**
 - `VITE_API_URL` is baked at build time and **must** be set on Vercel; the baseline
   hardcoded `'/api'`, breaking every request on the split deployment. `api.ts` exports
   `API_BASE_URL`/`apiUrl` for callers that cannot use `request()`. Consequence: **a
@@ -135,11 +139,11 @@ formatter runs after `new Date()` has already committed to the wrong instant.
 
 ## Notifications
 
-SSE via `services/alertStream.js` + `GET /api/alerts/stream` (30s poll is the
-fallback); the frame carries no data, so `GET /api/alerts` stays the single visibility
-implementation. Use `fetch` + `ReadableStream`, **not `EventSource`**. **`targetRole`
-is one column, so a role-addressed row reaches exactly one role** — address **one row
-per user** (`usersWithAnyRole` + `notifyUsers`).
+SSE via `services/alertStream.js` + `GET /api/alerts/stream`; the frame carries no data,
+so `GET /api/alerts` stays the single visibility implementation. Use `fetch` +
+`ReadableStream`, **not `EventSource`**. **`targetRole` is one column, so a
+role-addressed row reaches exactly one role** — address **one row per user**
+(`usersWithAnyRole` + `notifyUsers`).
 
 ## Access model
 
@@ -193,7 +197,7 @@ Project `fabulous-radiance` `840f2fbc-7579-4294-9715-8c0cfd7d06a7`, service `SCH
 beside them in `C:/tmp/railway-deploy.js` / `wait-migration.js`, which list deployments,
 dump the runtime log, and grep the boot log for a migration line. **`deploymentLogs`
 carries request-time errors** — a controller's `next(error)` appears with its stack and
-the request path. Token `84e36095-…` was valid 2026-09-25.
+the request path.
 
 ## Tooling and test infrastructure
 

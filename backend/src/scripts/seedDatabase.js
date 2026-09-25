@@ -1023,11 +1023,16 @@ async function seedOfficialViolationGuide() {
 
       for (const offenseLevel of ['1st', '2nd', '3rd']) {
         const requirements = guide.interventions?.[offenseLevel] || [];
+        // Parse once. The idempotence check below has to compare what this
+        // function actually WRITES, so both the check and the INSERT loop use
+        // the same parsed form.
+        const parsedRequirements = requirements.map(parseGuideRequirement);
+
         const [existingInterventionRows] = await connection.query(
           `SELECT *
            FROM guide_interventions
            WHERE guideId = ? AND offenseLevel = ?
-           ORDER BY createdAt ASC`,
+           ORDER BY createdAt ASC, id ASC`,
           [guide.id, offenseLevel]
         );
 
@@ -1039,10 +1044,25 @@ async function seedOfficialViolationGuide() {
           return String(metadata?.officialText || metadata?.rawText || '').trim();
         });
 
-        const officialTexts = requirements.map((item) => String(item).trim());
+        // Compare the stored rows against the STORED form of the requirement —
+        // not against the raw source text.
+        //
+        // parseGuideRequirement() blanks officialText for a Psychosocial
+        // Activity requirement, so a raw comparison could never match for any
+        // set containing one. 52 of the 99 guide x offense-level sets were
+        // therefore deleted and re-created on EVERY boot: 154 fresh
+        // guide_interventions ids per restart. The visible symptom arrived once
+        // intervention_tracker rows started referencing those rows and
+        // fk_tracker_guide_intervention (ON DELETE RESTRICT) refused the
+        // delete, which aborted the whole sync transaction and rolled it back.
+        // Comparing the stored form makes the sync idempotent: a boot that
+        // changes nothing now writes nothing.
+        const storedTexts = parsedRequirements.map((parsed) =>
+          String(parsed.metadata.officialText || '').trim()
+        );
         const isExactMatch =
-          existingOfficialTexts.length === officialTexts.length &&
-          existingOfficialTexts.every((text, index) => text === officialTexts[index]);
+          existingOfficialTexts.length === storedTexts.length &&
+          existingOfficialTexts.every((text, index) => text === storedTexts[index]);
 
         if (isExactMatch) continue;
 
@@ -1064,8 +1084,7 @@ async function seedOfficialViolationGuide() {
           continue;
         }
 
-        for (const requirement of requirements) {
-          const parsed = parseGuideRequirement(requirement);
+        for (const parsed of parsedRequirements) {
           await connection.query(
             `INSERT INTO guide_interventions
               (id, guideId, offenseLevel, interventionType, duration, unit, metadata)
@@ -1303,5 +1322,12 @@ async function seedDatabase() {
   console.log('Database seeding complete!');
 }
 
-module.exports = { seedDatabase, reconcileSeededAccessGrants, DEFAULT_USERS, OFFICIAL_VIOLATION_GUIDE };
+module.exports = {
+  seedDatabase,
+  seedOfficialViolationGuide,
+  parseGuideRequirement,
+  reconcileSeededAccessGrants,
+  DEFAULT_USERS,
+  OFFICIAL_VIOLATION_GUIDE,
+};
 
