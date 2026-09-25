@@ -110,9 +110,8 @@ zone**, and the database holds **UTC**. JS parses a zone-less date-time as
   `COPY backend/src ./backend/src` is a **directory** copy — a new
   controller/service/route needs no Dockerfile change. The frontend tree is copied
   file-by-file, so **every frontend file the backend resolves at request time needs
-  a `COPY` line and the build will not tell you**; a non-fatal catch hides the
-  failure (omitting `triLayout.json` made every TRI approval throw ENOENT silently —
-  `tests/tri-docker-assets.test.js`).
+  a `COPY` line and the build will not tell you** (omitting `triLayout.json` made
+  every TRI approval throw ENOENT silently — `tests/tri-docker-assets.test.js`).
 - **A publisher with a non-fatal catch needs a retry path.** TRI `finalize` swallows
   a render failure so an approval is never rolled back, so
   `publishMissingTriDocuments()` (at boot) exists to finish the job; the Anecdotal
@@ -194,17 +193,19 @@ Project `fabulous-radiance` `840f2fbc-7579-4294-9715-8c0cfd7d06a7`; services
 `SCH-PATH` `b5fb305f-e348-4f2f-982b-49fbd38e929f`, `MySQL`
 `350dae90-e97f-497d-939b-14e25e3500e3`; environment `production`
 `655addcf-10cf-4feb-b720-b2b5775790d1`. `C:/tmp/railway-deploy.js` /
-`railway-build.js` list deployments and dump the runtime / build logs (both read
-`RAILWAY_TOKEN` from the environment — pass it inline, never write a file).
-**`deploymentLogs` does carry request-time errors** — a controller's `next(error)`
+`railway-build.js` list deployments and dump the runtime / build logs
+(`RAILWAY_TOKEN` from the environment — pass it inline, never write a file).
+**`deploymentLogs` carries request-time errors** — a controller's `next(error)`
 appears with its stack and the request path. Token `84e36095-…` was valid
 2026-09-25.
 
 ## Tooling and test infrastructure
 
-- Node binary moves between patch releases
-  (`C:/Users/Administrator/.workbuddy-ai/binaries/node/versions/`); Playwright lives
-  in the managed node workspace (`channel: 'msedge'` = installed Edge).
+- Playwright lives in the managed node workspace (`channel: 'msedge'` = installed
+  Edge).
+- **Never re-login in a loop.** The login route rate-limits (429); a poll that
+  fetches a token per attempt then sends `Bearer undefined` → a burst of `401
+  Invalid token` at `auth.js`. Cache the token.
 - **6 tests fail in this sandbox and fail identically at HEAD** (5 in
   `jwt-secret.test.js`, 1 dialog-guard): `spawnSync … node.exe EBUSY` — prove it by
   stashing and running clean first. **Sandbox read-blocks on `node_modules/*` corrupt
