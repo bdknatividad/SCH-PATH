@@ -187,9 +187,16 @@ test('the form sends the classification and only asks when it can differ', () =>
   assert.ok(sends.length >= 3, `the classification is sent in only ${sends.length} payloads`);
 
   // The chooser appears for a returning admission only — a first admission has
-  // no choice to make.
+  // no choice to make — and not at all for a resident returning from Abscond,
+  // where the classification is forced and the API overrides whatever is sent.
+  // Offering the chooser there would show a choice that cannot be honoured.
   assert.match(RECORDS, /const isReturningAdmission = Boolean\(/, 'the returning case is not distinguished');
-  assert.match(RECORDS, /\{isReturningAdmission && \(/, 'the chooser is not limited to a returning admission');
+  assert.match(RECORDS, /const isReturningFromAbscond = Boolean\(/, 'the forced Abscond classification is not distinguished');
+  assert.match(
+    RECORDS,
+    /\{isReturningAdmission && !isReturningFromAbscond && \(/,
+    'the chooser is not limited to a returning admission that can differ',
+  );
   assert.match(RECORDS, /'Returning Resident \(Abscon\/Tumakas\)',\s*'Relapse',/, 'the two returning classifications are not offered');
   // Editing an existing slip must not reclassify it.
   assert.match(

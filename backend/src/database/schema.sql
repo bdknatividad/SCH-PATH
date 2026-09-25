@@ -330,13 +330,6 @@ CREATE TABLE violations (
   witnesses VARCHAR(255) NULL,
   reportedBy VARCHAR(100) NULL,
   reviewedBy VARCHAR(100) NULL,
-  -- Dual verification: both the Psychological Support Staff and the Social
-  -- Worker verify a logged incident before it proceeds.
-  psychVerifiedBy VARCHAR(100) NULL,
-  psychVerifiedAt DATETIME NULL,
-  psychVerification LONGTEXT NULL,
-  swVerifiedBy VARCHAR(100) NULL,
-  swVerifiedAt DATETIME NULL,
   actionTaken TEXT NULL,
   status ENUM('Pending Review', 'Under Investigation', 'Reviewed', 'Resolved', 'Escalated', 'Rejected') NOT NULL DEFAULT 'Pending Review',
   requiresAssessment BOOLEAN NOT NULL DEFAULT TRUE,
@@ -375,7 +368,6 @@ CREATE TABLE incidentReports (
   reportedBySignature LONGTEXT NULL,
   endorsedToSignature LONGTEXT NULL,
   checkedBySignature LONGTEXT NULL,
-  psychStaffSignature LONGTEXT NULL,
   notedBySignature LONGTEXT NULL,
   status ENUM('Submitted', 'Pending Review', 'Verified', 'Failed', 'Reassessment') NOT NULL DEFAULT 'Submitted',
   interventionType VARCHAR(100) NULL,

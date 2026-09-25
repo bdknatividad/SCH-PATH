@@ -8,9 +8,6 @@ const express = require('express');
 const router = express.Router();
 const evaluationController = require('../controllers/evaluationController');
 const { asyncHandler } = require('../middleware/errorHandler');
-// Houseparents have view-only access to Activities: they can read evaluations
-// but not add, change or remove them.
-const { authorizeNonHouseparent } = require('../middleware/auth');
 
 /**
  * GET /api/evaluations
@@ -46,18 +43,18 @@ router.get('/:id', asyncHandler(evaluationController.getById));
  * POST /api/evaluations
  * Create new evaluation
  */
-router.post('/', authorizeNonHouseparent, asyncHandler(evaluationController.create));
+router.post('/', asyncHandler(evaluationController.create));
 
 /**
  * PUT /api/evaluations/:id
  * Update evaluation
  */
-router.put('/:id', authorizeNonHouseparent, asyncHandler(evaluationController.update));
+router.put('/:id', asyncHandler(evaluationController.update));
 
 /**
  * DELETE /api/evaluations/:id
  * Delete evaluation
  */
-router.delete('/:id', authorizeNonHouseparent, asyncHandler(evaluationController.delete));
+router.delete('/:id', asyncHandler(evaluationController.delete));
 
 module.exports = router;

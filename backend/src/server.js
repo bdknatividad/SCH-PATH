@@ -782,17 +782,6 @@ async function runMigrations() {
   // which the user sees as "Database error occurred" with no column named.
   await ensureColumnLength('violations', 'type', 500, 'VARCHAR(500) NOT NULL');
 
-  // Dual verification of a logged incident: the Psychological Support Staff and
-  // the Social Worker each verify it, and it proceeds only when both have.
-  // `psychVerification` keeps the clinical decision the Psychological Staff made
-  // (action taken, schedule, psychosocial activities) until the second
-  // verification completes the review.
-  await ensureColumn('violations', 'psychVerifiedBy', 'VARCHAR(100) NULL', 'reviewedBy');
-  await ensureColumn('violations', 'psychVerifiedAt', 'DATETIME NULL', 'psychVerifiedBy');
-  await ensureColumn('violations', 'psychVerification', 'LONGTEXT NULL', 'psychVerifiedAt');
-  await ensureColumn('violations', 'swVerifiedBy', 'VARCHAR(100) NULL', 'psychVerification');
-  await ensureColumn('violations', 'swVerifiedAt', 'DATETIME NULL', 'swVerifiedBy');
-
   console.log('Migration: violations table ensured.');
 
   await pool.query(`CREATE TABLE IF NOT EXISTS staff (
@@ -1222,33 +1211,6 @@ async function runMigrations() {
     console.warn('Migration warning (residentAssignments):', err.message);
   }
 
-  // End every Houseparent Case Load assignment that was created automatically
-  // rather than by a person in the Houseparent Module:
-  //   - source 'system'                     the boot seed that assigned every
-  //                                         Active resident to every Houseparent
-  //   - source 'admission' / 'admission-update'
-  //                                         the old Admission Slip code that turned
-  //                                         the HP on Duty into the Case Load Manager
-  // Neither writer exists any more. The rows are ended (status 'Ended'), not
-  // deleted, so the history stays. Idempotent: once ended there is nothing left
-  // to match, and manual assignments (source 'caseload' / 'manual') are untouched.
-  try {
-    const [result] = await pool.query(
-      `UPDATE residentAssignments
-          SET status = 'Ended', endAt = COALESCE(endAt, NOW()), updatedBy = 'system-cleanup',
-              notes = CONCAT(COALESCE(notes, ''), CASE WHEN notes IS NULL OR notes = '' THEN '' ELSE ' ' END,
-                             '[Ended: automatic assignment, not made in the Houseparent Module]')
-        WHERE status = 'Active'
-          AND LOWER(TRIM(assignmentType)) = 'houseparent'
-          AND source IN ('system', 'admission', 'admission-update')`
-    );
-    if (result?.affectedRows) {
-      console.log(`Migration: ended ${result.affectedRows} automatic Houseparent assignment(s); assign Case Load Managers from the Houseparent Module.`);
-    }
-  } catch (err) {
-    console.warn('Migration warning (automatic Houseparent assignments):', err.message);
-  }
-
   try {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS triRecords (
@@ -1637,9 +1599,6 @@ async function runMigrations() {
         modifiedBy: 'VARCHAR(100) NULL',
         createdAt: 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP',
         updatedAt: 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
-        // When and by whom a resident was marked Absconded.
-        abscondedAt: 'DATETIME NULL',
-        abscondedBy: 'VARCHAR(100) NULL',
       };
       for (const [column, definition] of Object.entries(childColumnDefinitions)) {
         if (!existingChildColumns.has(column)) {
@@ -1647,6 +1606,14 @@ async function runMigrations() {
           console.log(`Migration: added children.${column}.`);
         }
       }
+      // When and by whom a resident was marked Absconded. Added through
+      // `ensureColumn` rather than as entries in the literal above: that literal
+      // is iterated with `Object.entries`, which the runtime-migration contract
+      // cannot see, and a column the app writes that no runtime migration
+      // creates is missing on every deployed database — a fresh install works
+      // and production throws ER_BAD_FIELD_ERROR.
+      await ensureColumn('children', 'abscondedAt', 'DATETIME NULL', 'updatedAt');
+      await ensureColumn('children', 'abscondedBy', 'VARCHAR(100) NULL', 'abscondedAt');
       // An existing database has the two-value status; widen it so a resident
       // can be marked Absconded. Idempotent, and no existing value changes.
       await pool.query(`ALTER TABLE children MODIFY COLUMN status ENUM('Active', 'Discharged', 'Absconded') NOT NULL DEFAULT 'Active'`);
@@ -2198,7 +2165,7 @@ async function runMigrations() {
   }
   // Form 08's four sign-offs used to be printed names only. Each now also keeps
   // the signature that was drawn for it, stored beside the name it belongs to.
-  for (const column of ['reportedBySignature', 'endorsedToSignature', 'checkedBySignature', 'notedBySignature', 'psychStaffSignature']) {
+  for (const column of ['reportedBySignature', 'endorsedToSignature', 'checkedBySignature', 'notedBySignature']) {
     try {
       await ensureColumn('incidentReports', column, 'LONGTEXT NULL', 'notedBy');
     } catch (err) {

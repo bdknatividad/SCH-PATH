@@ -19,6 +19,7 @@ import triLayout from '@/shared/triLayout.json';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { CaseLoad } from './CaseLoad';
 import { AnecdotalReports } from './AnecdotalReports';
+import { TriStatistics } from './TriStatistics';
 import { useSubModuleTab } from '@/app/hooks/useSubModuleTab';
 import { useSubModuleTabs } from '@/app/hooks/useSubModuleTabs';
 import { SignaturePadModal } from '@/app/components/SignaturePad';
@@ -2024,6 +2025,11 @@ export function Tri() {
         <AnecdotalReports />
       ) : (
       <>
+
+      {/* TRI Statistics — residents per TRI status, from the finalized TRI
+          records. `records` changes whenever a TRI is saved, submitted or
+          finalized here, which re-reads the counts. */}
+      {canReview && <TriStatistics refreshKey={records} />}
 
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div className="relative w-full lg:max-w-sm">

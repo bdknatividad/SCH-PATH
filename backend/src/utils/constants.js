@@ -112,7 +112,7 @@ const RESOURCES = {
     prefix: 'VIO',
     orderBy: 'createdAt DESC',
     jsonFields: [],
-    columns: ['id', 'residentId', 'date', 'type', 'description', 'severity', 'points', 'location', 'bodyLocation', 'witnesses', 'reportedBy', 'reviewedBy', 'psychVerifiedBy', 'psychVerifiedAt', 'swVerifiedBy', 'swVerifiedAt', 'actionTaken', 'status', 'requiresAssessment', 'assessmentTriggered', 'assessmentCompleted', 'offenseNumber', 'interventionStartDate', 'interventionMonth', 'clearedBy', 'clearedAt', 'incidentGroupId', 'guideId', 'createdBy', 'modifiedBy'],
+    columns: ['id', 'residentId', 'date', 'type', 'description', 'severity', 'points', 'location', 'bodyLocation', 'witnesses', 'reportedBy', 'reviewedBy', 'actionTaken', 'status', 'requiresAssessment', 'assessmentTriggered', 'assessmentCompleted', 'offenseNumber', 'interventionStartDate', 'interventionMonth', 'clearedBy', 'clearedAt', 'incidentGroupId', 'guideId', 'createdBy', 'modifiedBy'],
   },
   alerts: {
     prefix: 'ALR',

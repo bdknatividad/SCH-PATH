@@ -1919,7 +1919,8 @@ export function ChildRecords() {
     useState<
       'All' |
       'Active' |
-      'Discharged'
+      'Discharged' |
+      'Absconded'
     >(() => {
       const params =
         new URLSearchParams(
@@ -1936,6 +1937,12 @@ export function ChildRecords() {
         'Discharged'
       ) {
         return 'Discharged';
+      }
+
+      if (
+        filter === 'Absconded'
+      ) {
+        return 'Absconded';
       }
 
       if (
@@ -2007,6 +2014,12 @@ export function ChildRecords() {
     ) {
       setStatusFilter(
         'Discharged'
+      );
+    } else if (
+      filter === 'Absconded'
+    ) {
+      setStatusFilter(
+        'Absconded'
       );
     } else if (
       filter === 'All'
@@ -4187,13 +4200,21 @@ export function ChildRecords() {
             statusFilter ===
               'Active' &&
             child.status !==
-              'Discharged'
+              'Discharged' &&
+            child.status !==
+              'Absconded'
           ) ||
           (
             statusFilter ===
               'Discharged' &&
             child.status ===
               'Discharged'
+          ) ||
+          (
+            statusFilter ===
+              'Absconded' &&
+            child.status ===
+              'Absconded'
           );
 
         return (
@@ -4207,7 +4228,17 @@ export function ChildRecords() {
     children.filter(
       (child: any) =>
         child.status !==
-        'Discharged'
+        'Discharged' &&
+        child.status !==
+        'Absconded'
+    ).length;
+
+  // Residents marked Absconded (from the Abscond button in Personal Info).
+  const abscondedCount =
+    children.filter(
+      (child: any) =>
+        child.status ===
+        'Absconded'
     ).length;
 
   const dischargedCount =
@@ -4229,10 +4260,22 @@ export function ChildRecords() {
     !editingId && (duplicateChild || exactResident)
   );
 
+  // A resident who is currently Absconded is definitively "Returning Resident
+  // (Abscon/Tumakas)" — there is no ambiguity to ask the Social Worker to
+  // resolve here, unlike an ordinary returning admission. The backend enforces
+  // this regardless of what is submitted; this keeps the form's own display
+  // from suggesting a choice ("Relapse") that would not actually be saved.
+  const isReturningFromAbscond = Boolean(
+    isReturningAdmission &&
+      (duplicateChild || exactResident)?.status === 'Absconded'
+  );
+
   const admissionStatus = editingId
     ? existingAdmission?.admissionStatus || 'New'
     : isReturningAdmission
-      ? returningAdmissionStatus
+      ? (isReturningFromAbscond
+        ? 'Returning Resident (Abscon/Tumakas)'
+        : returningAdmissionStatus)
       : 'New';
 
   return (
@@ -4758,11 +4801,13 @@ export function ChildRecords() {
                       </p>
 
                       <p className="text-xs text-gray-500 mt-1">
-                        {isReturningAdmission
-                          ? 'This resident already has an admission on record. Choose how this one is classified.'
-                          : editingId
-                            ? 'Kept from the admission on record.'
-                            : 'First admission for this resident.'}
+                        {isReturningFromAbscond
+                          ? 'This resident absconded from a previous admission. This new admission is automatically classified as Returning Resident (Abscon/Tumakas).'
+                          : isReturningAdmission
+                            ? 'This resident already has an admission on record. Choose how this one is classified.'
+                            : editingId
+                              ? 'Kept from the admission on record.'
+                              : 'First admission for this resident.'}
                       </p>
 
                     </div>
@@ -4796,8 +4841,11 @@ export function ChildRecords() {
 
                   {/* Only a returning admission has a choice to make: the two
                       returning classifications are indistinguishable from the
-                      data, so one of them has to be picked by hand. */}
-                  {isReturningAdmission && (
+                      data, so one of them has to be picked by hand. A resident
+                      returning from Abscond is not ambiguous — the record
+                      already says why they left — so no picker is shown and
+                      nothing here can override the forced classification. */}
+                  {isReturningAdmission && !isReturningFromAbscond && (
                     <div className="mt-4 space-y-2">
                       <p className="text-xs font-semibold text-gray-500">
                         Classify this admission
@@ -5229,6 +5277,12 @@ export function ChildRecords() {
                         Returning Resident
                       </Badge>
 
+                      {duplicateChild.status === 'Absconded' && (
+                        <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100">
+                          Absconded — re-admitting
+                        </Badge>
+                      )}
+
                     </div>
 
                     <p className="text-sm text-gray-500">
@@ -5539,6 +5593,7 @@ export function ChildRecords() {
             'All',
             'Active',
             'Discharged',
+            'Absconded',
           ] as const
         ).map(
           (status) => {
@@ -5550,7 +5605,10 @@ export function ChildRecords() {
                 : status ===
                     'Active'
                   ? activeCount
-                  : dischargedCount;
+                  : status ===
+                      'Absconded'
+                    ? abscondedCount
+                    : dischargedCount;
 
             const active =
               statusFilter ===
@@ -5570,6 +5628,9 @@ export function ChildRecords() {
 
                   active
                     ? status ===
+                      'Absconded'
+                      ? 'bg-orange-600 border-orange-600 text-white'
+                      : status ===
                       'Discharged'
                       ? 'bg-emerald-600 border-emerald-600 text-white'
                       : status ===
@@ -5580,7 +5641,7 @@ export function ChildRecords() {
                 ].join(' ')}
               >
                 {
-                  status
+                  status === 'Absconded' ? 'Abscond' : status
                 }
 
                 <span
@@ -5681,6 +5742,13 @@ export function ChildRecords() {
                           'Discharged' && (
                           <Badge className="bg-emerald-500/20 text-emerald-300 border-none text-[10px] uppercase font-bold">
                             Case Closed
+                          </Badge>
+                        )}
+
+                        {child.status ===
+                          'Absconded' && (
+                          <Badge className="bg-orange-500/25 text-orange-200 border-none text-[10px] uppercase font-bold">
+                            Absconded
                           </Badge>
                         )}
 

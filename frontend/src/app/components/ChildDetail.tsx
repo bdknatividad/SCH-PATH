@@ -295,10 +295,14 @@ export function ChildDetail({ id: idProp, onBack }: ChildDetailProps = {}) {
   const [violationTypeSearch, setViolationTypeSearch] = useState('');
   const medicalFileRef = useRef<HTMLInputElement | null>(null);
   const [isUploadingMedical, setIsUploadingMedical] = useState(false);
+  // An absconded resident's record is frozen: every record stays readable, but
+  // nothing on it is editable. The API enforces the same rule (utils/abscond.js),
+  // so this only keeps the surface from offering an action that would be refused.
+  const isAbsconded = children.find(c => c.id === id)?.status === 'Absconded';
   // Medical Notes and the medical documents are managed by the Nurse and the
   // Center Head only — the same `Health` edit capability the Health module gates
   // its own create/edit on, so the two surfaces cannot disagree.
-  const canEditMedical = can('Health', 'edit');
+  const canEditMedical = can('Health', 'edit') && !isAbsconded;
   const [isEditingMedicalNotes, setIsEditingMedicalNotes] = useState(false);
   const [medicalNotesDraft, setMedicalNotesDraft] = useState('');
   const [savingMedicalNotes, setSavingMedicalNotes] = useState(false);
@@ -913,6 +917,24 @@ export function ChildDetail({ id: idProp, onBack }: ChildDetailProps = {}) {
 
   if (!child) return <div className="p-10 text-center">Resident record not found.</div>;
 
+  // Abscond — Center Head / Admin / Social Worker only (the API enforces the same).
+  const canMarkAbscond = ['centerhead', 'admin', 'socialworker'].includes(String(user?.role || '').toLowerCase().replace(/[\s_-]+/g, ''));
+  const handleAbscond = async () => {
+    const confirmed = await systemDialog.confirm({
+      title: `Mark ${child.name} as absconded?`,
+      description: 'The resident will be moved to the Abscond tab. Their Phase Timeline will be frozen and their record becomes view-only. All existing phase progress and records are kept.',
+      confirmLabel: 'Mark as Absconded',
+      tone: 'warning',
+    });
+    if (!confirmed) return;
+    try {
+      await request(`/children/${child.id}/abscond`, { method: 'POST' });
+      await refreshData();
+    } catch (error) {
+      void systemDialog.failure('Could not mark the resident as absconded', describeError(error, 'The status was not changed. Please try again.'));
+    }
+  };
+
   const basicName = latestAdmission?.name || child.name || '—';
   const basicAge = latestAdmission?.age ?? child.age ?? '—';
   const basicBirthDate = latestAdmission?.birthDate || child.birthDate || '';
@@ -936,9 +958,17 @@ export function ChildDetail({ id: idProp, onBack }: ChildDetailProps = {}) {
       <Card className="border-l-4 border-l-[#2F3E46]">
         <CardContent className="p-6">
           <div>
-            <h2 className="text-2xl font-bold text-[#2F3E46]">{child.name}</h2>
+            <h2 className="text-2xl font-bold text-[#2F3E46] flex items-center gap-2">
+              {child.name}
+              {isAbsconded && <Badge className="bg-orange-100 text-orange-800 border-none text-[10px] uppercase font-bold">Absconded</Badge>}
+            </h2>
             <p className="text-sm text-gray-500">ID: {child.id}</p>
           </div>
+          {isAbsconded && (
+            <p className="mt-3 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2 text-xs text-orange-800">
+              This resident has absconded{(child as any).abscondedAt ? ` (${formatShortDate(String((child as any).abscondedAt).slice(0, 10))})` : ''}. The record is view-only and the Phase Timeline is frozen; all existing records are kept.
+            </p>
+          )}
         </CardContent>
       </Card>
 
@@ -967,7 +997,14 @@ export function ChildDetail({ id: idProp, onBack }: ChildDetailProps = {}) {
         <TabsContent value="personal" className="mt-4 space-y-4">
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium flex items-center gap-2"><User className="w-4 h-4" /> Basic Information</CardTitle>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <CardTitle className="text-sm font-medium flex items-center gap-2"><User className="w-4 h-4" /> Basic Information</CardTitle>
+                {canMarkAbscond && !isAbsconded && child.status !== 'Discharged' && (
+                  <Button type="button" size="sm" variant="outline" className="h-8 border-orange-300 text-orange-700 hover:bg-orange-50" onClick={() => { void handleAbscond(); }}>
+                    Abscond
+                  </Button>
+                )}
+              </div>
             </CardHeader>
             <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-x-10 gap-y-3 text-sm">
               <div className="flex justify-between border-b pb-2"><span className="text-gray-500">Full Name</span><span className="font-semibold text-right">{basicName}</span></div>
@@ -1414,7 +1451,7 @@ export function ChildDetail({ id: idProp, onBack }: ChildDetailProps = {}) {
                 </div>
                 <div className="max-h-44 overflow-y-auto p-2">
                   <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
-                    {children.filter(c => c.status !== 'Discharged' && c.name.toLowerCase().includes(incidentResidentSearch.toLowerCase())).map(c => {
+                    {children.filter(c => c.status !== 'Discharged' && c.status !== 'Absconded' && c.name.toLowerCase().includes(incidentResidentSearch.toLowerCase())).map(c => {
                       const checked = selectedIncidentResidentIds.includes(c.id);
                       return <label key={c.id} className={`flex cursor-pointer items-start gap-2 rounded-md border px-3 py-2 text-xs transition-colors ${checked ? 'border-[#2F3E46] bg-gray-50' : 'border-transparent hover:bg-gray-50'}`}><input type="checkbox" checked={checked} onChange={() => setSelectedIncidentResidentIds(prev => checked ? prev.filter(x => x !== c.id) : [...prev, c.id])} className="mt-0.5 h-4 w-4 accent-[#2F3E46]" /><span className="min-w-0"><span className="block font-semibold text-[#2F3E46] break-words">{c.name}</span><span className="block text-[10px] text-gray-400">{c.id}{c.id === child.id ? ' · current resident' : ''}</span></span></label>;
                     })}
