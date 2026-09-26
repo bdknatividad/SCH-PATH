@@ -104,8 +104,14 @@ const MEDICAL_RECORD_ROLES = new Set(['nurse', 'centerhead', 'admin']);
 const APPROVER_ROLES = ['centerhead', 'socialworker', 'admin'];
 
 const DOCUMENT_READ_ROLES_BY_CATEGORY = {
-  medical: ['nurse', 'centerhead', 'admin'],
-  health: ['nurse', 'centerhead', 'admin'],
+  // A Houseparent reviews the medical record of a resident on their own case
+  // load — the "medical record filed" notification tells them to, and the
+  // resident's Medical tab renders this list. Withholding the category meant
+  // they were told to open a file they then could not read. This grants the
+  // *category*, not other residents' files: `documentVisibleTo` and
+  // `canReadDocumentAsync` both narrow every read through `residentInScope`.
+  medical: ['nurse', 'centerhead', 'admin', 'houseparent'],
+  health: ['nurse', 'centerhead', 'admin', 'houseparent'],
   psychological: ['psychologist', 'centerhead', 'admin'],
   behavioral: ['psychologist', 'socialworker', 'centerhead', 'admin'],
   assessment: ['psychologist', 'socialworker', 'centerhead', 'admin'],

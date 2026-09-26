@@ -200,6 +200,26 @@ function rowResidentIds(resourceName, row) {
   return candidates.map(String).filter(Boolean);
 }
 
+/**
+ * Resources the caseload-scoped role may read for its own residents without
+ * holding the module that owns them.
+ *
+ * The Houseparent holds no Health module, so the gate below emptied
+ * `healthRecords` for them — and the Medical tab of a resident on their case
+ * load showed no health records at all, including the one a Nurse had just
+ * filed and told them to review. The caseload filter further down narrows these
+ * to the Houseparent's own residents, which is the boundary that actually
+ * matters here; the module gate withheld only their own residents' rows.
+ *
+ * Deliberately a short, explicit list, and keyed by the one caseload-scoped
+ * role. A role with no caseload concept would be handed every resident's rows
+ * by the same exemption, which is why it is not a general "skip the gate when
+ * scoped" rule.
+ */
+const CASELOAD_READABLE_WITHOUT_MODULE = {
+  houseparent: new Set(['healthRecords']),
+};
+
 router.get('/store', authenticate, async (req, res, next) => {
   try {
     const data = {};
@@ -235,9 +255,14 @@ router.get('/store', authenticate, async (req, res, next) => {
         data[resourceName] = [];
         continue;
       }
-      // Same rule for every resource whose module the caller does not hold.
+      // Same rule for every resource whose module the caller does not hold —
+      // except the short caseload-readable list above, where the caseload filter
+      // below is the boundary instead of the module gate.
       const owningModule = STORE_MODULE_BY_RESOURCE[resourceName];
-      if (owningModule && !hasModuleAccess(snapshotFor(req), owningModule)) {
+      const caseloadReadable = CASELOAD_READABLE_WITHOUT_MODULE[
+        String(req.user?.role || '').toLowerCase().replace(/[\s_-]+/g, '')
+      ]?.has(resourceName);
+      if (owningModule && !caseloadReadable && !hasModuleAccess(snapshotFor(req), owningModule)) {
         data[resourceName] = [];
         continue;
       }

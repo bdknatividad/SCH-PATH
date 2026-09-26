@@ -18,7 +18,7 @@ const { PHASE_REQUIREMENTS, RESOURCES } = require('../utils/constants');
 const { canAccessResident } = require('./assignmentController');
 const { assignedResidentIds } = require('../utils/residentScope');
 const { loadDocumentScope, documentVisibleTo } = require('./documentController');
-const { isManager } = require('../utils/authorization');
+const { isManager, normalizeRole } = require('../utils/authorization');
 const notifications = require('../services/notificationService');
 const { buildAccessSnapshot, hasModuleAccess, hasSubModuleAccess, can } = require('../config/rbac');
 const { activeAdmissionIdFor } = require('../services/admissionLink');
@@ -46,14 +46,16 @@ const baseController = createController('children');
  * carries the `[ENDORSEMENTS]` block the Behavioral tab and the nurse dashboard
  * read, so redacting it would remove non-medical data.
  *
- * The rule fails *closed*. A role whose matrix declares no Medical tab can never
- * acquire one through a stored grant, so it is refused even before the snapshot
- * is consulted. That matters because `buildAccessSnapshot` treats an empty
- * `accessibleModules` list as "fall back to the role's full matrix" (see
- * `rbac.js`): a Houseparent row with `[]` stored — which is how the role is
- * seeded, and what every existing row looks like — would otherwise resolve to
- * the whole matrix and be handed the medical summary the role is defined never
- * to see.
+ * The rule fails *closed* for the roles it withholds. A role whose matrix
+ * declares no Medical tab can never acquire one through a stored grant, so it is
+ * refused even before the snapshot is consulted. That matters because
+ * `buildAccessSnapshot` treats an empty `accessibleModules` list as "fall back
+ * to the role's full matrix" (see `rbac.js`): a stored `[]` would otherwise
+ * resolve to the whole matrix and hand the summary to a role the matrix does not
+ * grant it to.
+ *
+ * The Houseparent is the one role allowed past the module test — see
+ * `roleCanReachMedicalTab`. Their reach is bounded by the caseload instead.
  */
 function mayReadResidentMedicalSummary(user) {
   if (!user) return false;
@@ -72,6 +74,16 @@ function mayReadResidentMedicalSummary(user) {
  */
 function roleCanReachMedicalTab(role) {
   try {
+    // The Houseparent holds no Child Records module — they reach a resident
+    // through their own Case Load, which renders the same `ChildDetail` viewer
+    // with the same Medical tab — so the module test below cannot be the whole
+    // rule for them. Their reach stays bounded by `canAccessResident` on
+    // `GET /children/:id` and by the caseload filter on the store, so this
+    // grants the summary for their own residents and nobody else's. They are
+    // notified to review a resident's medical record; withholding the summary
+    // left the very tab they were sent to looking empty.
+    if (normalizeRole(role) === 'houseparent') return true;
+
     const { getRoleDefinition } = require('../config/rbac');
     const definition = getRoleDefinition(role);
     if (!definition) return false;

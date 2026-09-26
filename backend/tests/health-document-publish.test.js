@@ -399,7 +399,7 @@ test('the category is what makes the folder deterministic for all six record typ
 
 // ── 2. Who can read the published record ───────────────────────────────────
 
-test('the stamped category is the one that grants the nurse and the Center Head read', () => {
+test('the stamped category grants read, and only within the caller\'s own residents', () => {
   const category = healthController.HEALTH_DOCUMENT_CATEGORY.toLowerCase();
   const block = DOCUMENT_CONTROLLER.slice(
     DOCUMENT_CONTROLLER.indexOf('const DOCUMENT_READ_ROLES_BY_CATEGORY'),
@@ -412,9 +412,32 @@ test('the stamped category is the one that grants the nurse and the Center Head 
   for (const role of ['nurse', 'centerhead', 'admin']) {
     assert.ok(roles.includes(role), `${role} cannot read the record it just filed`);
   }
-  for (const role of ['houseparent', 'educator']) {
-    assert.ok(!roles.includes(role), `${role} must not be able to read a medical record`);
-  }
+
+  // The Houseparent reads the medical record of a resident on their own case
+  // load: they are notified to review it, and the viewer their Case Load opens
+  // renders the Medical tab. This was withheld, and the tab they were sent to
+  // came back empty. The category grants the *document*, never another
+  // resident's file, so the caseload bound below is now the load-bearing half of
+  // this rule rather than a detail — it is asserted, not assumed.
+  assert.ok(
+    roles.includes('houseparent'),
+    'the Houseparent can no longer read the medical record they are told to review'
+  );
+  assert.match(
+    DOCUMENT_CONTROLLER,
+    /function documentVisibleTo\(document, user, scope\) \{[\s\S]*?return residentInScope\(document, user, scope\.allowedResidentIds\);/,
+    'documentVisibleTo no longer narrows by the caller\'s own residents, so granting the Houseparent the ' +
+      'category would expose every resident\'s medical record'
+  );
+  assert.match(
+    DOCUMENT_CONTROLLER,
+    /async function canReadDocumentAsync\(document, user, approvedDocumentIds = null\) \{[\s\S]*?return documentVisibleTo\(document, user, await loadDocumentScope\(user\)\);/,
+    'canReadDocumentAsync no longer applies the resident scope, so a single-document read would bypass the caseload'
+  );
+
+  // The Educator holds Child Records read-only and its specification says it
+  // must never reach medical records. That exclusion is unchanged.
+  assert.ok(!roles.includes('educator'), 'educator must not be able to read a medical record');
 });
 
 test('this change does not widen who may author a medical record', () => {
