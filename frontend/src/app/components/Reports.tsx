@@ -20,6 +20,7 @@ import { useData } from '../state/DataContext';
 import { describeError, request } from '@/services/api';
 import { useNavigate } from 'react-router-dom';
 import { AnecdotalReports, downloadAnecdotalPdf } from './AnecdotalReports';
+import { downloadReportZip, periodZipName } from '@/app/utils/downloadReportZip';
 import {
   QuarterlyProgressReportsCard,
   QuarterlyProgressReportEditor,
@@ -1078,19 +1079,41 @@ function ScheduledReportsPackage() {
   const [month, setMonth] = useState(String(new Date().getMonth() + 1));
   const [year, setYear] = useState(String(new Date().getFullYear()));
   const [checking, setChecking] = useState(false);
+  const [zipProgress, setZipProgress] = useState<{ kind: 'tri' | 'anecdotal'; done: number; total: number } | null>(null);
+  const [zipError, setZipError] = useState<string | null>(null);
 
   const getMonthName = (m: string) => MONTHS[Number(m) - 1] || '';
+
+  /** The month's TRI and Anecdotal records — the same two calls the checklist makes. */
+  const loadMonth = async () => {
+    const [triRes, anecdRes] = await Promise.all([
+      request<{ success: boolean; data?: any[] }>(`/tri?year=${year}&month=${month}`),
+      request<{ success: boolean; data?: any[] }>(`/anecdotal-reports?year=${year}&month=${month}`),
+    ]);
+    return { tri: triRes?.data || [], anecd: anecdRes?.data || [] };
+  };
+
+  /**
+   * The reports of one kind that belong to the selected month.
+   *
+   * The endpoint already filters by year and month, and this filters again on the
+   * record's own period fields. That is deliberate belt-and-braces: the ZIP is
+   * the thing the facility files, so a record from another month reaching it
+   * would be a silent filing error rather than a visible one.
+   */
+  const recordsForMonth = (records: any[], kind: 'tri' | 'anecdotal') =>
+    records.filter((r) => {
+      if (!r?.id || !r?.residentId) return false;
+      return kind === 'tri'
+        ? Number(r.reportingYear) === Number(year) && Number(r.reportingMonth) === Number(month)
+        : Number(r.reportYear) === Number(year) && Number(r.reportMonth) === Number(month);
+    });
 
   const handleViewMonthlyPackage = async () => {
     setChecking(true);
     try {
-      const [triRes, anecdRes] = await Promise.all([
-        request<{ success: boolean; data?: any[] }>(`/tri?year=${year}&month=${month}`),
-        request<{ success: boolean; data?: any[] }>(`/anecdotal-reports?year=${year}&month=${month}`),
-      ]);
+      const { tri, anecd } = await loadMonth();
       const active = activeResidentSnapshot;
-      const tri = triRes?.data || [];
-      const anecd = anecdRes?.data || [];
       const missing: string[] = [];
       for (const child of active) {
         const triRecord = tri.find(r => r.residentId === child.id);
@@ -1123,7 +1146,77 @@ function ScheduledReportsPackage() {
     } finally { setChecking(false); }
   };
 
-  return <Card className="shadow-sm border-none border-l-4 border-l-[#2F3E46]"><CardHeader className="border-b border-gray-100 bg-gray-50/50"><CardTitle className="flex items-center gap-2 text-[#2F3E46]"><Activity className="w-5 h-5 text-[#FFD100]" /> Scheduled Reports</CardTitle></CardHeader><CardContent className="pt-4"><p className="text-sm text-gray-500 mb-4">Reports are viewed or downloaded manually by the Social Worker. The monthly package currently checks TRI and Anecdotal Reports while the remaining required-document list is being finalized.</p><div className="flex flex-col gap-3 sm:flex-row sm:items-end"><div><Label className="text-xs">Month</Label><select value={month} onChange={e=>setMonth(e.target.value)} className="mt-1 h-10 rounded-md border px-3 text-sm">{MONTHS.map((m,i)=><option key={m} value={i+1}>{m}</option>)}</select></div><div><Label className="text-xs">Year</Label><select value={year} onChange={e=>setYear(e.target.value)} className="mt-1 h-10 rounded-md border px-3 text-sm">{[Number(year)-1,Number(year),Number(year)+1].map(y=><option key={y}>{y}</option>)}</select></div><Button onClick={handleViewMonthlyPackage} disabled={checking} className="gap-2 bg-[#2F3E46] text-white">{checking ? <Loader2 className="w-4 h-4 animate-spin"/> : <FileText className="w-4 h-4"/>}{checking ? 'Checking…' : 'View Monthly Package'}</Button></div></CardContent></Card>;
+  /**
+   * One ZIP holding every report of one kind for the selected month.
+   *
+   * Both kinds are built the same way: the month's records from the list
+   * endpoint, then each report's own PDF endpoint. A report that cannot be
+   * fetched is skipped and named, rather than losing the whole archive.
+   */
+  const handleDownloadZip = async (kind: 'tri' | 'anecdotal') => {
+    setZipError(null);
+    const isTri = kind === 'tri';
+    const label = isTri ? 'TRI reports' : 'Anecdotal Reports';
+    try {
+      const { tri, anecd } = await loadMonth();
+      const monthRecords = recordsForMonth(isTri ? tri : anecd, kind);
+      if (!monthRecords.length) {
+        await dialog.failure(
+          `No ${label} for ${getMonthName(month)} ${year}`,
+          `No ${label} belong to that month, so there is nothing to put in a ZIP.`,
+        );
+        return;
+      }
+
+      const items = monthRecords.map((record) => {
+        const child = activeResidentSnapshot.find((c) => c.id === record.residentId);
+        const who = String(child?.name || record.residentId).replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '');
+        const period = isTri
+          ? `${record.reportingYear}-${String(record.reportingMonth).padStart(2, '0')}`
+          : `${record.reportYear}-${String(record.reportMonth).padStart(2, '0')}`;
+        return {
+          path: isTri ? `/tri/${record.id}/pdf` : `/anecdotal-reports/${record.id}/pdf`,
+          name: `${isTri ? 'TRI' : 'Anecdotal-Report'}-${who}-${period}.pdf`,
+        };
+      });
+
+      setZipProgress({ kind, done: 0, total: items.length });
+      const result = await downloadReportZip(
+        periodZipName(isTri ? 'TRI-Reports' : 'Anecdotal-Reports', year, month),
+        items,
+        (done, total) => setZipProgress({ kind, done, total }),
+      );
+      if (result.skipped.length) {
+        await dialog.failure(
+          'Some reports could not be included',
+          `${result.included} of ${items.length} ${label} were added to the ZIP. These could not be downloaded: ${result.skipped.join(', ')}.`,
+        );
+      }
+    } catch (err: any) {
+      setZipError(err?.message || 'Unable to build the ZIP.');
+    } finally {
+      setZipProgress(null);
+    }
+  };
+
+  return <Card className="shadow-sm border-none border-l-4 border-l-[#2F3E46]"><CardHeader className="border-b border-gray-100 bg-gray-50/50"><CardTitle className="flex items-center gap-2 text-[#2F3E46]"><Activity className="w-5 h-5 text-[#FFD100]" /> Scheduled Reports</CardTitle></CardHeader><CardContent className="pt-4"><p className="text-sm text-gray-500 mb-4">Reports are viewed or downloaded manually by the Social Worker. The monthly package currently checks TRI and Anecdotal Reports while the remaining required-document list is being finalized.</p><div className="flex flex-col gap-3 sm:flex-row sm:items-end"><div><Label className="text-xs">Month</Label><select value={month} onChange={e=>setMonth(e.target.value)} className="mt-1 h-10 rounded-md border px-3 text-sm">{MONTHS.map((m,i)=><option key={m} value={i+1}>{m}</option>)}</select></div><div><Label className="text-xs">Year</Label><select value={year} onChange={e=>setYear(e.target.value)} className="mt-1 h-10 rounded-md border px-3 text-sm">{[Number(year)-1,Number(year),Number(year)+1].map(y=><option key={y}>{y}</option>)}</select></div><Button onClick={handleViewMonthlyPackage} disabled={checking} className="gap-2 bg-[#2F3E46] text-white">{checking ? <Loader2 className="w-4 h-4 animate-spin"/> : <FileText className="w-4 h-4"/>}{checking ? 'Checking…' : 'View Monthly Package'}</Button></div>
+        {/* Bulk download. Two buttons rather than one because the facility files
+            TRI and Anecdotal Reports separately, and the checklist above is a
+            different question ("is anything missing?") from "give me the
+            reports". Each button produces one ZIP holding one PDF per resident. */}
+        <div className="mt-4 border-t border-gray-100 pt-4">
+          <p className="text-xs font-bold uppercase tracking-wide text-gray-400">Bulk download</p>
+          <p className="mt-1 text-xs text-gray-500">One ZIP per report type, holding every resident&rsquo;s report for {getMonthName(month)} {year} — each report a separate PDF inside the archive.</p>
+          {zipError && <p className="mt-2 rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-700">{zipError}</p>}
+          <div className="mt-3 flex flex-wrap gap-2">
+            {(['tri', 'anecdotal'] as const).map((kind) => {
+              const running = zipProgress && zipProgress.kind === kind ? zipProgress : null;
+              const label = kind === 'tri' ? 'TRI Reports' : 'Anecdotal Reports';
+              return <Button key={kind} variant="outline" onClick={() => void handleDownloadZip(kind)} disabled={zipProgress !== null} className="gap-2">{running ? <Loader2 className="w-4 h-4 animate-spin"/> : <Download className="w-4 h-4"/>}{running ? `Zipping ${running.done}/${running.total}…` : `Download ${label} (ZIP)`}</Button>;
+            })}
+          </div>
+        </div>
+        </CardContent></Card>;
 }
 
 /**

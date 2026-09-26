@@ -17,6 +17,7 @@ import {
 import { Document as PdfDocument, Page as PdfPage, pdfjs } from 'react-pdf';
 import { SignaturePadModal } from '@/app/components/SignaturePad';
 import { downloadAnecdotalPdf } from '@/app/components/AnecdotalReports';
+import { downloadReportZip, periodZipName } from '@/app/utils/downloadReportZip';
 import { useData } from '../state/DataContext';
 import { useAuth } from '../state/AuthContext';
 import { request, fetchBinary } from '@/services/api';
@@ -107,6 +108,32 @@ export interface QprPeriod {
   periodEnd: string;
   label: string;
   headerLabel: string;
+}
+
+/**
+ * Which program/module a provenance string belongs to.
+ *
+ * The server writes `table.column`, or a note such as `computed from …` / `not
+ * on file`. Grouping by the table is what turns a flat list into "which program
+ * did this come from", which is the question a consolidated report exists to
+ * answer.
+ */
+function moduleOfSource(source: string): string {
+  const value = String(source || '').trim();
+  const table = value.split(/[.\s]/)[0].toLowerCase();
+  if (table.startsWith('education')) return 'Education';
+  if (table === 'healthrecords') return 'Health';
+  if (table === 'admissions') return 'Admission';
+  if (table === 'children') return 'Child Records';
+  if (table.startsWith('computed')) return 'Computed from the record';
+  if (table === 'not') return 'Not on file';
+  return 'Other';
+}
+
+/** `schoolAttended` → `School attended`, for a list a person reads. */
+function humanField(field: string): string {
+  const spaced = String(field).replace(/([a-z0-9])([A-Z])/g, '$1 $2');
+  return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 
 /**
@@ -624,6 +651,33 @@ export function QuarterlyProgressReportEditor({
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [drafts, setDrafts] = useState<Record<string, Partial<QprSection>>>({});
+
+  /**
+   * Where each identifying field came from.
+   *
+   * The server already records this — `identifyingInformation._sources` holds one
+   * entry per field naming the table and column it was read from — so a reviewer
+   * can tell "the resident's record genuinely says nothing here" from "no source
+   * was found". Nothing displayed it. A consolidated report has to show its own
+   * provenance rather than ask staff to trust it, which is the whole point of
+   * gathering Education, Health and the rest instead of collecting them by hand.
+   */
+  const fieldSources = useMemo(() => {
+    const raw = (report?.identifyingInformation as any)?._sources;
+    if (!raw || typeof raw !== 'object') return [] as { field: string; source: string; group: string }[];
+    return Object.entries(raw)
+      .map(([field, source]) => ({ field, source: String(source), group: moduleOfSource(String(source)) }))
+      .sort((a, b) => a.group.localeCompare(b.group) || a.field.localeCompare(b.field));
+  }, [report]);
+
+  const groupedSources = useMemo(() => {
+    const groups = new Map<string, { field: string; source: string }[]>();
+    for (const entry of fieldSources) {
+      if (!groups.has(entry.group)) groups.set(entry.group, []);
+      groups.get(entry.group)!.push({ field: entry.field, source: entry.source });
+    }
+    return [...groups.entries()];
+  }, [fieldSources]);
   /**
    * The closing narrative being typed, or null while the report's own value is
    * shown.
@@ -929,6 +983,32 @@ export function QuarterlyProgressReportEditor({
               Aspects and the closing narrative, then sign at the foot of the last page.
             </div>
 
+            {/* Which module every filled-in field was read from — see
+                `fieldSources`. Collapsed by default: it is a reference, not
+                something to read before writing the report. */}
+            {fieldSources.length > 0 && (
+              <details className="mb-3 rounded border border-gray-200 bg-white px-3 py-2">
+                <summary className="cursor-pointer text-xs font-semibold text-[#2F3E46]">
+                  Where this report&rsquo;s data came from — {fieldSources.length} field{fieldSources.length === 1 ? '' : 's'}
+                </summary>
+                <div className="mt-2 space-y-3">
+                  {groupedSources.map(([group, entries]) => (
+                    <div key={group}>
+                      <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400">{group}</p>
+                      <ul className="mt-0.5 space-y-0.5">
+                        {entries.map((entry) => (
+                          <li key={entry.field} className="flex flex-wrap gap-x-2 text-[11px] text-gray-600">
+                            <span className="font-semibold text-gray-700">{humanField(entry.field)}</span>
+                            <span className="text-gray-400">{entry.source}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
+
             {loading && (
               <p className="flex items-center gap-2 rounded-lg bg-white p-8 text-sm text-gray-500">
                 <Loader2 className="h-4 w-4 animate-spin" /> Loading report…
@@ -1124,14 +1204,20 @@ export function QuarterlyProgressReportsCard({ onOpenReport }: { onOpenReport: (
   // Shipped by the server with the list. Defaults to true so an older response
   // does not silently remove the control from a reviewer.
   const [canOpenReport, setCanOpenReport] = useState(true);
+  // Bulk download: one ZIP holding every report filed for a chosen quarter.
+  const [bulkPeriod, setBulkPeriod] = useState('');
+  const [zipProgress, setZipProgress] = useState<{ done: number; total: number } | null>(null);
+  const [zipError, setZipError] = useState<string | null>(null);
 
   const activeChildren = children.filter((c) => c.status === 'Active' || !c.status);
 
   useEffect(() => {
     request<{ data: QprPeriod[] }>(`/quarterly-progress-reports/periods?year=${encodeURIComponent(year)}`)
       .then((result) => {
-        setPeriods(result.data || []);
-        setPeriodStart((prev) => (result.data || []).some((p) => p.periodStart === prev) ? prev : (result.data?.[0]?.periodStart || ''));
+        const list = result.data || [];
+        setPeriods(list);
+        setPeriodStart((prev) => list.some((p) => p.periodStart === prev) ? prev : (list[0]?.periodStart || ''));
+        setBulkPeriod((prev) => list.some((p) => p.periodStart === prev) ? prev : (list[0]?.periodStart || ''));
       })
       .catch(() => setPeriods([]));
   }, [year]);
@@ -1146,6 +1232,53 @@ export function QuarterlyProgressReportsCard({ onOpenReport }: { onOpenReport: (
   }, [listReload]);
 
   const canOpen = Boolean(residentId && periodStart);
+
+  /**
+   * Every report filed for the chosen quarter.
+   *
+   * Matched on the report's own `periodStart`, which is what the quarter picker
+   * produced when the report was opened, so a report can never land in the ZIP
+   * for a quarter it was not filed under.
+   */
+  const reportsForQuarter = useMemo(
+    () => existing.filter((report) => String(report.periodStart || '').slice(0, 10) === bulkPeriod),
+    [existing, bulkPeriod],
+  );
+
+  /**
+   * One ZIP holding each resident's report for the chosen quarter, one PDF per
+   * report. A report that cannot be fetched is skipped and named rather than
+   * losing the whole archive — the same rule the Documents bulk download uses.
+   */
+  const handleDownloadQuarterZip = async () => {
+    setZipError(null);
+    const period = periods.find((p) => p.periodStart === bulkPeriod);
+    if (!period) return;
+    if (!reportsForQuarter.length) {
+      setZipError(`No Quarterly Progress Reports were filed for ${period.label}, so there is nothing to put in a ZIP.`);
+      return;
+    }
+    try {
+      const items = reportsForQuarter.map((report) => {
+        const child = children.find((c) => c.id === report.residentId);
+        const who = String(child?.name || report.residentId).replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '');
+        return {
+          path: `/quarterly-progress-reports/${report.id}/pdf`,
+          name: `Quarterly-Progress-Report-${who}-${period.label.replace(/\s+/g, '-')}.pdf`,
+        };
+      });
+      setZipProgress({ done: 0, total: items.length });
+      await downloadReportZip(
+        periodZipName('Quarterly-Progress-Reports', period.year, `Q${period.quarter}`),
+        items,
+        (done, total) => setZipProgress({ done, total }),
+      );
+    } catch (err: any) {
+      setZipError(err?.message || 'Unable to build the ZIP.');
+    } finally {
+      setZipProgress(null);
+    }
+  };
 
   const handleOpen = async () => {
     const period = periods.find((p) => p.periodStart === periodStart);
@@ -1267,6 +1400,46 @@ export function QuarterlyProgressReportsCard({ onOpenReport }: { onOpenReport: (
                   </button>
                 );
               })}
+            </div>
+          </div>
+        )}
+
+        {/*
+          Bulk download. The quarter is chosen here rather than inside the
+          "Open a Progress Report" dialog, because this is a different job: that
+          dialog creates one report for one resident, this collects the ones
+          already filed for a quarter. Gated by `canOpenReport`, the same
+          capability the server ships for opening a report, so the control is
+          not offered to a role the API would refuse.
+        */}
+        {canOpenReport && (
+          <div className="mt-5 border-t border-gray-100 pt-4">
+            <p className="text-xs font-bold uppercase tracking-wide text-gray-400">Bulk download</p>
+            <p className="mt-1 text-xs text-gray-500">One ZIP holding every resident&rsquo;s report for the quarter you pick — each report a separate PDF inside the archive.</p>
+            {zipError && <p className="mt-2 rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-700">{zipError}</p>}
+            <div className="mt-3 flex flex-wrap items-end gap-3">
+              <div className="space-y-1">
+                <Label className="text-xs font-semibold text-gray-500">Quarter</Label>
+                <Select value={bulkPeriod} onValueChange={setBulkPeriod}>
+                  <SelectTrigger className="h-10 w-52"><SelectValue placeholder="Select a quarter" /></SelectTrigger>
+                  <SelectContent>
+                    {periods.map((period) => (
+                      <SelectItem key={period.periodStart} value={period.periodStart}>
+                        {period.label} — {existing.filter((r) => String(r.periodStart || '').slice(0, 10) === period.periodStart).length} filed
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Button
+                variant="outline"
+                onClick={() => void handleDownloadQuarterZip()}
+                disabled={zipProgress !== null || !bulkPeriod}
+                className="gap-2"
+              >
+                {zipProgress ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                {zipProgress ? `Zipping ${zipProgress.done}/${zipProgress.total}…` : `Download ${reportsForQuarter.length} report(s) as ZIP`}
+              </Button>
             </div>
           </div>
         )}
