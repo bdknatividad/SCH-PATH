@@ -779,6 +779,16 @@ function NurseDashboard({
   const residentName = (id?: string, fallback?: string) =>
     children.find((child) => String(child.id) === String(id))?.name || fallback || 'Unassigned';
 
+  /**
+   * The Nurse's five widgets.
+   *
+   * "Upcoming Assessments" carries no `path`: the Nurse reads the schedule but
+   * holds no Assessments module, so `/assessments` answers 403 and the page
+   * would bounce straight back out. The count is still worth acting on, and the
+   * list it counts is already further down this same page, so the tile carries
+   * `scrollTo` instead and jumps to that card. Each row there opens the
+   * resident's record, which the Nurse does hold.
+   */
   const tiles = [
     {
       title: 'Medical Reminders',
@@ -801,12 +811,8 @@ function NurseDashboard({
       value: upcoming.length,
       caption: 'Scheduled from today — see the list below',
       icon: Calendar,
-      // No route: the Nurse reads the schedule but holds no Assessments module,
-      // so `/assessments` answers 403 and the page would bounce straight back
-      // out. The count is still worth acting on, and the list it counts is
-      // already further down this same page, so the tile scrolls to it instead
-      // of doing nothing. Each row there opens the resident's record, which the
-      // Nurse does hold.
+      // No route: see the note above the tile list. The list this counts is on
+      // this page, so the tile scrolls to it.
       path: null,
       scrollTo: NURSE_UPCOMING_ANCHOR,
     },

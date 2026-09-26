@@ -14,9 +14,15 @@
  * field the API was asking for. The reviewer had an error and nowhere to put the
  * answer.
  *
- * So this pins three things: the rule reads the intervention's *type* on both
- * sides, the two type lists are the same list, and the SPA no longer decides it
- * from the guide's prose.
+ * So this pins three things: the rule is decided by a property of the
+ * intervention itself — the configured `metadata.schedulable` flag, falling back
+ * to its *type* — the two type lists are the same list, and the SPA no longer
+ * decides it from the guide's prose.
+ *
+ * The flag was added later, for the opposite failure: a `Dialogue/Counseling`
+ * requirement the guide stores as **non-schedulable** was still being made to
+ * demand a schedule by the type-name rule, and the review screen had no control
+ * to supply one, so the incident could not be verified at all.
  */
 
 const test = require('node:test');
@@ -150,7 +156,22 @@ test('the API refuses a review without a schedule for a schedulable type', () =>
   );
   assert.match(
     BACKEND,
-    /const needsSchedule = requirements\.some\(\(item\) => isSchedulingInterventionType\(item\.interventionType\)\)/,
-    'the API no longer derives the requirement from the intervention type',
+    /const needsSchedule = requirements\.some\(interventionNeedsSchedule\)/,
+    'the API no longer derives the requirement from the intervention',
+  );
+  // The predicate now reads the configured `metadata.schedulable` flag first and
+  // falls back to the type. Both are properties of the intervention itself, so
+  // the property this file exists to protect — that the rule is never derived
+  // from the guide's prose — still holds. It is pinned here rather than left
+  // implied, because a future edit could reintroduce a text scan in the fallback.
+  assert.match(
+    BACKEND,
+    /function interventionNeedsSchedule\(row\) \{\s*const source = row && typeof row === 'object' \? row : \{ interventionType: row \};/,
+    'the API scheduling predicate no longer accepts an intervention row',
+  );
+  assert.match(
+    BACKEND,
+    /if \(metadata && typeof metadata\.schedulable === 'boolean'\) return metadata\.schedulable;\s*return isSchedulingInterventionType\(source\.interventionType\);/,
+    'the API no longer prefers the configured flag and falls back to the intervention type',
   );
 });
