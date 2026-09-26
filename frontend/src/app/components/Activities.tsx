@@ -36,6 +36,7 @@ import { Label } from '@/app/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/app/components/ui/select';
 import { Textarea } from '@/app/components/ui/textarea';
 import { Checkbox } from '@/app/components/ui/checkbox';
+import { ProgramQuarterlyReports } from './QuarterlyProgressReport';
 
 // 1. FIXED: Idinagdag ang Interface para mawala ang 'any' errors
 
@@ -224,6 +225,9 @@ export function Activities() {
 
   return (
     <div className="space-y-6 p-2">
+      {/* Quarterly reporting starts here as well as in Reports: the activities
+          logged here are read when the consolidated quarterly report is built. */}
+      <ProgramQuarterlyReports />
       <div className="flex justify-between items-center">
         <div>
           <h2 className="text-2xl font-bold tracking-tight text-[#2F3E46]">Activities</h2>

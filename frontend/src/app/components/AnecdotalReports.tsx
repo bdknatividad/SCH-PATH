@@ -589,7 +589,6 @@ export function AnecdotalReports({
   });
 
   const deadline = getLastMonday(Number(filterYear), Number(filterMonth));
-  const dayDiff = Math.ceil((new Date(`${deadline}T23:59:59`).getTime() - Date.now()) / 86400000);
 
   return (
     <div className={embedded ? 'space-y-4' : 'space-y-5 p-2'}>
@@ -602,10 +601,14 @@ export function AnecdotalReports({
           {isReportAuthor && !isSocialWorker && <Button onClick={startNew} className="bg-[#2F3E46] text-white gap-2"><FileText className="w-4 h-4" /> New Anecdotal Report</Button>}
         </div>
       )}
-
-      {isHouseparent && !embedded && (
-        <Card className="border-amber-200 bg-amber-50/70 shadow-sm"><CardContent className="p-4 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between"><div><p className="text-[10px] font-black uppercase tracking-wide text-amber-800">Monthly Submission Deadline</p><p className="text-sm font-semibold text-[#2F3E46]">TRI and Anecdotal Report are due by {fmtDate(deadline)}.</p></div><Badge className={dayDiff < 0 ? 'bg-red-100 text-red-700' : dayDiff <= 3 ? 'bg-orange-100 text-orange-700' : 'bg-white text-amber-800 border border-amber-200'}>{dayDiff < 0 ? 'Overdue' : dayDiff === 0 ? 'Due today' : `${dayDiff} days left`}</Badge></CardContent></Card>
-      )}
+      {/*
+        The Monthly Submission Deadline banner used to sit here as well, so a
+        Houseparent saw it twice: once at the top of the Houseparent module and
+        again under this heading. It is kept at the top of the module, where it
+        belongs to every tab rather than to one, and removed here. This component
+        has no other non-embedded home — the Reports module always passes
+        `embedded` — so nothing loses the warning.
+      */}
 
       {!showEditor && !embedded && (
         <>

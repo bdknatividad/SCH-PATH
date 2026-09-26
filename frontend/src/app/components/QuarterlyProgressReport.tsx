@@ -12,7 +12,7 @@ import {
 } from '@/app/components/ui/select';
 import {
   FileText, Download, Loader2, AlertCircle, CheckCircle2,
-  UserCheck, Lock, PenLine, Eye, ArrowLeft,
+  UserCheck, Lock, PenLine, Eye, ArrowLeft, ChevronDown, ChevronUp,
 } from 'lucide-react';
 import { Document as PdfDocument, Page as PdfPage, pdfjs } from 'react-pdf';
 import { SignaturePadModal } from '@/app/components/SignaturePad';
@@ -1487,5 +1487,52 @@ export function QuarterlyProgressReportsCard({ onOpenReport }: { onOpenReport: (
         )}
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * The Quarterly Progress Report, offered inside a program's own module.
+ *
+ * Every program feeds the same consolidated report — Education, Health and
+ * Activities are all read when the quarterly report is generated — so each
+ * program's module is a sensible place to start one, instead of requiring staff
+ * to remember that creation lives in the Reports module.
+ *
+ * Collapsed by default. It is an entry point, not the module's content, and it
+ * must not push the module's own header off the screen.
+ *
+ * Creating a report is the Social Worker's and the Center Head's capability and
+ * the API enforces it. `QuarterlyProgressReportsCard` gets that answer from the
+ * server (`canOpenReport`) and explains itself when the answer is no, so the
+ * same control can be placed here for every role without ever offering a button
+ * the API would refuse.
+ */
+export function ProgramQuarterlyReports() {
+  const [open, setOpen] = useState(false);
+  const [openReportId, setOpenReportId] = useState<string | null>(null);
+
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+      >
+        <span className="flex min-w-0 flex-wrap items-center gap-x-2">
+          <FileText className="h-4 w-4 shrink-0 text-[#FFD100]" />
+          <span className="text-sm font-bold text-[#2F3E46]">Quarterly Progress Report</span>
+          <span className="text-xs text-gray-500">— create or open this program&rsquo;s quarterly report</span>
+        </span>
+        {open ? <ChevronUp className="h-4 w-4 shrink-0 text-gray-400" /> : <ChevronDown className="h-4 w-4 shrink-0 text-gray-400" />}
+      </button>
+      {open && (
+        <div className="border-t border-gray-100 p-3">
+          <QuarterlyProgressReportsCard onOpenReport={setOpenReportId} />
+        </div>
+      )}
+      {openReportId && (
+        <QuarterlyProgressReportEditor reportId={openReportId} onClose={() => setOpenReportId(null)} />
+      )}
+    </div>
   );
 }
