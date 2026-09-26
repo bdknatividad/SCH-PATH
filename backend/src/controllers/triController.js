@@ -9,6 +9,7 @@ const notifications = require('../services/notificationService');
 // cannot be labelled with a different band than the one stored on the record.
 const { TRI_SCORING, MAX_TRI_PART_ONE_POINTS, ratingForPoints } = require('../utils/triScoring');
 const { buildTriReportDocument, TRI_SIGNATORY_SLOTS, signedLineCount } = require('../utils/triReportPdf');
+const { contentDisposition } = require('../utils/contentDisposition');
 const { buildRecommendationForTri } = require('./dischargeController');
 // Published TRI reports are filed in the TRI Records folder like any other
 // document; the folder comes from the routing rules so it cannot drift.
@@ -331,6 +332,36 @@ async function getById(req, res, next) {
     const record = await getRecord(req.params.id);
     if (!await canAccessResident(req.user, record.residentId)) throw new ApiError(403, 'You are not assigned to this resident');
     res.json({ success: true, data: mapRecord(record) });
+  } catch (error) { next(error); }
+}
+
+/**
+ * GET /api/tri/:id/pdf — the filled official TRI as a PDF, on demand.
+ *
+ * The form used to be drawn only in the browser: `Tri.tsx` fetches the blank
+ * `/forms/tri.pdf` and paints the record onto it, so a TRI could be downloaded
+ * only from a machine that had the editor open, one record at a time. Approval
+ * already builds the identical document server-side (`publishDocumentForTri`),
+ * so this exposes that generator rather than adding a second renderer — and it
+ * is what a bulk ZIP needs, because N records cannot each open a tab.
+ *
+ * The same two gates as `getById`: the record must exist, and the caller must be
+ * able to reach its resident (`canAccessResident`, which is what bounds a
+ * Houseparent to their own case load).
+ */
+async function getPdf(req, res, next) {
+  try {
+    const record = await getRecord(req.params.id);
+    if (!await canAccessResident(req.user, record.residentId)) throw new ApiError(403, 'You are not assigned to this resident');
+    const [[child]] = await pool.query('SELECT name FROM children WHERE id = ?', [record.residentId]);
+    const { buffer, fileName } = await buildTriReportDocument(record, child?.name);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Length', buffer.length);
+    // `inline` so the browser can preview it; the client saves it from the blob.
+    res.setHeader('Content-Disposition', contentDisposition(fileName, 'inline'));
+    // A TRI is a resident's record: never let a proxy or the browser cache it.
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.end(buffer);
   } catch (error) { next(error); }
 }
 
@@ -1059,4 +1090,4 @@ async function publishMissingTriDocuments({ limit = 50 } = {}) {
 // `publishDocumentForTri` is exported for the idempotency test: approving the same
 // record twice must update one Documents entry, and finalize() refuses the second
 // attempt before it can be observed over HTTP.
-module.exports = { list, getById, create, update, submit, review, returnForRevision, finalize, sign, updateSignatories, signOfficialLine, referenceViolations, summary, residentHistory, offenseDeductions, monitor, publishDocumentForTri, publishMissingTriDocuments, OFFICIAL_SIGNATURE_LINES };
+module.exports = { list, getById, getPdf, create, update, submit, review, returnForRevision, finalize, sign, updateSignatories, signOfficialLine, referenceViolations, summary, residentHistory, offenseDeductions, monitor, publishDocumentForTri, publishMissingTriDocuments, OFFICIAL_SIGNATURE_LINES };

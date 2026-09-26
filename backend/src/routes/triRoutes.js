@@ -33,6 +33,12 @@ router.get('/monitor', authorize('socialworker', 'centerhead', 'admin'), asyncHa
 router.get('/', requireModule('Houseparent'), asyncHandler(triController.list));
 router.post('/', authorize('socialworker', 'centerhead', 'admin', 'houseparent'), asyncHandler(triController.create));
 router.get('/:id', requireModule('Houseparent'), asyncHandler(triController.getById));
+// The filled official form as a PDF. Gated exactly like `/:id`, because it
+// returns the same record — the TRI is the Houseparent module's document, and
+// the Social Worker / Center Head who review it hold that module too. The
+// controller additionally bounds it with `canAccessResident`, so a Houseparent
+// can only render a resident on their own case load.
+router.get('/:id/pdf', requireModule('Houseparent'), asyncHandler(triController.getPdf));
 router.put('/:id', authorize('socialworker', 'centerhead', 'admin', 'houseparent'), asyncHandler(triController.update));
 router.post('/:id/submit', authorize('socialworker', 'centerhead', 'admin', 'houseparent'), asyncHandler(triController.submit));
 // The "Houseparent" signature line on page 8 of the form belongs to the Houseparent
