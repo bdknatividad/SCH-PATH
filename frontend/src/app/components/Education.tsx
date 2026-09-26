@@ -29,7 +29,7 @@ import {
 // ── TYPES ────────────────────────────────────────────────────────────────────
 
 export type EducationLevel =
-  | 'High School'
+  | 'Junior High School'
   | 'Senior High School'
   | 'Tutorial'
   | 'Alternative Learning System (ALS)'
@@ -37,8 +37,11 @@ export type EducationLevel =
   | 'ALS Junior High School'
   | 'ALS Senior High School'
   | 'Calamba Manpower Development Center (CMDC)'
-  // Legacy spellings. Kept in the union so a record written before the ALS
-  // levels were split still renders; they are no longer offered in the picker.
+  // Legacy spellings. Kept in the union so a record written before the levels
+  // were renamed or split still renders; none of them is offered in the picker.
+  // `High School` is the old name for `Junior High School` — it sat beside
+  // `Senior High School` and read as either one.
+  | 'High School'
   | 'ALS - Elementary'
   | 'ALS - High School';
 
@@ -169,7 +172,7 @@ const saveProgress = (r: ProgressReport[]) => {
 // retired. It stays in the type union and the colour maps so a record written
 // before the split still renders and still filters.
 const EDUCATION_LEVELS: EducationLevel[] = [
-  'High School',
+  'Junior High School',
   'Senior High School',
   'Tutorial',
   'ALS Elementary',
@@ -200,6 +203,7 @@ const levelLabel = (level: EducationLevel): string => LEVEL_LABELS[level] || lev
 const isNotEnrolled = (level: EducationLevel): boolean => level === 'Tutorial';
 
 const LEVEL_COLORS: Record<EducationLevel, { bg: string; text: string; accent: string }> = {
+  'Junior High School':                         { bg: '#DBEAFE', text: '#1E40AF', accent: '#3B82F6' },
   'High School':                                { bg: '#DBEAFE', text: '#1E40AF', accent: '#3B82F6' },
   'Senior High School':                         { bg: '#FEF3C7', text: '#92400E', accent: '#F59E0B' },
   'Tutorial':                                   { bg: '#FFE4E6', text: '#9F1239', accent: '#FB7185' },
@@ -213,6 +217,7 @@ const LEVEL_COLORS: Record<EducationLevel, { bg: string; text: string; accent: s
 };
 
 const LEVEL_SHORT: Record<EducationLevel, string> = {
+  'Junior High School': 'JHS',
   'High School': 'HS',
   'Senior High School': 'SHS',
   'Tutorial': 'Tutorial',
@@ -229,7 +234,7 @@ const EMPTY_STUDENT: Omit<Student, 'id' | 'files'> = {
   name: '',
   age: 0,
   gender: 'Male',
-  educationLevel: 'High School',
+  educationLevel: 'Junior High School',
   gradeSection: '',
   school: '',
   enrollmentDate: '',
