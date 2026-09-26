@@ -59,8 +59,16 @@ router.put('/:id', authorizeNonHouseparent, blockAbscondedPhaseWrites, asyncHand
 /**
  * POST /api/phases/:id/complete
  * Mark phase as completed
+ *
+ * The Center Head and the Social Worker may complete a phase — it is the Social
+ * Worker's case to move, and `PHASE_OVERRIDE_ROLES` in the controller accepts
+ * the same two roles for the `force` override. This guard used to name only
+ * `centerhead`, so a Social Worker who clicked "Force Advance (Override)" in
+ * their Phase Timeline was refused here with 403 before the controller ever
+ * decided the override: the SPA offered a button the API refused. The route, the
+ * role set and the button now agree.
  */
-router.post('/:id/complete', authenticate, authorize('centerhead'), blockAbscondedPhaseWrites, asyncHandler(phaseController.complete));
+router.post('/:id/complete', authenticate, authorize('centerhead', 'socialworker'), blockAbscondedPhaseWrites, asyncHandler(phaseController.complete));
 
 /**
  * POST /api/phases/:id/demote
