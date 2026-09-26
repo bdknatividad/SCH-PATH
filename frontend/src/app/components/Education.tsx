@@ -293,6 +293,45 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/**
+ * Whole years between a birth date and today.
+ *
+ * `children.age` is a stored column that is rewritten on every create/update,
+ * but `/store` does not recompute it — so a resident whose birthday has passed
+ * since their last edit carries a stale number until someone saves them again.
+ * Deriving it from the birth date is what "the age follows the birthday" means,
+ * and it costs one subtraction.
+ */
+function ageFromBirthDate(birthDate?: string | null): number | null {
+  const iso = String(birthDate || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
+  const [year, month, day] = iso.split('-').map(Number);
+  const today = new Date();
+  let age = today.getFullYear() - year;
+  const monthDiff = today.getMonth() + 1 - month;
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < day)) age -= 1;
+  return age >= 0 && age < 130 ? age : null;
+}
+
+/**
+ * A value this module does not own — shown for reference, never edited.
+ *
+ * Age is computed from the resident's birth date, and the guardian details and
+ * address are captured at admission. They were editable here, so the Education
+ * module held its own copy that could drift from the resident's record — and a
+ * corrected birth date or a new guardian never reached it.
+ */
+function ReadOnlyField({ label, value, hint }: { label: string; value?: string | number | null; hint?: string }) {
+  const shown = value === undefined || value === null || String(value).trim() === '' ? '—' : String(value);
+  return (
+    <div className="space-y-1.5">
+      <Label className="font-bold text-[#2F3E46]">{label}</Label>
+      <div className="rounded-xl border bg-gray-50 px-3 py-2 text-sm font-semibold text-[#2F3E46]">{shown}</div>
+      {hint && <p className="text-[11px] text-gray-400">{hint}</p>}
+    </div>
+  );
+}
+
 // ── COMPONENT ────────────────────────────────────────────────────────────────
 
 /**
@@ -851,12 +890,24 @@ export function Education() {
 
   const openEdit = (s: Student) => {
     setEditingStudent(s);
+    // Age, the guardian details and the address belong to the resident, not to
+    // this module: the age is computed from the birth date and the rest are
+    // captured at admission. They are re-read here so the form shows the
+    // resident's current values, and the save writes those back — which is how a
+    // corrected birth date or a new guardian reaches this record at all.
+    const resident = residents.find(c => c.id === s.residentId)
+      || residents.find(c => c.name.trim().toLowerCase() === s.name.trim().toLowerCase());
     setStudentForm({
-      name: s.name, age: s.age, gender: s.gender,
+      name: s.name,
+      age: ageFromBirthDate(resident?.birthDate) ?? resident?.age ?? s.age,
+      gender: s.gender,
       educationLevel: s.educationLevel, gradeSection: s.gradeSection,
       school: s.school, enrollmentDate: s.enrollmentDate,
-      status: s.status, address: s.address, guardianName: s.guardianName,
-      guardianContact: s.guardianContact, notes: s.notes,
+      status: s.status,
+      address: resident?.address || s.address,
+      guardianName: resident?.guardianName || s.guardianName,
+      guardianContact: resident?.guardianContact || s.guardianContact,
+      notes: s.notes,
       lrn: s.lrn, traineeNumber: s.traineeNumber,
     });
     setFormError('');
@@ -1371,7 +1422,7 @@ export function Education() {
                     ...p,
                     name: v,
                     gender: (res?.gender as 'Male' | 'Female') || 'Male',
-                    age: res?.age || p.age,
+                    age: ageFromBirthDate(res?.birthDate) ?? res?.age ?? p.age,
                     address: res?.address || p.address,
                     guardianName: res?.guardianName || p.guardianName,
                     guardianContact: res?.guardianContact || p.guardianContact,
@@ -1385,10 +1436,11 @@ export function Education() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-1.5">
-                <Label className="font-bold text-[#2F3E46]">Age *</Label>
-                <Input type="number" min={1} max={30} value={studentForm.age || ''} onChange={e => setStudentForm(p => ({ ...p, age: Number(e.target.value) }))} className="rounded-xl" />
-              </div>
+              <ReadOnlyField
+                label="Age"
+                value={studentForm.age}
+                hint="Computed from the resident's birth date."
+              />
               <div className="space-y-1.5">
                 <Label className="font-bold text-[#2F3E46]">Gender</Label>
                 <div className="rounded-xl border bg-gray-50 px-3 py-2 text-sm text-[#2F3E46] font-semibold">{studentForm.gender || 'Male'}</div>
@@ -1450,18 +1502,11 @@ export function Education() {
                   </p>
                 )}
               </div>
-              <div className="col-span-2 space-y-1.5">
-                <Label className="font-bold text-[#2F3E46]">Address</Label>
-                <Input value={studentForm.address} onChange={e => setStudentForm(p => ({ ...p, address: e.target.value }))} placeholder="Home address" className="rounded-xl" />
+              <div className="col-span-2">
+                <ReadOnlyField label="Address" value={studentForm.address} hint="From the resident's admission record." />
               </div>
-              <div className="space-y-1.5">
-                <Label className="font-bold text-[#2F3E46]">Guardian Name</Label>
-                <Input value={studentForm.guardianName} onChange={e => setStudentForm(p => ({ ...p, guardianName: e.target.value }))} className="rounded-xl" />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="font-bold text-[#2F3E46]">Guardian Contact</Label>
-                <Input value={studentForm.guardianContact} onChange={e => setStudentForm(p => ({ ...p, guardianContact: e.target.value }))} className="rounded-xl" />
-              </div>
+              <ReadOnlyField label="Guardian Name" value={studentForm.guardianName} hint="From the resident's admission record." />
+              <ReadOnlyField label="Guardian Contact" value={studentForm.guardianContact} />
               <div className="col-span-2 space-y-1.5">
                 <Label className="font-bold text-[#2F3E46]">Notes</Label>
                 <Textarea value={studentForm.notes} onChange={e => setStudentForm(p => ({ ...p, notes: e.target.value }))} className="rounded-xl min-h-[80px]" placeholder="Additional notes..." />
