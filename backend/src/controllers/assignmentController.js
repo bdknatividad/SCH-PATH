@@ -95,12 +95,19 @@ async function getByResident(req, res, next) {
 
 /**
  * One Case Worker (the Houseparent acting as Case Load Manager) may hold at
- * most 15 residents — the facility's 1:15 case-worker-to-resident ratio.
+ * most 3 residents.
  *
- * This was 3, which is not a ratio the facility uses; it capped every
- * Houseparent at three cards and made the fourth assignment fail with a 400.
+ * `4f1370a` raised this to 15 on the stated basis of a "1:15 case-worker-to-
+ * resident ratio". That was wrong for this facility — the cap is 3 — and it let
+ * a Houseparent collect fifteen cards. Restored to 3.
+ *
+ * The number is served to the client as `maxCaseload` / `availableSlots` on
+ * every caseload row, and the Case Load screen reads it from there, so this
+ * constant is the only place the limit is declared. It gates *new* assignments
+ * only: an existing caseload that is already over the cap is left alone, and
+ * the roster reports it as full rather than silently dropping anyone.
  */
-const MAX_RESIDENTS_PER_HOUSEPARENT = 15;
+const MAX_RESIDENTS_PER_HOUSEPARENT = 3;
 
 async function countActiveHouseparentCaseload(userId) {
   const [rows] = await pool.query(
