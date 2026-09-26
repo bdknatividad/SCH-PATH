@@ -646,6 +646,42 @@ async function create(req, res, next) {
     // Do not create tracker rows or intervention alerts at logging time.
     const plan = buildInterventionPlan(violation, guide, offenseLevel, residentName);
 
+    // A logged incident is waiting on other people, so tell them.
+    //
+    // Nothing did this before: `create` sent no notification at all. The only
+    // violation alerts fired *after* someone had already verified one side
+    // (which then tells the other side), so a new incident could sit in
+    // "For Verification" with nobody aware of it — the reporter had to go and
+    // tell the Psychologist and the Social Worker by hand.
+    //
+    // Addressed one row per user against the three roles the facility names, not
+    // `targetRole`: a role-addressed row reaches exactly one role, and the Center
+    // Head is not a verifier here — they are informed. The service skips the
+    // actor, so a Social Worker logging their own incident is not told about it.
+    try {
+      const reviewers = await notifications.usersWithAnyRole(['centerhead', 'psychologist', 'socialworker']);
+      if (reviewers.length) {
+        await notifications.notifyUsers(
+          reviewers.map((reviewer) => reviewer.id),
+          {
+            type: 'Violation For Verification',
+            residentId: violation.residentId,
+            title: `Incident for verification — ${residentName}`,
+            message: `${req.user?.username || 'A staff member'} logged a ${guide.category} violation for ${residentName}: ${guide.name}. It needs the Psychological Staff's and the Social Worker's verification before the intervention can be assigned.`,
+            priority: 'High',
+            actionRequired: 'Review and verify the logged incident.',
+            relatedRecordType: 'violation',
+            relatedRecordId: newId,
+            actorUsername: req.user?.username || null,
+            dedupeKey: `violation:${newId}:logged-for-verification`,
+          },
+        );
+      }
+    } catch (notifyErr) {
+      // The incident is already saved; a failed alert must not undo it.
+      console.error('[ViolationController] Incident-logged notification failed (non-fatal):', notifyErr.message);
+    }
+
     res.status(201).json({
       success: true,
       data: {
