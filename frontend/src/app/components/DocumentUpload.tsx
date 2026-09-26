@@ -297,7 +297,10 @@ function DocumentList({ docs, children, canApprove, canDelete, onApprove, onReje
       <Card>
         <CardContent className="p-12 text-center">
           <FileText className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-          <p className="text-gray-500">{emptyMessage || 'No documents found. Upload your first document.'}</p>
+          {/* Neutral fallback: "upload your first document" is wrong advice for a
+              role that holds Documents view-only, and this component is rendered
+              for them too. The call sites that want a specific line pass one. */}
+          <p className="text-gray-500">{emptyMessage || 'No documents found.'}</p>
         </CardContent>
       </Card>
     );
@@ -1523,10 +1526,20 @@ export function DocumentUpload() {
           <h2 className="text-2xl font-semibold text-[#2F3E46]">Document Management</h2>
           <p className="text-gray-600">Upload, review, and manage resident documents</p>
         </div>
-        <Button className="flex items-center gap-2 bg-[#2F3E46]" onClick={() => setIsUploadDialogOpen(true)}>
-          <Upload className="w-4 h-4" />
-          <span>Upload Document</span>
-        </Button>
+        {/*
+          Uploading is a `create` capability on Documents. The button used to be
+          unconditional, so the Educator — who holds Documents view-only — was
+          offered it, filled the whole dialog in, and then had the upload refused
+          by the API (`requirePermission('Documents', 'create')`). Hidden rather
+          than shown and failing, which is the same rule the rest of this module
+          applies to its review controls.
+        */}
+        {can('Documents', 'create') && (
+          <Button className="flex items-center gap-2 bg-[#2F3E46]" onClick={() => setIsUploadDialogOpen(true)}>
+            <Upload className="w-4 h-4" />
+            <span>Upload Document</span>
+          </Button>
+        )}
       </div>
       
       {/* Pending review alert for Center Head */}
@@ -1895,7 +1908,7 @@ export function DocumentUpload() {
               <Card>
                 <CardContent className="p-12 text-center">
                   <Folder className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-                  <p className="text-gray-500">No documents uploaded yet. Use the Upload Document button to get started.</p>
+                  <p className="text-gray-500">{can('Documents', 'create') ? 'No documents uploaded yet. Use the Upload Document button to get started.' : 'No documents uploaded yet.'}</p>
                 </CardContent>
               </Card>
             )}
