@@ -53,6 +53,14 @@ export interface EducationFile {
   size: number;
   uploadDate: string;
   category: 'Performance' | 'Evaluation' | 'Certificate' | 'Monthly Report' | 'Progress Report' | 'Other';
+  /**
+   * What an `Other` file actually is.
+   *
+   * "Other" alone says nothing — the file was filed as "Education — Other" in
+   * the resident's Documents and read the same way here, so nothing about it
+   * could be searched or told apart from the next one.
+   */
+  otherLabel?: string;
   dataUrl?: string;
 }
 
@@ -451,6 +459,8 @@ export function Education() {
   const [isUploadOpen, setIsUploadOpen] = useState(false);
   const [uploadTarget, setUploadTarget] = useState<Student | null>(null);
   const [uploadCategory, setUploadCategory] = useState<EducationFile['category']>('Performance');
+  /** The free-text answer that "Other" requires. */
+  const [uploadOtherLabel, setUploadOtherLabel] = useState('');
   const [uploadError, setUploadError] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
   const [pendingFile, setPendingFile] = useState<File | null>(null);
@@ -893,6 +903,7 @@ export function Education() {
   const openUpload = (s: Student, defaultCategory: EducationFile['category'] = 'Performance') => {
     setUploadTarget(s);
     setUploadCategory(defaultCategory);
+    setUploadOtherLabel('');
     setUploadError('');
     setPendingFile(null);
     setIsUploadOpen(true);
@@ -909,6 +920,15 @@ export function Education() {
 
   const handleUploadConfirm = () => {
     if (!pendingFile || !uploadTarget) { setUploadError('Please select a file.'); return; }
+    // "Other" has to say what it is. Without this the file is filed as
+    // "Education — Other" in the resident's Documents and shown as "Other" here,
+    // so it cannot be told apart from the next "Other" or searched for.
+    const otherLabel = uploadOtherLabel.trim();
+    if (uploadCategory === 'Other' && !otherLabel) {
+      setUploadError('Please specify what this document is.');
+      return;
+    }
+    const documentLabel = uploadCategory === 'Other' ? otherLabel : uploadCategory;
     setUploadDocsWarning('');
     const reader = new FileReader();
     reader.onloadend = async () => {
@@ -920,6 +940,7 @@ export function Education() {
         size: pendingFile.size,
         uploadDate: new Date().toISOString().split('T')[0],
         category: uploadCategory,
+        otherLabel: uploadCategory === 'Other' ? otherLabel : undefined,
         dataUrl: fileData,
       };
       const updated = students.map(s =>
@@ -946,10 +967,10 @@ export function Education() {
           await addDocument({
             residentId: resident.id,
             residentName: resident.name,
-            title: `Education — ${uploadCategory}`,
+            title: `Education — ${documentLabel}`,
             category: 'Education',
             phase: '',
-            description: `${uploadCategory} uploaded via Education Module for ${uploadTarget.name}.`,
+            description: `${documentLabel} uploaded via Education Module for ${uploadTarget.name}.`,
             fileName: pendingFile.name,
             fileType: pendingFile.type,
             fileSize: pendingFile.size,
@@ -1598,7 +1619,9 @@ export function Education() {
                               </div>
                               <div className="flex-1 min-w-0">
                                 <p className="text-sm font-semibold text-[#2F3E46] truncate">{f.name}</p>
-                                <p className="text-[10px] text-gray-400">{f.category} · {formatBytes(f.size)} · {f.uploadDate}</p>
+                                {/* An "Other" file shows what it actually is rather
+                                    than the word "Other". */}
+                                <p className="text-[10px] text-gray-400">{f.category === 'Other' && f.otherLabel ? f.otherLabel : f.category} · {formatBytes(f.size)} · {f.uploadDate}</p>
                               </div>
                               <div className="flex gap-1 shrink-0">
                                 {f.dataUrl && (
@@ -1657,6 +1680,21 @@ export function Education() {
                 </SelectContent>
               </Select>
             </div>
+            {/* "Other" has to say what it is: the file is filed in the resident's
+                Documents as "Education — <this>", and shown under it here. */}
+            {uploadCategory === 'Other' && (
+              <div className="space-y-1.5">
+                <Label className="font-bold text-[#2F3E46]">Specify document *</Label>
+                <Input
+                  value={uploadOtherLabel}
+                  onChange={e => setUploadOtherLabel(e.target.value)}
+                  placeholder="e.g. Report Card, Form 137"
+                  className="rounded-xl"
+                  autoFocus
+                />
+                <p className="text-[11px] text-gray-400">This becomes the document&rsquo;s name in the resident&rsquo;s Documents.</p>
+              </div>
+            )}
             <div className="space-y-1.5">
               <Label className="font-bold text-[#2F3E46]">File *</Label>
               <div
