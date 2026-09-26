@@ -398,6 +398,17 @@ const ANECDOTAL_MONTH_NAMES = [
 /** Roles the button is offered to. The API refuses every other role outright. */
 const ANECDOTAL_REFERENCE_ROLES = new Set(['socialworker', 'centerhead', 'admin']);
 
+/**
+ * Who may open a Quarterly Progress Report.
+ *
+ * The server is the authority — `create` answers 403 "Only a Social Worker or
+ * Center Head can open a Quarterly Progress Report." — and this mirrors it so the
+ * entry point is not offered to a role that would be refused. Same shape as
+ * `ANECDOTAL_REFERENCE_ROLES` above: a role list the API already enforces, used
+ * only to decide whether to draw a control.
+ */
+const QPR_CREATOR_ROLES = new Set(['socialworker', 'centerhead', 'admin']);
+
 interface AnecdotalReferenceRecord {
   id: string;
   residentId?: string;
@@ -1508,8 +1519,18 @@ export function QuarterlyProgressReportsCard({ onOpenReport }: { onOpenReport: (
  * the API would refuse.
  */
 export function ProgramQuarterlyReports() {
+  const { user } = useAuth();
   const [open, setOpen] = useState(false);
   const [openReportId, setOpenReportId] = useState<string | null>(null);
+
+  /*
+    Only the Social Worker and the Center Head may open one, and the API enforces
+    it. An Educator or a Nurse reaching their own module is not offered a row that
+    would only tell them so — the same rule the Documents module applies to its
+    upload button. The check is the server's role list, not a guess: `create`
+    answers 403 for anyone else.
+  */
+  if (!QPR_CREATOR_ROLES.has(String(user?.role || '').toLowerCase())) return null;
 
   return (
     <div className="rounded-xl border border-gray-200 bg-white">
