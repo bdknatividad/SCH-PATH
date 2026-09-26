@@ -452,6 +452,103 @@ async function getById(req, res, next) {
 }
 
 /**
+ * Every column that stores a **username** as a link to an account.
+ *
+ * Account Management can change a username, and nothing used to follow it. The
+ * columns below are compared against the signed-in account or read back as
+ * "whose is this", so a rename silently detached them: `documentOwnerMatchesUser`
+ * stopped recognising the uploader of their own documents, and `notifyAuthor`
+ * could no longer resolve the author of an anecdotal report. Both are keyed on
+ * `username`, so the link is repaired by carrying the rename across.
+ *
+ * Deliberately excluded, and the reason is the same for each — these hold a name
+ * as it was **printed on an official form**, not a link to an account, and
+ * rewriting one would alter a signed document:
+ *   · `incidentReports.reportedBy` / `checkedBy` / `notedBy` (Form 08)
+ *   · `triRecords.houseparentSignedBy`
+ *   · `anecdotalReports.houseparentName`
+ *   · `admissions.houseparentOnDuty`
+ *   · `quarterlyProgressReports.assignedToName`
+ * `incidentReports.verifiedBy` / `psychVerifiedBy` / `swVerifiedBy` ARE
+ * usernames — the controller writes `verifiedBy || req.user?.username`.
+ *
+ * `alerts.readBy` is a single `varchar(100)` username, not a JSON list, so a
+ * plain equality update is correct for it.
+ */
+const USERNAME_REFERENCE_COLUMNS = {
+  accessRequests: ['reviewedBy'],
+  activities: ['createdBy', 'modifiedBy'],
+  activityEvaluations: ['createdBy', 'modifiedBy'],
+  admissions: ['createdBy', 'modifiedBy'],
+  alerts: ['actorUsername', 'readBy'],
+  anecdotalReports: ['submittedBy', 'createdBy', 'updatedBy'],
+  assessments: ['triggeredBy', 'createdBy', 'modifiedBy'],
+  children: ['createdBy', 'modifiedBy', 'abscondedBy'],
+  courtRecords: ['createdBy', 'modifiedBy'],
+  dischargeExtensions: ['decidedBy'],
+  dischargeRecommendations: ['reviewedBy'],
+  documents: ['submittedBy', 'uploadedBy', 'reviewedBy', 'approvedBy', 'rejectedBy', 'createdBy', 'modifiedBy'],
+  education_monthly_reports: ['submittedBy', 'reviewedBy', 'createdBy', 'modifiedBy'],
+  education_progress_reports: ['createdBy', 'modifiedBy'],
+  education_records: ['createdBy', 'modifiedBy'],
+  education_school_visits: ['createdBy', 'modifiedBy'],
+  healthRecords: ['recordedBy', 'prescribedBy', 'createdBy', 'modifiedBy'],
+  incidentReports: ['verifiedBy', 'psychVerifiedBy', 'swVerifiedBy'],
+  intervention_requirements: ['completedBy'],
+  intervention_tracker: ['completedBy'],
+  phaseProgress: ['enteredBy', 'completedBy', 'createdBy', 'modifiedBy'],
+  quarterlyProgressReportSections: ['submittedBy', 'createdBy', 'updatedBy'],
+  quarterlyProgressReports: ['createdBy', 'updatedBy', 'submittedBy', 'reviewedBy', 'finalizedBy'],
+  reports: ['generatedBy', 'createdBy', 'modifiedBy'],
+  residentAssignments: ['createdBy', 'updatedBy'],
+  staff: ['createdBy', 'modifiedBy'],
+  triRecords: ['submittedBy', 'reviewedBy', 'finalizedBy', 'createdBy', 'updatedBy'],
+  users: ['createdBy', 'modifiedBy'],
+  violation_guide: ['createdBy', 'updatedBy'],
+  violations: ['reportedBy', 'reviewedBy', 'psychVerifiedBy', 'swVerifiedBy', 'clearedBy', 'createdBy', 'modifiedBy'],
+};
+
+/**
+ * Carry a username change across every table that references the account.
+ *
+ * Matched with `=` against the trimmed old username, so the `System` / `system`
+ * sentinels and any human-typed name that merely resembles a username are left
+ * alone. A table or column this build expects but the deployed database has not
+ * got yet is skipped rather than failing the rename — the same tolerance the
+ * grant UPDATE above shows, and the account change has already been committed
+ * by the time this runs.
+ *
+ * @returns {Promise<{table: string, column: string, rows: number}[]>} what moved
+ */
+async function cascadeUsernameRename(oldUsername, newUsername) {
+  const from = String(oldUsername || '').trim();
+  const to = String(newUsername || '').trim();
+  if (!from || !to || from === to) return [];
+
+  const moved = [];
+  for (const [table, columns] of Object.entries(USERNAME_REFERENCE_COLUMNS)) {
+    for (const column of columns) {
+      try {
+        const [result] = await pool.query(
+          `UPDATE \`${table}\` SET \`${column}\` = ? WHERE \`${column}\` = ?`,
+          [to, from]
+        );
+        if (result?.affectedRows) moved.push({ table, column, rows: result.affectedRows });
+      } catch (error) {
+        // ER_NO_SUCH_TABLE / ER_BAD_FIELD_ERROR: the deployed database is behind
+        // this build. Anything else is worth knowing about, but still must not
+        // undo a rename the Center Head already made.
+        const code = error?.code || '';
+        if (code !== 'ER_NO_SUCH_TABLE' && code !== 'ER_BAD_FIELD_ERROR') {
+          console.error(`[UserController] Rename cascade failed on ${table}.${column}:`, error.message);
+        }
+      }
+    }
+  }
+  return moved;
+}
+
+/**
  * Update user by ID (username, password, role, accessibleModules, status)
  * @async
  */
@@ -631,6 +728,19 @@ async function updateById(req, res, next) {
         await pool.query(`UPDATE users SET ${safeUpdates.join(', ')} WHERE id = ?`, safeValues);
       } else {
         throw sqlErr;
+      }
+    }
+
+    // A username change is a rename of the same account, not a new one. Carry it
+    // across the tables that link to the account by name, or the person stops
+    // owning their own documents and stops receiving their own notifications.
+    if (username && username !== String(existing[0].username || '').trim()) {
+      const moved = await cascadeUsernameRename(existing[0].username, username);
+      if (moved.length) {
+        const total = moved.reduce((sum, row) => sum + row.rows, 0);
+        console.log(
+          `[UserController] Renamed ${existing[0].username} -> ${username}: updated ${total} row(s) across ${moved.length} column(s).`
+        );
       }
     }
 
