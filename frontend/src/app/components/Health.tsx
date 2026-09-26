@@ -14,7 +14,7 @@ import { Textarea } from '@/app/components/ui/textarea';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/app/components/ui/tabs';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/app/components/ui/dialog';
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogAction, AlertDialogCancel } from '@/app/components/ui/alert-dialog';
-import { Search, Plus, Eye, Edit, Trash2, Pill, Stethoscope, HeartPulse, AlertTriangle, User, Calendar, Printer, FileText, Download, PenLine, X as CloseIcon } from 'lucide-react';
+import { Search, Plus, Eye, Edit, Trash2, Pill, Stethoscope, HeartPulse, AlertTriangle, User, Calendar, Printer, FileText, Download, PenLine, ChevronDown, ChevronUp, X as CloseIcon } from 'lucide-react';
 import { useData } from '../state/DataContext';
 import { useAuth } from '../state/AuthContext';
 import { usePermissions } from '@/app/hooks/usePermissions';
@@ -814,122 +814,18 @@ export function Health() {
         of the Documents module, not a second store of it: the rows are the same
         rows, so there is nothing to de-duplicate.
       */}
-      <Card className="border border-gray-200">
-        {/* Stacks on a phone. In a row, the hint text and the title compete for
-            320px and the title loses — "Medical Documents" broke mid-word
-            ("Documen / ts"), which is the same unreadable compression the table
-            fixes removed. Side by side again from `sm` up. */}
-        <CardHeader className="pb-2 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-          <CardTitle className="text-sm font-bold text-slate-700 flex items-center gap-2">
-            <FileText className="w-4 h-4 text-[#2F3E46] shrink-0" /> Medical Documents
-            <Badge className="bg-[#2F3E46]/10 text-[#2F3E46]">{medicalDocuments.length}</Badge>
-          </CardTitle>
-          <div className="flex flex-wrap items-center gap-2">
-            {can('Health', 'create') && (
-              <>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 gap-1 px-2 text-xs"
-                  disabled={filterResident === 'all' || uploadingKey !== null}
-                  title={filterResident === 'all' ? 'Choose a resident in the filter first' : undefined}
-                  onClick={() => startUpload('Laboratory Results', filterResident)}
-                >
-                  <Plus className="w-3 h-3" /> Upload Laboratory Results
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 gap-1 px-2 text-xs"
-                  disabled={filterResident === 'all' || uploadingKey !== null}
-                  title={filterResident === 'all' ? 'Choose a resident in the filter first' : undefined}
-                  onClick={() => startUpload('Medical Certificate', filterResident)}
-                >
-                  <Plus className="w-3 h-3" /> Upload Medical Certificate
-                </Button>
-              </>
-            )}
-            <p className="text-[11px] text-gray-400">Filed under Documents → Medical Records</p>
-          </div>
-        </CardHeader>
-        <CardContent>
-          {medicalDocuments.length === 0 ? (
-            <p className="py-4 text-center text-sm italic text-gray-400">
-              No medical documents filed for this {filterResident === 'all' ? 'set of residents' : 'resident'}.
-            </p>
-          ) : (
-            <div className="divide-y divide-gray-100">
-              {medicalDocuments.map(doc => (
-                <div key={doc.id} className="flex items-center justify-between gap-3 py-2">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-[#2F3E46]">{doc.title}</p>
-                    <p className="text-[11px] text-gray-400">
-                      {children.find(c => c.id === doc.residentId)?.name || doc.residentName || 'Unassigned'}
-                      {' · '}
-                      {doc.uploadedAt ? formatShortDate(String(doc.uploadedAt).slice(0, 10)) : '—'}
-                      {doc.status ? ` · ${doc.status}` : ''}
-                    </p>
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-7 shrink-0 gap-1 px-2 text-xs"
-                    onClick={() => downloadDocumentFile(
-                      doc,
-                      (message) => { void dialog.failure('Could not download the document', message); },
-                    )}
-                  >
-                    <Download className="w-3 h-3" /> Download
-                  </Button>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <div>
-        <button
-          onClick={() => setShowForms(v => !v)}
-          className="flex items-center gap-2 px-4 py-2 rounded-xl border-2 border-green-200 text-green-700 bg-green-50 hover:bg-green-100 font-semibold text-sm transition-all"
-        >
-          <span>📋</span>
-          {showForms ? 'Hide Forms' : 'Available Forms'}
-        </button>
-        {showForms && (
-          <div className="mt-3 border border-green-200 rounded-2xl overflow-hidden bg-white shadow-sm">
-            <div className="bg-green-600 px-5 py-3 flex items-center gap-2">
-              <span className="text-white text-lg">📋</span>
-              <h3 className="font-bold text-white">Nurse / Medical Forms</h3>
-              <span className="text-green-200 text-xs ml-1">— Click to download</span>
-            </div>
-            <div className="divide-y divide-gray-100">
-              {NURSE_FORMS_DATA.map(form => (
-                <div key={form.file} className="flex items-center justify-between px-5 py-3 hover:bg-green-50 transition-all">
-                  <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-lg bg-green-100 flex items-center justify-center shrink-0">
-                      <span className="text-base">📄</span>
-                    </div>
-                    <div>
-                      <p className="font-semibold text-[#2F3E46] text-sm">{form.name}</p>
-                      <p className="text-xs text-gray-400">{form.description}</p>
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 gap-1.5">
-                    <button onClick={() => window.open(form.file, '_blank', 'noopener,noreferrer')} className="rounded-lg border border-green-200 px-2.5 py-1.5 text-xs font-bold text-green-600 hover:bg-green-100">View</button>
-                    <button onClick={() => { const w=window.open(form.file, '_blank'); w?.addEventListener('load',()=>w.print()); }} className="rounded-lg border border-green-200 px-2.5 py-1.5 text-xs font-bold text-green-600 hover:bg-green-100">Print</button>
-                    <button onClick={() => { const l = document.createElement('a'); l.href = form.file; l.download = form.name + '.pdf'; l.click(); }} className="rounded-lg border border-green-200 px-2.5 py-1.5 text-xs font-bold text-green-600 hover:bg-green-100">Download</button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-
+      {/*
+        The records come first, because they are what this module is for. The
+        Medical Documents list below is a view of the Documents module, and the
+        blank forms after that are reference material — neither belongs above the
+        work.
+      */}
       {/* TABS */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="mb-2">
+        {/* Four labels plus their counts do not fit a phone, and squeezing them
+            breaks the words. The strip scrolls instead — the same rule the
+            Violations tabs follow. */}
+        <TabsList className="mb-3 max-w-full justify-start overflow-x-auto">
           <TabsTrigger value="all">All ({tabCounts.all})</TabsTrigger>
           <TabsTrigger value="Health Assessment">
             <HeartPulse className="w-3.5 h-3.5 mr-1" /> Assessments ({tabCounts['Health Assessment']})
@@ -965,7 +861,27 @@ export function Health() {
             ) : (
             <div className="grid gap-3">
               {filtered.length === 0 ? (
-                <Card><CardContent className="py-12 text-center text-gray-400 text-sm italic">No records found.</CardContent></Card>
+                // An empty list is a dead end unless it says what to do next.
+                // "No records found." reads the same whether the resident has
+                // none or the filters are hiding them, and those need different
+                // actions from the reader.
+                <Card className="border-none shadow-sm">
+                  <CardContent className="flex flex-col items-center gap-2 py-12 text-center">
+                    <Stethoscope className="h-10 w-10 text-gray-200" />
+                    <p className="text-sm font-semibold text-[#2F3E46]">
+                      {searchTerm.trim() || filterResident !== 'all'
+                        ? 'No records match these filters.'
+                        : 'No health records yet.'}
+                    </p>
+                    <p className="text-xs text-gray-400">
+                      {searchTerm.trim() || filterResident !== 'all'
+                        ? 'Clear the search or the resident filter to see more.'
+                        : can('Health', 'create')
+                          ? 'Use Log Health Record to add the first one.'
+                          : 'The Nurse logs health records for this resident.'}
+                    </p>
+                  </CardContent>
+                </Card>
               ) : filtered.map(record => (
                 <Card key={record.id} className="border border-gray-100 shadow-sm hover:shadow-md transition-shadow">
                   <CardContent className="p-5">
@@ -1040,6 +956,129 @@ export function Health() {
         ))}
 
       </Tabs>
+
+      <Card className="border-none shadow-sm">
+        {/* Stacks on a phone. In a row, the hint text and the title compete for
+            320px and the title loses — "Medical Documents" broke mid-word
+            ("Documen / ts"), which is the same unreadable compression the table
+            fixes removed. Side by side again from `sm` up. */}
+        <CardHeader className="border-b border-gray-100 pb-3 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+          <CardTitle className="text-sm font-bold text-[#2F3E46] flex items-center gap-2">
+            <FileText className="w-4 h-4 text-[#FFD100] shrink-0" /> Medical Documents
+            <Badge className="bg-[#2F3E46]/10 text-[#2F3E46]">{medicalDocuments.length}</Badge>
+          </CardTitle>
+          <div className="flex flex-wrap items-center gap-2">
+            {can('Health', 'create') && (
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 gap-1 px-2 text-xs"
+                  disabled={filterResident === 'all' || uploadingKey !== null}
+                  title={filterResident === 'all' ? 'Choose a resident in the filter first' : undefined}
+                  onClick={() => startUpload('Laboratory Results', filterResident)}
+                >
+                  <Plus className="w-3 h-3" /> Upload Laboratory Results
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 gap-1 px-2 text-xs"
+                  disabled={filterResident === 'all' || uploadingKey !== null}
+                  title={filterResident === 'all' ? 'Choose a resident in the filter first' : undefined}
+                  onClick={() => startUpload('Medical Certificate', filterResident)}
+                >
+                  <Plus className="w-3 h-3" /> Upload Medical Certificate
+                </Button>
+              </>
+            )}
+            <p className="text-[11px] text-gray-400">Filed under Documents → Medical Records</p>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {medicalDocuments.length === 0 ? (
+            <p className="py-4 text-center text-sm italic text-gray-400">
+              No medical documents filed for this {filterResident === 'all' ? 'set of residents' : 'resident'}.
+            </p>
+          ) : (
+            <div className="divide-y divide-gray-100">
+              {medicalDocuments.map(doc => (
+                <div key={doc.id} className="flex items-center justify-between gap-3 py-2">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-[#2F3E46]">{doc.title}</p>
+                    <p className="text-[11px] text-gray-400">
+                      {children.find(c => c.id === doc.residentId)?.name || doc.residentName || 'Unassigned'}
+                      {' · '}
+                      {doc.uploadedAt ? formatShortDate(String(doc.uploadedAt).slice(0, 10)) : '—'}
+                      {doc.status ? ` · ${doc.status}` : ''}
+                    </p>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 shrink-0 gap-1 px-2 text-xs"
+                    onClick={() => downloadDocumentFile(
+                      doc,
+                      (message) => { void dialog.failure('Could not download the document', message); },
+                    )}
+                  >
+                    <Download className="w-3 h-3" /> Download
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/*
+        Blank forms, for printing and filing by hand.
+
+        Reference material, so it sits at the foot of the page and stays
+        collapsed. It used to be a green block with emoji, which read as a
+        different module from everything around it — the palette here is the same
+        navy and gold the rest of SCH-PATH uses, and the controls are the same
+        `Button` as everywhere else rather than three hand-rolled green ones.
+      */}
+      <Card className="border-none shadow-sm">
+        <button
+          type="button"
+          onClick={() => setShowForms(v => !v)}
+          className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+        >
+          <span className="flex min-w-0 flex-wrap items-center gap-x-2">
+            <FileText className="h-4 w-4 shrink-0 text-[#FFD100]" />
+            <span className="text-sm font-bold text-[#2F3E46]">Blank forms</span>
+            <span className="text-xs text-gray-500">— view, print or download the official PDF</span>
+          </span>
+          {showForms ? <ChevronUp className="h-4 w-4 shrink-0 text-gray-400" /> : <ChevronDown className="h-4 w-4 shrink-0 text-gray-400" />}
+        </button>
+        {showForms && (
+          <CardContent className="border-t border-gray-100 pt-2">
+            <ul className="divide-y divide-gray-100">
+              {NURSE_FORMS_DATA.map(form => (
+                <li key={form.file} className="flex flex-wrap items-center justify-between gap-3 py-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-[#2F3E46]">{form.name}</p>
+                    <p className="text-xs text-gray-400">{form.description}</p>
+                  </div>
+                  <div className="flex shrink-0 flex-wrap gap-2">
+                    <Button size="sm" variant="outline" className="gap-1.5" onClick={() => window.open(form.file, '_blank', 'noopener,noreferrer')}>
+                      <Eye className="h-3.5 w-3.5" /> View
+                    </Button>
+                    <Button size="sm" variant="outline" className="gap-1.5" onClick={() => { const w = window.open(form.file, '_blank'); w?.addEventListener('load', () => w.print()); }}>
+                      <Printer className="h-3.5 w-3.5" /> Print
+                    </Button>
+                    <Button size="sm" variant="outline" className="gap-1.5" onClick={() => { const l = document.createElement('a'); l.href = form.file; l.download = form.name + '.pdf'; l.click(); }}>
+                      <Download className="h-3.5 w-3.5" /> Download
+                    </Button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        )}
+      </Card>
 
       {/* OFFICIAL FORM SELECTION */}
       <Dialog open={isFormPickerOpen} onOpenChange={setIsFormPickerOpen}>
