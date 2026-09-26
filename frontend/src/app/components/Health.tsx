@@ -607,15 +607,23 @@ export function Health() {
   /**
    * The medical documents, read straight from the Documents module.
    *
-   * These are the SAME rows the child's Medical tab lists under "Health &
-   * Medical History" — one source (`documents` with category 'Medical'), so a
-   * file added in either place is one row and can never appear twice. The Health
+   * These are the same rows the child's Medical tab lists under "Health &
+   * Medical History", so a file added in either place is one row. The Health
    * module shows them because the specification requires a file uploaded in
    * Documents to be visible here too.
+   *
+   * The system-generated copies are excluded — see the filter below. They are
+   * not files anybody attached; they are this module's own records, and the
+   * record is already listed in the tabs.
    */
   const medicalDocuments = useMemo(
     () => documents
       .filter(d => String(d.category || '').trim().toLowerCase() === 'medical')
+      // Files somebody attached by hand. The Health module publishes a
+      // "system-generated copy" of every record it writes, and those copies carry
+      // the record's id — listing them here showed the same checkup twice, as a
+      // file and again as the record in the tabs below.
+      .filter(d => !(d as any).healthRecordId)
       .filter(d => filterResident === 'all' || d.residentId === filterResident)
       .filter(d => matchesResidentStatus(d.residentId))
       .sort((a, b) => String(b.uploadedAt || b.approvedAt || '')

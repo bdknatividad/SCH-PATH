@@ -288,8 +288,9 @@ router.get('/store', authenticate, async (req, res, next) => {
             `SELECT id, residentId, admissionId, residentName, staffId, assessmentId, title, type, category, documentCategory, description,
                     fileName, fileSize, filePath, fileType, uploaderRole, status, revision, phase, requiredFor,
                     submittedBy, submittedAt, uploadedBy, uploadedAt, reviewedBy, reviewedAt,
-                    approvedBy, approvedAt, rejectedBy, rejectedAt, rejectionReason, notes, createdBy, modifiedBy,
-                    createdAt, updatedAt
+                    approvedBy, approvedAt, rejectedBy, rejectedAt, rejectionReason, notes,
+                    healthRecordId, triRecordId, quarterlyReportId, anecdotalReportId,
+                    createdBy, modifiedBy, createdAt, updatedAt
              FROM documents ORDER BY createdAt DESC`
           );
           const scope = await loadDocumentScope(req.user);

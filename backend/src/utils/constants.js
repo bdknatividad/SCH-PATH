@@ -197,7 +197,12 @@ const RESOURCES = {
     prefix: 'DOC',
     orderBy: 'createdAt DESC',
     jsonFields: [],
-    columns: ['id', 'residentId', 'admissionId', 'residentName', 'staffId', 'assessmentId', 'title', 'type', 'category', 'documentCategory', 'description', 'fileName', 'fileSize', 'filePath', 'fileData', 'fileType', 'uploaderRole', 'status', 'revision', 'phase', 'requiredFor', 'submittedBy', 'submittedAt', 'uploadedBy', 'uploadedAt', 'reviewedBy', 'reviewedAt', 'approvedBy', 'approvedAt', 'rejectedBy', 'rejectedAt', 'rejectionReason', 'notes', 'createdBy', 'modifiedBy'],
+    // The `*RecordId` columns say which record a published document was
+    // generated from. They are written by the publishers (TRI, Health, Quarterly,
+    // Anecdotal) and were missing from this list, so `mapRow` dropped them and no
+    // reader could tell an auto-published copy from a file somebody uploaded.
+    // That is what made Child Records → Medical list the same health record twice.
+    columns: ['id', 'residentId', 'admissionId', 'residentName', 'staffId', 'assessmentId', 'title', 'type', 'category', 'documentCategory', 'description', 'fileName', 'fileSize', 'filePath', 'fileData', 'fileType', 'uploaderRole', 'status', 'revision', 'phase', 'requiredFor', 'submittedBy', 'submittedAt', 'uploadedBy', 'uploadedAt', 'reviewedBy', 'reviewedAt', 'approvedBy', 'approvedAt', 'rejectedBy', 'rejectedAt', 'rejectionReason', 'notes', 'healthRecordId', 'triRecordId', 'quarterlyReportId', 'anecdotalReportId', 'createdBy', 'modifiedBy'],
   },
   // The Documents module's audit trail. One row per workflow transition; see
   // schema.sql for why the rejection note has to live here rather than only on

@@ -1209,12 +1209,18 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
           </Card>
 
           {/* Health & Medical History.
-              Two lists, each with exactly one source, so nothing is duplicated
-              and nothing is missing:
-                · documents with category 'Medical' — the Documents module, which
-                  is also what the Health module lists as "Medical Documents";
-                · records written by the Health module — the same rows the Health
-                  module shows in its own tabs. */}
+              Two lists, and they are not the same thing:
+
+                · **Medical Documents** — files filed under category 'Medical' in
+                  the Documents module. Only the ones somebody uploaded by hand:
+                  the Health module publishes a copy of every record into
+                  Documents, and those copies are excluded here because the record
+                  itself is listed below and says more.
+                · **Health Records** — the records the Health module wrote: the
+                  findings, the medications, the treatment. The source of truth.
+
+              They used to overlap almost completely, so a single checkup appeared
+              twice and the section read as duplicated rather than as two views. */}
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-3">
               <CardTitle className="text-sm font-bold text-slate-700">Health & Medical History</CardTitle>
@@ -1248,10 +1254,25 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
                     </thead>
                     <tbody className="divide-y divide-gray-50">
                       {(() => {
-                        const docModuleMedical = documents.filter(d => d.residentId === child.id && d.category === 'Medical').map(d => ({ id: d.id, name: d.title, category: 'Medical', dateUploaded: d.uploadedAt ? d.uploadedAt.split('T')[0] : d.approvedAt?.split('T')[0] || '—', fileName: d.fileName, fileData: d.fileData }));
+                        /*
+                          Only files that were actually uploaded here.
+                          
+                          The Health module auto-publishes every record into
+                          Documents as a "system-generated copy", and those copies
+                          carry the record's id in `healthRecordId`. Listing every
+                          Medical document therefore showed the same checkup twice:
+                          once as a file, and again as the Health Record below —
+                          which is the fuller entry, because it carries the
+                          findings and the prescription. The copies are excluded,
+                          and what remains is what somebody attached by hand: a
+                          visitor log, a medical certificate.
+                        */
+                        const docModuleMedical = documents
+                          .filter(d => d.residentId === child.id && d.category === 'Medical' && !(d as any).healthRecordId)
+                          .map(d => ({ id: d.id, name: d.title, category: 'Medical', dateUploaded: d.uploadedAt ? d.uploadedAt.split('T')[0] : d.approvedAt?.split('T')[0] || '—', fileName: d.fileName, fileData: d.fileData }));
                         const legacyRecords = (child.medicalRecords || []).filter(r => !docModuleMedical.some(d => d.name === r.name));
                         const allRecords = [...docModuleMedical, ...legacyRecords];
-                        if (allRecords.length === 0) return <tr><td colSpan={4} className="p-10 text-center"><div className="flex flex-col items-center gap-2 opacity-30"><Stethoscope className="w-10 h-10" /><p className="text-sm italic">No medical records found for this resident.</p></div></td></tr>;
+                        if (allRecords.length === 0) return <tr><td colSpan={4} className="p-10 text-center"><div className="flex flex-col items-center gap-2 opacity-30"><Stethoscope className="w-10 h-10" /><p className="text-sm italic">No medical documents filed for this resident.</p></div></td></tr>;
                         return allRecords.map((rec) => <tr key={rec.id} className="hover:bg-gray-50/50"><td className="p-3 font-medium">{rec.name}</td><td className="p-3 text-gray-500">{rec.category}</td><td className="p-3 text-gray-500">{rec.dateUploaded}</td><td className="p-3 text-right">{rec.fileData && <a href={rec.fileData} download={rec.fileName || rec.name} className="text-xs text-[#2F3E46] underline font-semibold">Download</a>}</td></tr>);
                       })()}
                     </tbody>
