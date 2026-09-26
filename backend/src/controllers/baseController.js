@@ -85,6 +85,64 @@ function bindValue(config, col, value) {
   return value;
 }
 
+/** Parse a resource's `orderBy` — `col DESC`, or `a DESC, b DESC` — into terms. */
+function parseOrderBy(orderBy) {
+  return String(orderBy || '')
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => {
+      const [column, direction] = part.split(/\s+/);
+      return { column, desc: String(direction || '').toUpperCase() === 'DESC' };
+    })
+    .filter((term) => term.column);
+}
+
+/**
+ * Order rows in the application instead of in SQL.
+ *
+ * MySQL sorts each row together with the columns it has to carry along, so a row
+ * holding a large JSON or TEXT payload can exhaust `sort_buffer_size` and fail
+ * the query outright with ER_OUT_OF_SORTMEMORY — a 400 on the whole list, with
+ * the column never named. A resource opts in with `sortInApplication: true` when
+ * its rows are too wide to sort in the database; see `education_records` in
+ * constants.js for the measurement behind this.
+ *
+ * NULLs sort last in both directions, so "not recorded" never leads the list.
+ * Numbers compare numerically, so an INT column does not order as text.
+ * Everything else compares as a string, which is exact for the TIMESTAMP and
+ * DATE columns these resources order by.
+ */
+function sortRows(rows, orderBy) {
+  const terms = parseOrderBy(orderBy);
+  if (terms.length === 0) return rows;
+
+  return [...rows].sort((a, b) => {
+    for (const { column, desc } of terms) {
+      const av = a?.[column];
+      const bv = b?.[column];
+      const aNull = av === null || av === undefined;
+      const bNull = bv === null || bv === undefined;
+
+      if (aNull || bNull) {
+        if (aNull && bNull) continue;
+        return aNull ? 1 : -1;
+      }
+
+      let result;
+      if (typeof av === 'number' && typeof bv === 'number') {
+        result = av - bv;
+      } else {
+        const as = String(av);
+        const bs = String(bv);
+        result = as < bs ? -1 : as > bs ? 1 : 0;
+      }
+      if (result !== 0) return desc ? -result : result;
+    }
+    return 0;
+  });
+}
+
 function createController(resource) {
   const { config, key: resourceKey, tableName } = resolveResource(resource);
 
@@ -100,13 +158,19 @@ function createController(resource) {
         // resource's own columns may be used as filters.
         const { clause, values } = buildWhereClause(filters, config.columns);
         
-        const query = `SELECT * FROM \`${tableName}\` ${clause} ORDER BY ${config.orderBy}`;
+        // A resource whose rows are too wide to filesort is ordered here rather
+        // than by MySQL — see `sortInApplication` in constants.js. Leaving the
+        // ORDER BY off is the whole point: it is the sort that fails.
+        const query = config.sortInApplication
+          ? `SELECT * FROM \`${tableName}\` ${clause}`
+          : `SELECT * FROM \`${tableName}\` ${clause} ORDER BY ${config.orderBy}`;
         const [rows] = await pool.query(query, values);
-        
+        const ordered = config.sortInApplication ? sortRows(rows, config.orderBy) : rows;
+
         res.json({
           success: true,
-          data: rows.map(row => mapRow(resourceKey, row)),
-          count: rows.length,
+          data: ordered.map(row => mapRow(resourceKey, row)),
+          count: ordered.length,
         });
       } catch (error) {
         next(error);

@@ -143,6 +143,25 @@ const RESOURCES = {
     orderBy: 'createdAt DESC',
     jsonFields: ['files'],
     /*
+     * Sort this resource in the application, not in SQL.
+     *
+     * `files` holds the learner's uploads as JSON and one live row measured
+     * 277 KB of it. `SELECT * ... ORDER BY createdAt DESC` therefore has to
+     * filesort rows of that size inside `sort_buffer_size` (256 KB by default),
+     * and MySQL answers ER_OUT_OF_SORTMEMORY — a 400 on the whole list, for
+     * every role. `baseController.getAll` builds exactly that statement.
+     *
+     * An index on the sort column is not enough on its own: with this few rows
+     * the optimiser still prefers a full scan plus a filesort, so the sort has to
+     * leave SQL entirely for the result to be deterministic. The row count here
+     * is a handful per resident, which is what makes an in-process sort the right
+     * trade — the payload is already being sent to the client either way.
+     *
+     * Only `orderBy` columns are supported by the comparator, and this resource
+     * orders by a single TIMESTAMP, which compares correctly as text.
+     */
+    sortInApplication: true,
+    /*
      * A learner who is not enrolled in school has no school and no enrolment
      * date, so both columns are nullable. The form sends `null`, but a caller
      * that sends the empty string it read out of a form field would otherwise
