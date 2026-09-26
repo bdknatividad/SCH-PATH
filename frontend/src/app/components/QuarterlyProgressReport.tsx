@@ -53,9 +53,8 @@ pdfjs.GlobalWorkerOptions.workerSrc = `/pdf.worker.mjs?v=${pdfjs.version}`;
  * The three narrative columns of each aspect, the closing narrative at the foot,
  * and the signature. "Present level of Functioning" in particular is a
  * professional assessment: a system that guessed at it would be inventing a
- * clinical opinion. The reference form's own sample values (Moderate, Normal)
- * are offered as suggestions, and nothing is inserted on the Social Worker's
- * behalf.
+ * clinical opinion, so nothing is chosen on the Social Worker's behalf and the
+ * field starts blank. It is a closed dropdown — Normal, Moderate or Severe.
  *
  * The inputs are transparent and borderless because the PDF underneath already
  * draws the cell, the column rules and the row shading. Their positions come from
@@ -111,9 +110,9 @@ export interface QprPeriod {
 }
 
 /**
- * The rating suggestions the facility uses on the form's "Present level of
- * Functioning" line. The field stays free text so staff are not forced into a
- * vocabulary the facility has not agreed on.
+ * The rating the facility uses on the form's "Present level of Functioning"
+ * line. The field is a closed dropdown over exactly these three values — the
+ * facility fixed the vocabulary, so nothing else can be typed in.
  */
 const RATING_SUGGESTIONS = ['Normal', 'Moderate', 'Severe'];
 
@@ -245,19 +244,20 @@ function AspectCells({
 
   return (
     <>
-      <input
+      <select
         aria-label={`${section.aspectLabel} — present level of functioning`}
-        list={`qpr-rating-${section.id}`}
         value={section.presentLevel || ''}
         onChange={(event) => onChange({ presentLevel: event.target.value })}
-        readOnly={!editable}
-        placeholder={editable ? 'e.g. Moderate' : ''}
+        disabled={!editable}
         className={field}
         style={cellBox(pageIndex, rowIndex, 'presentLevel')}
-      />
-      <datalist id={`qpr-rating-${section.id}`}>
-        {RATING_SUGGESTIONS.map((value) => <option key={value} value={value} />)}
-      </datalist>
+      >
+        {/* The blank row is the "not assessed yet" state. Every aspect starts
+            here and five of the six live sections sit here, so the field has to
+            be able to stay empty — and to be cleared again once rated. */}
+        <option value=""></option>
+        {RATING_SUGGESTIONS.map((value) => <option key={value} value={value}>{value}</option>)}
+      </select>
 
       <textarea
         aria-label={`${section.aspectLabel} — observations`}
