@@ -46,6 +46,7 @@ import 'react-pdf/dist/Page/TextLayer.css';
 // `?v=` is a cache key, not a fetch hint — see the note in QuarterlyProgressReport.tsx.
 pdfjs.GlobalWorkerOptions.workerSrc = `/pdf.worker.mjs?v=${pdfjs.version}`;
 import { PhaseProgress } from './PhaseProgress';
+import { PrescriptionList } from './PrescriptionList';
 import IncidentReportModal from './IncidentReportModal';
 
 interface ViolationGuideRecord {
@@ -1288,6 +1289,22 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
               </div>
             </CardContent>
           </Card>
+
+          {/*
+            Prescriptions, read on their own rather than buried in the health
+            record list — another staff member needs the medicine, the dose, how
+            often and for how long, and a one-line summary showing only the
+            medicine's name does not say any of that.
+
+            The same component the Health module renders, over the same records
+            and the same endpoint, so marking one given here and marking it given
+            there are the same act rather than two states to keep in step.
+          */}
+          <PrescriptionList
+            records={healthRecords.filter((r: any) => String(r.residentId) === String(child.id))}
+            canMark={can('Health', 'edit')}
+            onChanged={() => refreshData()}
+          />
         </TabsContent>
 
         <TabsContent value="behavioral" className="mt-4 space-y-4">

@@ -14,7 +14,7 @@ const { pool } = require('../config/database');
 const { activeAdmissionIdFor } = require('../services/admissionLink');
 const { createController } = require('./baseController');
 const { ApiError } = require('../middleware/errorHandler');
-const { insertWithGeneratedId, mapRow } = require('../utils/helpers');
+const { insertWithGeneratedId, mapRow, toMysqlDateTime } = require('../utils/helpers');
 const { canAccessResident } = require('./assignmentController');
 const { RESOURCES } = require('../utils/constants');
 const { normalizeRole } = require('../utils/authorization');
@@ -339,6 +339,55 @@ async function update(req, res, next) {
 }
 
 /**
+ * POST /:id/prescription-given — record that a prescription has been given.
+ *
+ * Deliberately not `PUT /:id`. That route re-publishes the record's document
+ * (`publishSafely`), so toggling one checkbox would rewrite the child's filed
+ * copy of the record — and it validates the whole record, so a Medication Log
+ * saved before a field became required could not be marked given at all.
+ *
+ * Both surfaces call this one route: the Medication Log row in the Health module
+ * and the prescription list in Child Records → Medical. There is one column pair
+ * behind it, so "done in either place is done in both" is a property of the data
+ * rather than two states the UI has to keep in step.
+ *
+ * Toggleable — `given: false` clears it, for one marked by mistake. Gated on
+ * `Health:edit` at the route, which is the Nurse and the Center Head, the same
+ * rule the module already applies to its other writes.
+ */
+async function markPrescriptionGiven(req, res, next) {
+  try {
+    const { id } = req.params;
+    const given = req.body?.given !== false;
+
+    const [existing] = await pool.query('SELECT id, recordType FROM healthRecords WHERE id = ?', [id]);
+    if (existing.length === 0) throw new ApiError(404, 'healthRecords not found');
+    if (String(existing[0].recordType || '') !== 'Medication Log') {
+      throw new ApiError(400, 'Only a Medication Log entry is a prescription that can be marked as given.');
+    }
+
+    await pool.query(
+      'UPDATE healthRecords SET givenAt = ?, givenBy = ?, modifiedBy = ? WHERE id = ?',
+      [
+        given ? toMysqlDateTime(new Date()) : null,
+        given ? (req.user?.username || null) : null,
+        req.user?.username || null,
+        id,
+      ],
+    );
+
+    const [rows] = await pool.query('SELECT * FROM healthRecords WHERE id = ?', [id]);
+    res.json({
+      success: true,
+      data: mapRow('healthRecords', rows[0]),
+      message: given ? 'Prescription marked as given.' : 'Prescription marked as not yet given.',
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
  * DELETE /:id — delete a health record and the copy filed in Documents.
  *
  * The published document exists only because the record does. Leaving it behind
@@ -479,6 +528,7 @@ module.exports = {
   create,
   update,
   delete: remove,
+  markPrescriptionGiven,
   getByResident,
   getLatest,
   getStats,

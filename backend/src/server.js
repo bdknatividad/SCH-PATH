@@ -2382,6 +2382,23 @@ async function runMigrations() {
     }
   }
 
+  // ── The prescription's "given" state ──────────────────────────────────────
+  //
+  // A prescription (Medication Log) had no way to record that it had actually
+  // been given. `status` could not carry it: that column is written once at
+  // creation and is `'Completed'` on every row, so it distinguishes nothing —
+  // and reusing it would silently change the meaning of every existing record.
+  //
+  // Two nullable columns instead. `givenAt IS NULL` means outstanding, which is
+  // the honest default for the rows that already exist: nothing recorded that
+  // they were dispensed, because nothing could.
+  //
+  // Both surfaces — the Health module and Child Records → Medical — read and
+  // write these same two columns, which is what makes "mark it done in either
+  // place and it is done in both" true rather than two states to keep in step.
+  await ensureColumn('healthRecords', 'givenAt', 'DATETIME NULL', 'details');
+  await ensureColumn('healthRecords', 'givenBy', 'VARCHAR(100) NULL', 'givenAt');
+
   // ── Audit columns required by the generic resource controllers ──
   // RESOURCES.* declares createdBy/modifiedBy for these resources and
   // baseController writes them on create/update, but the columns were never

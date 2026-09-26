@@ -100,7 +100,11 @@ const RESOURCES = {
     // vitals columns (bloodPressure/temperature/weight/height/pulse) that do
     // not exist, and omitted real columns, which silently dropped
     // treatmentType/procedure_/outcome/followUpDate/duration on every write.
-    columns: ['id', 'residentId', 'residentName', 'recordType', 'date', 'assessmentType', 'findings', 'allergies', 'conditions', 'status', 'recordedBy', 'medicationName', 'dosage', 'frequency', 'duration', 'prescribedBy', 'treatmentType', 'procedure_', 'outcome', 'followUpDate', 'details', 'createdBy', 'modifiedBy'],
+    // `givenAt`/`givenBy` carry a prescription's "given" state. They have to be
+    // listed here or `mapRow` drops them: it emits only the columns named for
+    // the resource, so a new column that is missing from this list is written
+    // and then invisible on every read.
+    columns: ['id', 'residentId', 'residentName', 'recordType', 'date', 'assessmentType', 'findings', 'allergies', 'conditions', 'status', 'recordedBy', 'medicationName', 'dosage', 'frequency', 'duration', 'prescribedBy', 'treatmentType', 'procedure_', 'outcome', 'followUpDate', 'givenAt', 'givenBy', 'details', 'createdBy', 'modifiedBy'],
   },
   activityEvaluations: {
     prefix: 'EVAL',

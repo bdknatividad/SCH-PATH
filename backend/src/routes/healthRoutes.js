@@ -57,6 +57,17 @@ router.post('/', requirePermission('Health', 'create'), asyncHandler(healthContr
 router.put('/:id', requirePermission('Health', 'edit'), asyncHandler(healthController.update));
 
 /**
+ * POST /api/health/:id/prescription-given
+ * Mark a prescription (Medication Log) as given, or clear that.
+ *
+ * Its own route rather than a `PUT` because `update` re-publishes the record's
+ * document and validates the whole record — a checkbox should not rewrite the
+ * child's filed copy. Both the Health module and Child Records → Medical call
+ * this one route, so the two views cannot disagree.
+ */
+router.post('/:id/prescription-given', requirePermission('Health', 'edit'), asyncHandler(healthController.markPrescriptionGiven));
+
+/**
  * DELETE /api/health/:id
  * Delete health record
  */

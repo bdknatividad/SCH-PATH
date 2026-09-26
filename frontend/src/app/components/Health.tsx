@@ -22,6 +22,7 @@ import { useSystemDialog } from './SystemDialog';
 import { downloadDocumentFile } from '@/utils/documentFile';
 import { formatShortDate } from '@/utils/dateFormatter';
 import { ProgramQuarterlyReports } from './QuarterlyProgressReport';
+import { PrescriptionList } from './PrescriptionList';
 
 // ── CONSTANTS ──────────────────────────────────────────────────────────────
 const ALLERGIES = ['None', 'Penicillin', 'Aspirin', 'Sulfa drugs', 'Food allergies', 'Others'];
@@ -44,6 +45,25 @@ const FORM_OPTIONS = [
   { value: 'Medication Log', code: 'Form 11-E', title: 'Medication Log', description: 'Prescribed medication, dosage, frequency and duration.' },
   { value: 'Medical Treatment', code: 'Form 11-F', title: 'Medical Treatment', description: 'Treatment performed, its outcome and follow-up date.' },
 ] as const;
+
+/**
+ * Every laboratory result attached to a medical row.
+ *
+ * A checkup usually produces more than one piece of paper — an X-ray and a lab
+ * slip, say — and the row could hold exactly one. `laboratoryResultDocuments` is
+ * the list; the older single `laboratoryResultDocumentId`/`FileName` pair is
+ * read as its first entry, so a row saved before this existed still shows its
+ * file and nothing has to be migrated.
+ */
+function rowDocuments(row: any): { id: string; name: string }[] {
+  const list = Array.isArray(row?.laboratoryResultDocuments)
+    ? row.laboratoryResultDocuments.filter((entry: any) => entry && entry.id)
+    : [];
+  if (list.length) return list;
+  return row?.laboratoryResultDocumentId
+    ? [{ id: String(row.laboratoryResultDocumentId), name: String(row.laboratoryResultFileName || 'View result') }]
+    : [];
+}
 
 const EMPTY_FORM = {
   residentId: '', residentName: '',
@@ -421,7 +441,7 @@ export function Health() {
   const validateForm = () => {
     if (!form.residentId) return 'Please select a resident.';
     if (!form.date) return 'Please select a date.';
-    if (form.recordType === 'Medical Record' && medicalRows.every(row => !row.findings.trim() && !row.laboratoryProcedure.trim() && !row.laboratoryResultDocumentId && !row.prescription.trim() && !row.careProvider.trim() && !row.doctorName.trim())) return 'Add at least one medical record row.';
+    if (form.recordType === 'Medical Record' && medicalRows.every(row => !row.findings.trim() && !row.laboratoryProcedure.trim() && rowDocuments(row).length === 0 && !row.prescription.trim() && !row.careProvider.trim() && !row.doctorName.trim())) return 'Add at least one medical record row.';
     if (form.recordType === 'Dental Services' && (!form.chiefComplaints.trim() || !Object.values(dentalServices).some(value => value === true))) return 'Chief complaint and at least one dental service are required.';
     if (form.recordType === 'Height & Weight Monitoring' && !form.monitoringYear.trim()) return 'Monitoring year is required.';
     if (form.recordType === 'Health Assessment' && (!form.assessmentType.trim() || !form.findings.trim())) return 'Assessment type and findings are required.';
@@ -655,9 +675,19 @@ export function Health() {
       });
       const documentId = String(saved?.id || saved?.data?.id || '');
       if (target.kind === 'Laboratory Results' && target.rowIndex !== undefined) {
-        setMedicalRows(rows => rows.map((row, index) => index === target.rowIndex
-          ? { ...row, laboratoryResultDocumentId: documentId, laboratoryResultFileName: file.name }
-          : row));
+        setMedicalRows(rows => rows.map((row, index) => {
+          if (index !== target.rowIndex) return row;
+          const next = [...rowDocuments(row), { id: documentId, name: file.name }];
+          // The legacy pair keeps pointing at the first document, so a reader
+          // that has not been taught about the list still shows a real file
+          // rather than an empty cell.
+          return {
+            ...row,
+            laboratoryResultDocuments: next,
+            laboratoryResultDocumentId: next[0].id,
+            laboratoryResultFileName: next[0].name,
+          };
+        }));
       }
       await refreshData();
       setSaveMessage(`${target.kind} uploaded for ${resident?.name || 'the resident'}.`);
@@ -906,6 +936,25 @@ export function Health() {
 
         {(['all', 'Health Assessment', 'Medication Log', 'Medical Treatment'] as const).map(tab => (
           <TabsContent key={tab} value={tab}>
+            {/*
+              A prescription gets its own view instead of the generic record
+              card. The medicine, dose, frequency and duration are what another
+              staff member actually needs to read, and the "given" toggle belongs
+              beside them.
+
+              The same component Child Records → Medical renders, over the same
+              records and the same endpoint — which is what makes marking a
+              prescription given here and marking it there the same act.
+            */}
+            {tab === 'Medication Log' ? (
+              <PrescriptionList
+                records={filtered}
+                canMark={can('Health', 'edit')}
+                onChanged={() => refreshData()}
+                title="Prescriptions"
+                emptyMessage="No prescriptions on file for these residents."
+              />
+            ) : (
             <div className="grid gap-3">
               {filtered.length === 0 ? (
                 <Card><CardContent className="py-12 text-center text-gray-400 text-sm italic">No records found.</CardContent></Card>
@@ -978,6 +1027,7 @@ export function Health() {
                 </Card>
               ))}
             </div>
+            )}
           </TabsContent>
         ))}
 
@@ -1103,30 +1153,36 @@ export function Health() {
                             {(['date', 'findings', 'laboratoryProcedure', 'laboratoryResults', 'prescription', 'careProvider', 'doctorName', 'specialization'] as const).map(field => (
                               field === 'laboratoryResults' ? (
                                 // Laboratory Results sits beside the procedure it
-                                // belongs to: the uploaded file for this row.
+                                // belongs to. A checkup usually produces more than
+                                // one piece of paper, so this is a list: each file
+                                // gets its own line, and the button adds another
+                                // rather than replacing what is there.
                                 <td key={field} className="border-b border-gray-100 p-1.5">
                                   <div className="flex flex-col gap-1">
-                                    {row.laboratoryResultDocumentId && (
+                                    {rowDocuments(row).map((doc) => (
                                       <button
+                                        key={doc.id}
                                         type="button"
                                         className="truncate text-left text-[11px] font-semibold text-[#2F3E46] underline"
-                                        title={row.laboratoryResultFileName}
-                                        onClick={() => openUploadedDocument(row.laboratoryResultDocumentId)}
+                                        title={doc.name}
+                                        onClick={() => openUploadedDocument(doc.id)}
                                       >
-                                        {row.laboratoryResultFileName || 'View result'}
+                                        {doc.name || 'View result'}
                                       </button>
-                                    )}
+                                    ))}
                                     <Button
                                       type="button"
                                       size="sm"
                                       variant="outline"
                                       className="h-7 gap-1 px-2 text-[11px]"
                                       disabled={uploadingKey !== null}
-                                      aria-label={`Upload laboratory results for medical row ${index + 1}`}
+                                      aria-label={`Attach a laboratory result to medical row ${index + 1}`}
                                       onClick={() => startUpload('Laboratory Results', form.residentId, index)}
                                     >
                                       <Plus className="h-3 w-3" />
-                                      {uploadingKey === `Laboratory Results:${index}` ? 'Uploading…' : row.laboratoryResultDocumentId ? 'Replace' : 'Upload'}
+                                      {uploadingKey === `Laboratory Results:${index}`
+                                        ? 'Uploading…'
+                                        : rowDocuments(row).length ? 'Attach another' : 'Upload'}
                                     </Button>
                                   </div>
                                 </td>
@@ -1516,7 +1572,7 @@ export function Health() {
             <div className="space-y-4 py-2 text-sm">
               <div className="text-center border-y-2 border-[#2F3E46] py-4 uppercase"><p className="text-xs">Republic of the Philippines</p><p className="text-xs">Province of Laguna</p><p className="font-black">City Government of Calamba</p><p className="text-xs">City Social Services Department</p><p className="font-black tracking-widest">Second Chance Home</p><h3 className="mt-2 font-black">{FORM_OPTIONS.find(option => option.value === viewRecord.recordType)?.title || viewRecord.recordType}</h3><p className="text-xs font-bold">{FORM_OPTIONS.find(option => option.value === viewRecord.recordType)?.code}</p></div>
               <div className="grid grid-cols-3 gap-3 border p-3"><span><b>Name:</b> {viewRecord.residentName}</span><span><b>Age:</b> {children.find(child => child.id === viewRecord.residentId)?.age || '—'}</span><span><b>Birthday:</b> {children.find(child => child.id === viewRecord.residentId)?.birthDate || '—'}</span></div>
-              {viewRecord.recordType === 'Medical Record' && <div className="overflow-x-auto"><table className="min-w-[1000px] w-full border-collapse text-xs"><thead><tr>{['Date', 'Medical Findings', 'Laboratory Procedure', 'Laboratory Results', 'Prescription', 'Care Provider', "Doctor's Name", 'Specialization'].map(label => <th key={label} className="border bg-gray-100 p-2 text-left">{label}</th>)}</tr></thead><tbody>{(viewRecord.details?.medicalRows || []).map((row: any, index: number) => <tr key={index}>{[row.date, row.findings, row.laboratoryProcedure].map((value: string, cellIndex: number) => <td key={cellIndex} className="border p-2 align-top">{value || '—'}</td>)}<td className="border p-2 align-top">{row.laboratoryResultDocumentId ? <button type="button" className="text-left font-semibold text-[#2F3E46] underline" onClick={() => openUploadedDocument(row.laboratoryResultDocumentId)}>{row.laboratoryResultFileName || 'View result'}</button> : '—'}</td>{[row.prescription, row.careProvider, row.doctorName, row.specialization].map((value: string, cellIndex: number) => <td key={cellIndex} className="border p-2 align-top">{value || '—'}</td>)}</tr>)}</tbody></table></div>}
+              {viewRecord.recordType === 'Medical Record' && <div className="overflow-x-auto"><table className="min-w-[1000px] w-full border-collapse text-xs"><thead><tr>{['Date', 'Medical Findings', 'Laboratory Procedure', 'Laboratory Results', 'Prescription', 'Care Provider', "Doctor's Name", 'Specialization'].map(label => <th key={label} className="border bg-gray-100 p-2 text-left">{label}</th>)}</tr></thead><tbody>{(viewRecord.details?.medicalRows || []).map((row: any, index: number) => <tr key={index}>{[row.date, row.findings, row.laboratoryProcedure].map((value: string, cellIndex: number) => <td key={cellIndex} className="border p-2 align-top">{value || '—'}</td>)}<td className="border p-2 align-top">{rowDocuments(row).length ? <span className="flex flex-col gap-0.5">{rowDocuments(row).map((doc) => <button key={doc.id} type="button" className="text-left font-semibold text-[#2F3E46] underline" onClick={() => openUploadedDocument(doc.id)}>{doc.name || 'View result'}</button>)}</span> : '—'}</td>{[row.prescription, row.careProvider, row.doctorName, row.specialization].map((value: string, cellIndex: number) => <td key={cellIndex} className="border p-2 align-top">{value || '—'}</td>)}</tr>)}</tbody></table></div>}
               {viewRecord.recordType === 'Height & Weight Monitoring' && <div className="overflow-x-auto"><table className="min-w-[900px] w-full border-collapse text-sm"><thead><tr><th className="border p-2 text-left">Month</th>{MONTHS.map(month => <th key={month} className="border p-2">{month}</th>)}</tr></thead><tbody><tr><th className="border p-2 text-left">Height</th>{(viewRecord.details?.monthlyMeasurements || []).map((row: any) => <td key={row.month} className="border p-2">{row.height || '—'}</td>)}</tr><tr><th className="border p-2 text-left">Weight</th>{(viewRecord.details?.monthlyMeasurements || []).map((row: any) => <td key={row.month} className="border p-2">{row.weight || '—'}</td>)}</tr><tr className="bg-gray-50"><th className="border p-2 text-left">BMI</th>{(viewRecord.details?.monthlyMeasurements || []).map((row: any) => <td key={row.month} className="border p-2 font-semibold">{bmiFor(row.height, row.weight) || '—'}</td>)}</tr><tr><th className="border p-2 text-left text-xs">Classification</th>{(viewRecord.details?.monthlyMeasurements || []).map((row: any) => <td key={row.month} className="border p-2 text-center"><WeightClassBadge height={row.height} weight={row.weight} /></td>)}</tr><tr><th className="border p-2 text-left text-xs font-normal">Healthy weight for height</th>{(viewRecord.details?.monthlyMeasurements || []).map((row: any) => <td key={row.month} className="border p-2 text-xs text-gray-500">{healthyWeightRange(row.height) || '—'}{healthyWeightRange(row.height) && <span className="block text-[10px] text-yellow-700">6%: {sixPercentLimit(row.height)}</span>}</td>)}</tr></tbody></table></div>}
               <div className="grid grid-cols-3 gap-y-2 gap-x-3">
                 <span className="font-semibold text-gray-500">ID</span><span className="col-span-2 font-mono text-xs">{viewRecord.id}</span>
