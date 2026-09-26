@@ -236,7 +236,7 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
   const location = useLocation();
   const { children, updateChild, addViolation, violations, refreshData, addDocument, documents, healthRecords } = useData();
   const { user } = useAuth();
-  const { can } = usePermissions();
+  const { can, canOpenModule } = usePermissions();
   const isHouseparent = user?.role?.toLowerCase() === 'houseparent';
 
   /**
@@ -1142,7 +1142,12 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-3"><Card className="border-none shadow-sm"><CardContent className="p-4 text-center"><p className="text-2xl font-black text-blue-600">{visitDocs.length}</p><p className="text-xs text-gray-500 mt-0.5">School Visits</p></CardContent></Card><Card className="border-none shadow-sm"><CardContent className="p-4 text-center"><p className="text-2xl font-black text-green-600">{passCount}</p><p className="text-xs text-gray-500 mt-0.5">Passed</p></CardContent></Card><Card className="border-none shadow-sm"><CardContent className="p-4 text-center"><p className="text-2xl font-black text-red-500">{failCount}</p><p className="text-xs text-gray-500 mt-0.5">Failed</p></CardContent></Card></div>
                 {quarterlyDocs.length > 0 && <Card className="border-none shadow-sm"><CardContent className="p-4"><h4 className="font-bold text-[#2F3E46] text-sm mb-3">Quarterly Reports</h4><div className="space-y-2">{quarterlyDocs.map((d) => { const firstLines = (d.description || '').split('\n').slice(0, 2).join(' '); const badge = d.status === 'Approved' ? { label: 'Pass', cls: 'bg-green-100 text-green-700' } : d.status === 'Rejected' ? { label: 'Fail', cls: 'bg-red-100 text-red-700' } : (d.status as string) === 'Reassessment' ? { label: 'Reassessment', cls: 'bg-yellow-100 text-yellow-700' } : { label: 'Pending Review', cls: 'bg-gray-100 text-gray-600' }; return (<div key={d.id} className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl"><div className="flex-1 min-w-0"><div className="flex items-center gap-2 flex-wrap"><p className="text-xs font-bold text-[#2F3E46] truncate">{firstLines}</p><span className={`px-2 py-0.5 rounded-full font-bold text-[10px] shrink-0 ${badge.cls}`}>{badge.label}</span></div><p className="text-[10px] text-gray-400 mt-0.5">Submitted {d.submittedAt ? new Date(d.submittedAt).toLocaleDateString() : '—'} by {d.uploadedBy || 'Educator'}</p></div></div>); })}</div></CardContent></Card>}
                 {visitDocs.length > 0 && <Card className="border-none shadow-sm"><CardContent className="p-4"><h4 className="font-bold text-[#2F3E46] text-sm mb-3">School Visit Reports</h4><div className="space-y-2">{visitDocs.map((d) => (<div key={d.id} className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl"><div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center shrink-0"><span className="text-sm">🏫</span></div><div className="flex-1 min-w-0"><p className="text-xs text-gray-600">{d.description}</p><p className="text-[10px] text-gray-400 mt-0.5">{d.uploadedAt ? new Date(d.uploadedAt).toLocaleDateString() : ''}</p></div></div>))}</div></CardContent></Card>}
-                {!student && <Card className="border-none shadow-sm"><CardContent className="p-8 text-center"><span className="text-4xl">📚</span><p className="text-gray-400 mt-2 text-sm">No education records found for this resident.</p><p className="text-xs text-gray-300 mt-1">Go to the Education module to enroll this resident.</p></CardContent></Card>}
+                {!student && <Card className="border-none shadow-sm"><CardContent className="p-8 text-center"><span className="text-4xl">📚</span><p className="text-gray-400 mt-2 text-sm">No education records found for this resident.</p>{/*
+                  Only point at the Education module for someone who can open it.
+                  The line used to be unconditional, so a Nurse, a Psychologist or
+                  a Houseparent — none of whom hold Education — was told to go
+                  somewhere the sidebar does not offer them.
+                */}<p className="text-xs text-gray-300 mt-1">{canOpenModule('Education') ? 'Go to the Education module to enroll this resident.' : 'An Educator can enrol this resident from the Education module.'}</p></CardContent></Card>}
               </div>
             );
           })()}

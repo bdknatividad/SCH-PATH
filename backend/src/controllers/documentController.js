@@ -119,6 +119,13 @@ const DOCUMENT_READ_ROLES_BY_CATEGORY = {
   educational: ['educator', 'centerhead', 'admin'],
   case: ['socialworker', 'psychologist', 'centerhead', 'admin'],
   legal: ['socialworker', 'centerhead', 'admin'],
+  // The Admission Slip is rendered inside the Child Records Personal Info tab,
+  // which every role holding Child Records can open, and a Houseparent reads the
+  // same record through their Case Load. Withholding the *document* therefore did
+  // not withhold the slip — it only put a "Request Access" button in front of a
+  // file the reader could already see in the resident's record, and routed them
+  // through an approval for nothing.
+  admission: ['socialworker', 'psychologist', 'nurse', 'educator', 'houseparent', 'centerhead', 'admin'],
   // Anecdotal Reports are published here on submit, but the category had no
   // entry, so nobody except the uploader (via the owner match) or a Center
   // Head/Admin could open one — View returned 403 for the Social Worker who

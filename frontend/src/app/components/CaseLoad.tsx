@@ -92,25 +92,46 @@ export function CaseLoad() {
   const [searchTerm, setSearchTerm] = useState('');
   const [assignedResidentRecords, setAssignedResidentRecords] = useState<any[]>([]);
 
-  const load = () => {
-    setLoading(true);
-    setError(null);
+  /**
+   * Load the roster.
+   *
+   * `background` is the whole difference between opening the module and keeping
+   * it in sync. A background refresh must not raise the loading flag — that
+   * blanked the cards every few seconds, so the page looked like it kept
+   * reloading itself — and it must not replace a good list with an error, since
+   * one failed poll is not a reason to empty the screen.
+   */
+  const load = (background = false) => {
+    if (!background) {
+      setLoading(true);
+      setError(null);
+    }
     request<{ success: boolean; data: CaseloadEntry[] }>('/resident-assignments/caseload', { method: 'GET' })
       .then((res) => {
-        if (res?.success) setData(res.data || []);
-        else setError('Unable to load case load data.');
+        if (res?.success) {
+          setData(res.data || []);
+          if (background) setError(null);
+        } else if (!background) {
+          setError('Unable to load case load data.');
+        }
       })
-      .catch((err) => setError(err instanceof Error ? err.message : 'Unable to load case load data.'))
-      .finally(() => setLoading(false));
+      .catch((err) => {
+        if (!background) setError(err instanceof Error ? err.message : 'Unable to load case load data.');
+      })
+      .finally(() => { if (!background) setLoading(false); });
   };
 
   useEffect(() => {
-    // Keep the Case Load in sync with Center Head assignments while the module
-    // is open. This is intentionally scoped to this module only; it does not
-    // alter the existing Center Head UI or any other module's refresh logic.
+    // Keep the Case Load in sync with Center Head assignments while the module is
+    // open. This is intentionally scoped to this module only; it does not alter
+    // the existing Center Head UI or any other module's refresh logic.
+    //
+    // Silently, and once a minute rather than every five seconds: an assignment
+    // made elsewhere is not urgent to the second, and returning to the tab
+    // refreshes immediately anyway.
     load();
-    const interval = window.setInterval(load, 5000);
-    const handleFocus = () => load();
+    const interval = window.setInterval(() => load(true), 60_000);
+    const handleFocus = () => load(true);
     window.addEventListener('focus', handleFocus);
     return () => {
       window.clearInterval(interval);

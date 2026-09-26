@@ -1466,13 +1466,15 @@ export function DocumentUpload() {
     return (
       <div key={folderKey} className="border border-gray-200 rounded-lg overflow-hidden bg-white">
         <button
-          className="w-full flex items-center gap-2 px-3 py-2 bg-gray-100 hover:bg-gray-200 transition-colors text-sm"
+          className="w-full flex flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2 bg-gray-100 hover:bg-gray-200 transition-colors text-sm"
           onClick={() => toggleCategory(folderKey)}
         >
           {isFolderOpen
-            ? <FolderOpen className="w-4 h-4 text-[#2F3E46]" />
-            : <Folder className="w-4 h-4 text-[#2F3E46]" />}
-          <span className="font-medium text-gray-700 flex-1 text-left">
+            ? <FolderOpen className="w-4 h-4 text-[#2F3E46] shrink-0" />
+            : <Folder className="w-4 h-4 text-[#2F3E46] shrink-0" />}
+          {/* Same treatment as the child row: the folder name truncates rather
+              than pushing the file count and chevron off the card. */}
+          <span className="font-medium text-gray-700 flex-1 min-w-0 truncate text-left">
             {folder}
             {folder === 'Admission Files' && admissionOrdinal != null && (
               <span className="ml-2 text-[10px] font-bold uppercase tracking-wide text-[#2F3E46] bg-[#FFD100]/60 px-2 py-0.5 rounded-full align-middle">
@@ -1480,8 +1482,8 @@ export function DocumentUpload() {
               </span>
             )}
           </span>
-          <span className="text-xs text-gray-400 mr-1">{folderDocs.length} file{folderDocs.length !== 1 ? 's' : ''}</span>
-          {isFolderOpen ? <ChevronDown className="w-3.5 h-3.5 text-gray-400" /> : <ChevronRightIcon className="w-3.5 h-3.5 text-gray-400" />}
+          <span className="shrink-0 text-xs text-gray-400">{folderDocs.length} file{folderDocs.length !== 1 ? 's' : ''}</span>
+          {isFolderOpen ? <ChevronDown className="w-3.5 h-3.5 text-gray-400 shrink-0" /> : <ChevronRightIcon className="w-3.5 h-3.5 text-gray-400 shrink-0" />}
         </button>
         {isFolderOpen && (
           <div className="divide-y divide-gray-100">
@@ -1758,18 +1760,22 @@ export function DocumentUpload() {
                 return (
                   <Card key={nameKey} className="overflow-hidden">
                     <button
-                      className="w-full flex items-center gap-3 px-4 py-3 bg-[#2F3E46] text-white hover:bg-[#263440] transition-colors"
+                      className="w-full flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3 bg-[#2F3E46] text-white hover:bg-[#263440] transition-colors"
                       onClick={() => toggleChild(nameKey)}
                     >
-                      {isChildOpen ? <FolderOpen className="w-5 h-5 text-[#FFD100]" /> : <Folder className="w-5 h-5 text-[#FFD100]" />}
-                      <span className="font-semibold flex-1 text-left">{displayName}</span>
-                      {isReturning && <span className="text-[10px] bg-orange-400 text-white px-2 py-0.5 rounded-full font-bold mr-1">Returning</span>}
-                      <span className="text-xs text-gray-300 mr-2">
+                      {isChildOpen ? <FolderOpen className="w-5 h-5 text-[#FFD100] shrink-0" /> : <Folder className="w-5 h-5 text-[#FFD100] shrink-0" />}
+                      {/* `min-w-0 truncate` so a long resident name shortens instead
+                          of shoving the counts and the chevron off the row, and
+                          `flex-wrap` so the counts drop to their own line when the
+                          window is narrow rather than overflowing the card. */}
+                      <span className="font-semibold flex-1 min-w-0 truncate text-left">{displayName}</span>
+                      {isReturning && <span className="shrink-0 text-[10px] bg-orange-400 text-white px-2 py-0.5 rounded-full font-bold">Returning</span>}
+                      <span className="shrink-0 text-xs text-gray-300">
                         {splitByAdmission
                           ? `${periods.length} admissions · ${allDocs.length} file${allDocs.length !== 1 ? 's' : ''}`
                           : `${flatGroups.length} categor${flatGroups.length === 1 ? 'y' : 'ies'} · ${allDocs.length} file${allDocs.length !== 1 ? 's' : ''}`}
                       </span>
-                      {isChildOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronRightIcon className="w-4 h-4" />}
+                      {isChildOpen ? <ChevronDown className="w-4 h-4 shrink-0" /> : <ChevronRightIcon className="w-4 h-4 shrink-0" />}
                     </button>
                     {isChildOpen && (
                       <CardContent className="p-3 space-y-2 bg-gray-50">
