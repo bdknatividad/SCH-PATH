@@ -104,20 +104,16 @@ const FORM08_SIGNATURE_BOXES = {
 /**
  * The four sign-off lines' printed names.
  *
- * The two right-hand lines are pre-printed rather than typed: the report is
- * endorsed to the Social Worker and noted by the Case Manager, and those are the
- * same two people on every Form 08, so leaving them to be typed meant they could
+ * "Checked by" and "Noted by" are the same two people on every Form 08, so they
+ * are pre-printed rather than typed: leaving them to the filer meant they could
  * be filled in differently — or left blank — on every report.
  *
- * "Reported by" stays typed, because it is the one line that genuinely changes:
- * whoever witnessed the incident files it.
- *
- * The `endorsedTo` column is still stored (see the INSERT/UPDATE below) so no
- * existing record loses what it held; it is simply no longer what gets printed.
+ * "Reported by" and "Endorsed to" stay typed, because those are the two lines
+ * that genuinely change from one report to the next. `FORM08_ENDORSED_TO_NAME`
+ * is therefore empty and no longer drawn — it is kept only as the value older
+ * records were saved with when nothing was typed, so an old record re-saved
+ * without a name is not blanked, and it remains part of this module's exports.
  */
-// "Endorsed to" is a fillable name: the typed `endorsedTo` is what prints. This
-// is only the value older records were saved with when nothing was typed, kept
-// so an old record re-saved without a name is not blanked.
 const FORM08_ENDORSED_TO_NAME = '';
 const FORM08_CHECKED_BY_NAME = 'Francis C. Patricio, RSW';
 const FORM08_CHECKED_BY_ROLE = 'SWO I - Case Manager';

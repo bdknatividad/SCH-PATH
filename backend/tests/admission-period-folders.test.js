@@ -1021,7 +1021,7 @@ test('the dialogs are one component, mounted once', () => {
   }
 });
 
-test('the app-level error screen does not print the exception', () => {
+test('the app-level error screen shows a bounded message and never the stack', () => {
   const app = read(path.join(FRONTEND, 'src', 'app', 'App.tsx'));
   // Comments stripped: the note explaining what this screen used to do names
   // `error.message`, and matching that would defeat the check.
@@ -1031,10 +1031,28 @@ test('the app-level error screen does not print the exception', () => {
     .filter((line) => !isComment(line))
     .join('\n');
 
+  // The stack is what must never be rendered: a <pre> of it put a developer dump
+  // in front of staff, and a stack names the API host and the whole call path.
   assert.doesNotMatch(boundary, /<pre>/, 'the raw error text is rendered again');
-  assert.doesNotMatch(boundary, /error\?\.message|error\.message/, 'the exception message is rendered again');
+  assert.doesNotMatch(
+    boundary,
+    /error\?\.stack|error\.stack|componentStack/,
+    'the stack is rendered again — a stack names the API host and the call path',
+  );
   assert.doesNotMatch(boundary, /May Error sa Component/, 'the old developer-facing heading is back');
-  // The console still gets it, which is where a stack belongs.
+
+  // The message itself IS shown, deliberately: the person who sees this page is
+  // usually not the person who can read a console, so a screenshot has to carry
+  // the cause. It must stay truncated, and it is the same text `describeError()`
+  // already returns to the user in a dialog, so it is not a new disclosure.
+  assert.match(
+    boundary,
+    /this\.state\.error\?\.message/,
+    'the message is no longer shown, so a screenshot of this page cannot diagnose it',
+  );
+  assert.match(boundary, /\.slice\(0,\s*300\)/, 'the rendered message is no longer bounded');
+
+  // The console still gets the whole thing, which is where a stack belongs.
   assert.match(boundary, /componentDidCatch/, 'the error is no longer logged for whoever is debugging');
 });
 

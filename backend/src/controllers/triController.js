@@ -1,6 +1,6 @@
 const { pool } = require('../config/database');
 const { activeAdmissionIdFor } = require('../services/admissionLink');
-const { insertWithGeneratedId } = require('../utils/helpers');
+const { insertWithGeneratedId, toMysqlDateTime } = require('../utils/helpers');
 const { ApiError } = require('../middleware/errorHandler');
 const { canAccessResident } = require('./assignmentController');
 const { normalizeRole } = require('../utils/authorization');
@@ -66,7 +66,10 @@ async function mirrorSignatoryToColumns(recordId, slot, entry, updatedBy) {
       [
         signed,
         signed ? entry.signedBy || null : null,
-        signed ? (entry.signedAt ? new Date(entry.signedAt) : new Date()) : null,
+        // `toMysqlDateTime`, not a bare `Date`. The driver would otherwise send
+        // the object and rely on its own locale-dependent conversion — the
+        // hazard `helpers.toMysqlDateTime` exists to remove.
+        signed ? toMysqlDateTime(entry.signedAt || new Date()) : null,
         updatedBy,
         recordId,
       ]
@@ -809,7 +812,10 @@ async function updateSignatories(req, res, next) {
       if (value.length > 2_000_000) throw new ApiError(413, 'signature image is too large');
       entry.signature = value || null;
       entry.signedBy = value ? req.user.username : null;
-      entry.signedAt = value ? new Date().toISOString() : null;
+      // The same shape the mirrored column holds, so the JSON and the column
+      // cannot disagree — and no raw ISO instant is left where a query could
+      // pick it up. The response boundary labels it on the way out.
+      entry.signedAt = value ? toMysqlDateTime(new Date()) : null;
     }
 
     const next = { ...current, [slot]: entry };
@@ -873,7 +879,7 @@ async function signOfficialLine(req, res, next) {
     const entry = { ...(current[slot] || {}) };
     entry.signature = signature || null;
     entry.signedBy = signature ? req.user.username : null;
-    entry.signedAt = signature ? new Date().toISOString() : null;
+    entry.signedAt = signature ? toMysqlDateTime(new Date()) : null;
 
     await pool.query(
       'UPDATE triRecords SET signatories = ?, updatedBy = ? WHERE id = ?',

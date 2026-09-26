@@ -785,6 +785,14 @@ async function runMigrations() {
   await ensureColumn('violations', 'swVerifiedBy', 'VARCHAR(100) NULL', 'psychVerification');
   await ensureColumn('violations', 'swVerifiedAt', 'DATETIME NULL', 'swVerifiedBy');
 
+  // `type` holds `guide.name`, so it has to be as wide as the guide name it
+  // copies: violationController.create() writes `type: guide.name` straight
+  // through buildInsertPayload. violation_guide.name is VARCHAR(500) and 10 of
+  // the 33 official names exceed 100 characters (the longest is 189), so at
+  // VARCHAR(100) logging any of those violations failed with ER_DATA_TOO_LONG —
+  // which the user sees as "Database error occurred" with no column named.
+  await ensureColumnLength('violations', 'type', 500, 'VARCHAR(500) NOT NULL');
+
   console.log('Migration: violations table ensured.');
 
   await pool.query(`CREATE TABLE IF NOT EXISTS staff (
@@ -1214,16 +1222,33 @@ async function runMigrations() {
     console.warn('Migration warning (residentAssignments):', err.message);
   }
 
-  // End every Houseparent Case Load assignment that was created automatically
-  // rather than by a person in the Houseparent Module:
+  // End every Houseparent Case Load assignment that was created by the machine
+  // rather than by a person:
   //   - source 'system'                     the boot seed that assigned every
   //                                         Active resident to every Houseparent
   //   - source 'admission' / 'admission-update'
-  //                                         the old Admission Slip code that turned
+  //                                         the Admission Slip code that turned
   //                                         the HP on Duty into the Case Load Manager
-  // Neither writer exists any more. The rows are ended (status 'Ended'), not
-  // deleted, so the history stays. Idempotent: once ended there is nothing left
-  // to match, and manual assignments (source 'caseload' / 'manual') are untouched.
+  //
+  // Both writers are gone from this code: `seedResidentAssignments()` is no
+  // longer called at boot, the Admission Slip no longer posts an assignment, and
+  // assignmentController refuses any houseparent-type row whose source is not
+  // 'caseload' / 'manual'. The rows already in the database still have to be
+  // retired, which is what this does.
+  //
+  // `createdBy` is the second gate, and it is load-bearing. The live data was
+  // written by an Admission Slip screen that was still in service — measured
+  // 2026-09-26, eight rows carry source 'admission'/'admission-update' with
+  // createdBy 'centerhead', the most recent 80 minutes old. Those rows are the
+  // record of who was actually on duty, and for several residents they are the
+  // only link to a Houseparent. Ending them would empty a real caseload and lock
+  // that Houseparent out of the documents scoped to it, so only rows the machine
+  // wrote are retired. A human-created row is ended from the Houseparent Module,
+  // by the Center Head, deliberately.
+  //
+  // The rows are ended (status 'Ended'), not deleted, so the history stays.
+  // Idempotent: once ended there is nothing left to match, and manual
+  // assignments (source 'caseload' / 'manual') are untouched.
   try {
     const [result] = await pool.query(
       `UPDATE residentAssignments
@@ -1232,7 +1257,8 @@ async function runMigrations() {
                              '[Ended: automatic assignment, not made in the Houseparent Module]')
         WHERE status = 'Active'
           AND LOWER(TRIM(assignmentType)) = 'houseparent'
-          AND source IN ('system', 'admission', 'admission-update')`
+          AND source IN ('system', 'admission', 'admission-update')
+          AND (createdBy IS NULL OR LOWER(TRIM(createdBy)) IN ('system', 'seed'))`
     );
     if (result?.affectedRows) {
       console.log(`Migration: ended ${result.affectedRows} automatic Houseparent assignment(s); assign Case Load Managers from the Houseparent Module.`);
@@ -2530,6 +2556,30 @@ async function runMigrations() {
   } catch (err) {
     console.warn('Migration warning (education_records nullability):', err.message);
   }
+
+  // The audit columns on `education_records`.
+  //
+  // `CREATE TABLE IF NOT EXISTS` above is a no-op on a table that already
+  // exists, so any column that was added to that CREATE TABLE body *after* the
+  // table was first provisioned is missing from the deployed database. That is
+  // exactly what happened here: `education_records` predates `createdAt` /
+  // `updatedAt` being in the body, and nothing ever added them.
+  //
+  // Measured on the live database 2026-09-26:
+  //   GET /api/education-records          -> 400 "Database error occurred"
+  //   GET /api/education-records/NOPE     -> 404 "education_records not found"
+  // The second call proves the table exists (it runs `SELECT * ... WHERE id = ?`
+  // with no ORDER BY); the first only adds `ORDER BY createdAt DESC`, so the
+  // column is what is missing. Every role's Education list was therefore broken,
+  // and the error was masked to a message that named no column.
+  //
+  // The three child tables below were checked at the same time and answered 200,
+  // so their audit columns are present and are deliberately not touched here.
+  //
+  // `ensureColumn` introspects first, so this is a no-op where the columns
+  // already exist and cannot fail on a fresh database.
+  await ensureColumn('education_records', 'createdAt', 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP');
+  await ensureColumn('education_records', 'updatedAt', 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP');
 
   // ── Quarterly Progress Report ──
   // Created here rather than only in schema.sql so an already-provisioned

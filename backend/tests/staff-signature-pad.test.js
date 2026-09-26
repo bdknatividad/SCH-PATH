@@ -430,9 +430,11 @@ const INCIDENT_MODAL = path.join(COMPONENTS, 'IncidentReportModal.tsx');
 const SCHEMA = path.resolve(__dirname, '../src/database/schema.sql');
 const SERVER = path.resolve(__dirname, '../src/server.js');
 
-const FORM08_SIGNOFFS = ['reportedBy', 'endorsedTo', 'checkedBy', 'notedBy'];
+// The four sign-offs the template carries plus the Psychological Support Staff
+// box the merged Form 08 added below "SWO I - Case Manager".
+const FORM08_SIGNOFFS = ['reportedBy', 'endorsedTo', 'checkedBy', 'notedBy', 'psychStaff'];
 
-test('Form 08 has a signature column for each of its four sign-offs', () => {
+test('Form 08 has a signature column for each of its five sign-offs', () => {
   const schema = read(SCHEMA);
   const table = schema.match(/CREATE TABLE (?:IF NOT EXISTS )?incidentReports \(([\s\S]*?)\n\)\s*(?:ENGINE|;)/);
   assert.ok(table, 'the incidentReports table definition was not found');
@@ -457,7 +459,7 @@ test('an existing database gets the Form 08 signature columns added on boot', ()
   }
 });
 
-test('the Form 08 controller stores and stamps all four signatures', () => {
+test('the Form 08 controller stores and stamps all five signatures', () => {
   const source = read(INCIDENT_CONTROLLER);
 
   for (const field of FORM08_SIGNOFFS) {
@@ -510,10 +512,14 @@ test('every Form 08 signature box is measured against the real template', () => 
   //   * the "Reported by / Endorsed to" labels occupy 689–697
   //   * the "Checked by / Noted by" labels occupy 762–770
   //   * nothing at all is drawn between 652 and 688, or between 714 and 761
-  // so a box must stay inside one of those two blank bands.
+  //   * the template ends at top = 785 (the "Checked by / Noted by" rules); the
+  //     role lines below them are drawn at 789 and the Psychological Support
+  //     Staff's printed name at 836, so 798–836 is the third blank band
+  // so a box must stay inside one of those three blank bands.
   const bands = [
     { from: 652, to: 688 },
     { from: 714, to: 761 },
+    { from: 798, to: 836 },
   ];
 
   for (const [name, box] of Object.entries(boxes)) {

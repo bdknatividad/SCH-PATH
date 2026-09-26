@@ -137,17 +137,15 @@ function loadLayout() {
     }
   }
 
-  // The four designated names are facts, not coordinates, but they live in the same
-  // file for the same reason: the browser print view prints them too, and a
-  // published copy that disagrees with the printed one is the defect this prevents.
-  // The Houseparent's line is deliberately absent — it is whoever prepared the
-  // report, so it comes from the record, not from a fixed list.
-  for (const key of ['adminofficer', 'swo1', 'swo2', 'swo3']) {
-    const person = raw.designatedPersonnel && raw.designatedPersonnel[key];
-    if (!person || !String(person.name || '').trim()) {
-      throw new Error(`The TRI layout is missing the designated name for "${key}" (${LAYOUT_PATH})`);
-    }
-  }
+  // The two lines whose names the form pre-prints are declared on the slot table
+  // above (`printedName`), not here. A `designatedPersonnel` block used to be
+  // required at this point; it was the other half of a design that stored the
+  // four officials separately, and after the two designs were reconciled the
+  // layout no longer carries it — so the check threw on every load and no TRI
+  // PDF could be generated at all. The names have one home now, and this is the
+  // guard that keeps it that way: every line the writer stamps must be declared
+  // in `TRI_SIGNATORY_SLOTS` and have its geometry in the layout, which the loop
+  // above already enforces.
 
   cachedLayout = raw;
   return cachedLayout;
@@ -266,7 +264,6 @@ async function stampSignature(pdf, page, dataUrl, box) {
     const scale = Math.min(box.width / image.width, box.height / image.height);
     const width = image.width * scale;
     const height = image.height * scale;
-    const anchorWidth = nameWidth != null ? nameWidth : (line.nameInkWidth || box.width);
     page.drawImage(image, {
       x: box.x + (box.width - width) / 2,
       y: box.y,

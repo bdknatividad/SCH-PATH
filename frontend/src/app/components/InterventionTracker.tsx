@@ -286,18 +286,21 @@ export function InterventionTracker({ embedded = false }: { embedded?: boolean }
    * Whether the Form 08 (Incident Report) section has anything to show for this
    * track, and whether the report has come back.
    *
-   * The checklist gate alone is not enough. Sending an Incident Report back for
-   * reassessment reopens every tracker row — that is the whole point of the
-   * decision, and it is what `reopenInterventionForReassessment` does in the
-   * backend. So the checklist stops being complete at exactly the moment this
-   * section has something to say, and gating it on completion alone hid the "For
-   * Reassessment" badge together with the "Fill Out Again" button — the only
-   * control that can answer the decision. The report came back with no way to
-   * resubmit it, which read as the reassessment never reaching the tracker.
+   * The checklist gate alone is not enough. Gating this section on "every row is
+   * Completed" tied a *report* state to a *checklist* state, and the two are not
+   * the same fact: a report the Center Head has sent back has to stay reachable
+   * — with its "For Reassessment" badge and its "Fill Out Again" button, the only
+   * control that can answer the decision — whatever the checklist says. While the
+   * backend also reopened the rows on a reassessment the section vanished at
+   * exactly the moment it had something to say, so the report came back with no
+   * way to resubmit it, which read as the reassessment never reaching the
+   * tracker. The rows are no longer reset (see `reopenInterventionForReassessment`
+   * in `documentController`), but the gate is kept independent of the checklist
+   * anyway so the two can never disagree again.
    *
-   * A 'Failed' report never hits that, because failure deliberately does not
-   * reopen the checklist. It is covered here anyway, so both returned states
-   * read the same and neither depends on the checklist's state to stay visible.
+   * A 'Failed' report never showed the symptom, because failure never reopened
+   * the checklist. It is covered here anyway, so both returned states read the
+   * same and neither depends on the checklist's state to stay visible.
    */
   const form8Section = (track: any) => {
     const report = incidentReportsByViolation[track.violation.id];
@@ -740,9 +743,10 @@ export function InterventionTracker({ embedded = false }: { embedded?: boolean }
                               {/* The Form 08 row appears once every requirement is complete — and
                                   always while its report is Failed / For Reassessment, so "Fill Out
                                   Again" is reachable even when a reassessment has reopened the
-                                  intervention's requirements. */}
-                              {((track.interventions.length > 0 && track.interventions.every((s: any) => s.status === 'Completed'))
-                                || incidentReportNeedsRework(incidentReportsByViolation[track.violation.id])) && (
+                                  intervention's requirements. The gate is `form8Section`, not a
+                                  second copy of the expression, so the caption and the row can
+                                  never disagree about whether the section is showing. */}
+                              {form8Section(track).visible && (
                                 <li className="rounded-lg border border-blue-200 bg-blue-50 p-2 mt-2">
                                   <div className="flex items-center gap-2">
                                     <span className="font-bold shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-[9px] bg-blue-500 text-white">8</span>

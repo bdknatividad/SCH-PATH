@@ -218,15 +218,24 @@ test('the generator stamps the captured Houseparent signature and nothing else',
   // It cannot fabricate a signature, but the Houseparent's own drawn signature is
   // recorded data — it belongs on the exported form, and its absence is exactly the
   // "the signature is missing from the download" defect.
+  //
+  // The line list is `TRI_SIGNATORY_SLOTS` in the writer; the Houseparent's slot is
+  // drawn by its own function because it is the one line whose signature lives in a
+  // column rather than in the `signatories` JSON. Pinning the function name matters:
+  // a stray reference inside the stamping helper once threw a ReferenceError that the
+  // helper's own `catch` swallowed, so every export printed a blank line with no
+  // error anywhere. `drawHouseparentSignature` must be reached and must actually
+  // stamp — see `tri-signature-stamp.test.js`, which generates a PDF and counts the
+  // image XObjects on page 8 rather than trusting the source text.
   assert.match(
     GENERATOR,
-    /drawLineSignature/,
+    /drawHouseparentSignature/,
     'the generator no longer stamps the captured Houseparent signature, so exports print a blank line'
   );
   assert.match(
     GENERATOR,
-    /key: 'houseparent',[\s\S]*?signatureColumn: 'houseparentSignature'/,
-    "the Houseparent's line is no longer in the generator's line list"
+    /stampSignature\(pdf, pages\[HOUSEPARENT_SIGNATURE_BOX\.page\], signatorySignatureOf\(record, 'houseparent'\), HOUSEPARENT_SIGNATURE_BOX\)/,
+    "the Houseparent's line no longer resolves its signature from the record and stamps it into the shared box"
   );
   assert.match(
     GENERATOR,

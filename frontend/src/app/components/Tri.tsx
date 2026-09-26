@@ -20,7 +20,6 @@ import triLayout from '@/shared/triLayout.json';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { CaseLoad } from './CaseLoad';
 import { AnecdotalReports } from './AnecdotalReports';
-import { TriStatistics } from './TriStatistics';
 import { useSubModuleTab } from '@/app/hooks/useSubModuleTab';
 import { useSubModuleTabs } from '@/app/hooks/useSubModuleTabs';
 import { SignaturePadModal } from '@/app/components/SignaturePad';
@@ -496,62 +495,6 @@ async function drawTriSignatures(pdf: any, pages: any[], record: TriRecord, font
     }
   }
   return signed;
-}
-
-/**
- * Stamps the four official lines' printed names and drawn signatures onto the page-8
- * "Assessed by" block of an exported PDF.
- *
- * Mirrors `SIGNATURE_LINES` / `drawLineName` / `drawLineSignature` in the backend
- * writer. On the first row the template is blank, so the name is drawn below the
- * signature — the same order as the Houseparent's line, so each rule reads as the
- * underline of its name. The second row is the template's own exception: it already
- * prints both names correctly below the rule, so nothing is drawn there and only the
- * signature is stamped. Nothing is ever painted white; there is no stale text to hide.
- *
- * A line with no signature, or one that cannot be decoded, is not an error: it is
- * simply left blank, exactly as on the server.
- */
-async function drawTriOfficialSignatures(pdf: any, pages: any[], record: TriRecord, font: any) {
-  for (const line of TRI_OFFICIAL_LINES) {
-    const namePos = line.namePos;
-    const name = designatedLineName(line.key);
-    let nameWidth = 0;
-
-    if (namePos && name) {
-      const namePage = pages[namePos.page];
-      if (namePage) {
-        let size = namePos.size;
-        while (size > 4 && font.widthOfTextAtSize(name, size) > namePos.width) size -= 0.25;
-        nameWidth = font.widthOfTextAtSize(name, size);
-        namePage.drawText(name, { x: namePos.x, y: namePos.y, size, font, color: rgb(0.08, 0.08, 0.08) });
-      }
-    }
-
-    const dataUrl = String((record as any)[line.signatureField] || '');
-    const match = dataUrl.match(/^data:image\/(png|jpeg|jpg);base64,/i);
-    const box = line.signatureBox;
-    const page = pages[box.page];
-    if (!match || !page) continue;
-
-    try {
-      const image = match[1].toLowerCase() === 'png'
-        ? await pdf.embedPng(dataUrl)
-        : await pdf.embedJpg(dataUrl);
-      const scale = Math.min(box.width / image.width, box.height / image.height);
-      const width = image.width * scale;
-      const height = image.height * scale;
-      const anchorWidth = nameWidth || line.nameInkWidth || box.width;
-      page.drawImage(image, {
-        x: box.x + (anchorWidth - width) / 2,
-        y: box.y + (box.height - height) / 2,
-        width,
-        height,
-      });
-    } catch {
-      // Left blank on purpose — see the docblock.
-    }
-  }
 }
 
 /**
@@ -1145,18 +1088,8 @@ function openPrintReport(record: TriRecord, child: any, onError?: (message: stri
     return `<div class="${slot}">${img}${name ? `<div class="name">${escapeHtml(name)}</div>` : ''}<div class="rule">${escapeHtml(label)}</div></div>`;
   };
 
-  // Row 1 is the Houseparent plus the block's first two officials; row 2 is the two
-  // the official form prints itself. One builder, so a line cannot print its name but
-  // not its signature.
-  const officialCellHtml = (key: string) => {
-    const line = TRI_OFFICIAL_LINES.find(l => l.key === key)!;
-    return signatureCellHtml(line.label, designatedLineName(line.key), String((record as any)[line.signatureField] || ''));
-  };
-  const signatureRowOne = signatureCellHtml('Houseparent', signatureName, signatureDataUrl)
-    + officialCellHtml('adminofficer')
-    + officialCellHtml('swo1');
-  const signatureRowTwo = officialCellHtml('swo2') + officialCellHtml('swo3');
-
+  // The block is built from `TRI_SIGNATORIES`, the same table the PDF export
+  // stamps from, so a line cannot print its name but not its signature.
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>TRI ${escapeHtml(getPeriodLabel(record.reportingYear, record.reportingMonth))}</title>
 <style>
   * { box-sizing: border-box; }

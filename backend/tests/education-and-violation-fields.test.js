@@ -183,9 +183,13 @@ test('the Case Load screen warns about residents a month without a manager', () 
   );
 
   // A Houseparent cannot assign a case, so the panel is not shown to them, and
-  // only the Center Head is offered the Assign buttons.
+  // only the roles the API accepts are offered the Assign buttons.
   assert.match(CASELOAD_UI, /\{!isHouseparent && unassignedResidents\.length > 0 && \(/);
-  assert.match(CASELOAD_UI, /const canAssignCaseLoad = normalizedRole === 'centerhead' \|\| normalizedRole === 'admin';/);
+  assert.match(
+    CASELOAD_UI,
+    /const canAssignCaseLoad = normalizedRole === 'centerhead' \|\| normalizedRole === 'admin' \|\| normalizedRole === 'socialworker';/,
+    'the Assign buttons are offered to a role the API refuses, or withheld from one it accepts'
+  );
   assert.match(CASELOAD_UI, /Assign Resident/);
   assert.match(CASELOAD_UI, /Assign HP/);
 });
@@ -199,14 +203,22 @@ test('the one-month warning excludes discharged and already-managed residents', 
   //    list; counting them would make the banner permanently wrong, and it would
   //    be wrong in the direction that matters — it would look like work is
   //    outstanding when it is not.
+  //
+  // Both exclusions are clauses of the same filter, so they are pinned against
+  // that filter rather than against a statement that no longer exists.
+  const block = CASELOAD_UI.match(
+    /const unassignedResidents = useMemo\(\(\) => \{[\s\S]*?\n  \}, \[children, assignedResidentIds\]\);/
+  );
+  assert.ok(block, 'the unassigned-residents list was not found');
+
   assert.match(
-    CASELOAD_UI,
-    /if \(String\(c\.status \|\| ''\) === 'Discharged'\) return false;/,
+    block[0],
+    /String\(c\.status \|\| ''\) !== 'Discharged'/,
     'a discharged resident must not be reported as missing a Case Load Manager'
   );
   assert.match(
-    CASELOAD_UI,
-    /if \(assignedResidentIds\.has\(String\(c\.id\)\)\) return false;/,
+    block[0],
+    /!assignedResidentIds\.has\(String\(c\.id\)\)/,
     'a resident who already has a Case Load Manager must not be reported'
   );
 });

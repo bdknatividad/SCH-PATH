@@ -310,7 +310,6 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
   // Medical Notes and the medical documents are managed by the Nurse and the
   // Center Head only — the same `Health` edit capability the Health module gates
   // its own create/edit on, so the two surfaces cannot disagree.
-  const isAbsconded = children.find(c => c.id === id)?.status === 'Absconded';
   // An absconded resident's record is view-only.
   const canEditMedical = can('Health', 'edit') && !isAbsconded;
   const [isEditingMedicalNotes, setIsEditingMedicalNotes] = useState(false);

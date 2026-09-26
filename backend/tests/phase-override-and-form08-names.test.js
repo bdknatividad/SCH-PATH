@@ -7,12 +7,12 @@
  *     both halves: a button the API refuses is worse than no button, because the
  *     reviewer only finds out after confirming.
  *
- * 23. The printed names on Form 08. Two of the four sign-off lines were left for
- *     the filer to type even though the same two people sign every incident
- *     report, so they could differ — or be left blank — from one report to the
- *     next. "Endorsed to" and "Noted by" are now pre-printed, and the modal
- *     mirrors the PDF builder's constants so the preview cannot disagree with
- *     the paper that comes out.
+ * 23. The printed names on Form 08. "Checked by" and "Noted by" are the same two
+ *     people on every incident report, so they are pre-printed rather than typed:
+ *     leaving them to the filer meant they could differ — or be left blank — from
+ *     one report to the next. "Endorsed to" stays a typed field (the partner's
+ *     Form 08, kept as-is), and the modal mirrors the PDF builder's constants so
+ *     the preview cannot disagree with the paper that comes out.
  */
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -76,48 +76,68 @@ test('the SPA offers Force Advance to exactly the roles the API accepts', () => 
 
 // ── 23. Form 08's pre-printed names ─────────────────────────────────────────
 
-test('Form 08 pre-prints the endorsement and the noted-by name', () => {
+test('Form 08 pre-prints the checked-by and noted-by names, and types the endorsement', () => {
+  // "Endorsed to" is the one sign-off the filer types, so the builder must draw
+  // the caller's value and must not fall back to a hard-coded name.
   assert.match(
     INCIDENT_CONTROLLER,
-    /const FORM08_ENDORSED_TO_NAME = "Ma'am Joyce";/,
-    'the endorsement line is not pre-printed',
+    /const FORM08_ENDORSED_TO_NAME = '';/,
+    'the endorsement line is pre-printed, so the typed value cannot be the one that prints',
   );
   assert.match(
     INCIDENT_CONTROLLER,
-    /const FORM08_NOTED_BY_NAME = 'Sir Francis';/,
-    'the noted-by line does not carry the expected name',
-  );
-  // The typed value must no longer reach the paper, or the pre-printed name
-  // would be overwritten by whatever was typed.
-  assert.match(
-    INCIDENT_CONTROLLER,
-    /drawTextTop\(FORM08_ENDORSED_TO_NAME, 388, 687\.6/,
-    'the endorsement line still draws the typed value',
+    /drawTextTop\(endorsedTo, 388, 687\.6/,
+    'the endorsement line does not draw the typed value',
   );
   assert.doesNotMatch(
     INCIDENT_CONTROLLER,
-    /drawTextTop\(endorsedTo, 388, 687\.6/,
-    'the endorsement line draws the typed value, so the pre-printed name is pointless',
+    /drawTextTop\(FORM08_ENDORSED_TO_NAME, 388, 687\.6/,
+    'the endorsement line draws the constant instead of what was typed',
+  );
+  // The two lines nobody types carry the real names and roles.
+  assert.match(
+    INCIDENT_CONTROLLER,
+    /const FORM08_CHECKED_BY_NAME = 'Francis C\. Patricio, RSW';/,
+    'the checked-by name is not the one the form prints',
+  );
+  assert.match(
+    INCIDENT_CONTROLLER,
+    /const FORM08_NOTED_BY_NAME = 'MARICOR C\. NAVARRO, RSW';/,
+    'the noted-by name is not the one the form prints',
+  );
+  assert.match(
+    INCIDENT_CONTROLLER,
+    /drawTextTop\(FORM08_NOTED_BY_NAME, 361, 776\.4/,
+    'the noted-by line no longer draws the pre-printed name',
   );
 });
 
-test('the record keeps the printed name without discarding what it held', () => {
-  // `endorsedTo || FORM08_ENDORSED_TO_NAME` defaults new reports to the printed
-  // name and leaves an existing value alone, so nothing is overwritten.
-  const defaults = INCIDENT_CONTROLLER.match(/endorsedTo \|\| FORM08_ENDORSED_TO_NAME/g) || [];
+test('the record keeps what it held, and both write paths store the printed names', () => {
+  // The endorsement is stored verbatim; `endorsedTo || null` means a report filed
+  // without one stores NULL rather than a name the filer never typed.
+  const defaults = INCIDENT_CONTROLLER.match(/endorsedTo \|\| null/g) || [];
   assert.equal(
     defaults.length,
     2,
-    `both write paths (create and resubmit) must default endorsedTo; found ${defaults.length}`,
+    `both write paths (create and resubmit) must bind endorsedTo verbatim; found ${defaults.length}`,
+  );
+
+  // Both paths write the two pre-printed names as a pair, so a report can never
+  // be stored with one of them missing.
+  const pairs = INCIDENT_CONTROLLER.match(/FORM08_CHECKED_BY_NAME, FORM08_NOTED_BY_NAME/g) || [];
+  assert.equal(
+    pairs.length,
+    2,
+    `both write paths must store the checked-by and noted-by names; found ${pairs.length}`,
   );
 });
 
 test('the modal shows the same names the PDF stamps', () => {
   // A preview that disagrees with the output is how a wrong name gets signed.
   const pairs = [
-    ["Ma'am Joyce", 'FIXED_ENDORSED_TO_NAME'],
     ['Francis C. Patricio, RSW', 'FIXED_CHECKED_BY_NAME'],
-    ['Sir Francis', 'FIXED_NOTED_BY_NAME'],
+    ['MARICOR C. NAVARRO, RSW', 'FIXED_NOTED_BY_NAME'],
+    ['Joyce Anne D.C. Tenorio', 'FIXED_PSYCH_STAFF_NAME'],
   ];
   for (const [name, constant] of pairs) {
     const declaration = new RegExp(`const ${constant} = ["']${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["'];`);
@@ -134,17 +154,28 @@ test('the modal shows the same names the PDF stamps', () => {
   }
 });
 
-test('the endorsement line is no longer typed', () => {
-  assert.doesNotMatch(
-    INCIDENT_MODAL,
-    /aria-label="Endorsed to" value=\{form\.endorsedTo\}/,
-    'the endorsement line is still an editable field, so the typed value cannot match the printed name',
-  );
+test('the endorsement line is typed, and the pre-printed lines are not', () => {
+  // The endorsement is the one line the filer fills in, so it has to be an
+  // editable field — and the modal must not carry a constant for it, because a
+  // constant is what would silently win over what was typed.
   assert.match(
     INCIDENT_MODAL,
-    /aria-label="Endorsed to printed name"/,
-    'the endorsement line is neither typed nor shown',
+    /aria-label="Endorsed to"[^>]*value=\{form\.endorsedTo\}/,
+    'the endorsement line is not an editable field',
   );
+  assert.doesNotMatch(
+    INCIDENT_MODAL,
+    /FIXED_ENDORSED_TO_NAME/,
+    'the modal still declares a fixed endorsement name, so the preview can disagree with what was typed',
+  );
+  // The two pre-printed lines are shown, not typed.
+  for (const label of ['Checked by printed name', 'Noted by printed name']) {
+    assert.match(
+      INCIDENT_MODAL,
+      new RegExp(`aria-label="${label}"`),
+      `the ${label} line is not shown`,
+    );
+  }
 });
 
 // ── What actually lands on the page ─────────────────────────────────────────
@@ -189,7 +220,10 @@ async function drawnText(buffer) {
   return runs;
 }
 
-const SENTINEL = 'TYPED-VALUE-MUST-NOT-PRINT';
+// Short enough to stay on one line at the endorsement's `maxWidth: 155` — a
+// wrapped value would be split across several `Tj` runs and the search below
+// would miss it.
+const TYPED_ENDORSEE = 'TYPED-ENDORSEE';
 
 async function form08Runs(overrides = {}) {
   const { buildForm08Pdf } = require('../src/controllers/incidentReportController');
@@ -202,7 +236,7 @@ async function form08Runs(overrides = {}) {
     actionTaken: 'Action taken.',
     result: 'Result.',
     reportedBy: 'HP 1',
-    endorsedTo: SENTINEL,
+    endorsedTo: TYPED_ENDORSEE,
     checkedBy: null,
     notedBy: null,
     reportedBySignature: null,
@@ -214,21 +248,23 @@ async function form08Runs(overrides = {}) {
   return drawnText(buffer);
 }
 
-test('the printed names are on the page, and the typed endorsement is not', async () => {
+test('the pre-printed names are on the page, and so is the typed endorsement', async () => {
   const runs = await form08Runs();
   const texts = runs.map((run) => run.text);
 
-  for (const name of ["Ma'am Joyce", 'Francis C. Patricio, RSW', 'Sir Francis']) {
+  for (const name of ['Francis C. Patricio, RSW', 'MARICOR C. NAVARRO, RSW', 'Joyce Anne D.C. Tenorio']) {
     assert.ok(
       texts.some((text) => text.includes(name)),
       `${name} is not drawn on Form 08, so the form prints without its signatory`,
     );
   }
+  // The endorsement is the filer's to fill in: what was typed has to reach the
+  // paper, or the field would silently print nothing.
   assert.ok(
-    !texts.some((text) => text.includes(SENTINEL)),
-    'the typed endorsement value reached the page — the pre-printed name can be overwritten',
+    texts.some((text) => text.includes(TYPED_ENDORSEE)),
+    'the typed endorsement value never reached the page',
   );
-  // "Reported by" is the one line that is still typed.
+  // "Reported by" is the other typed line.
   assert.ok(texts.includes('HP 1'), 'the typed Reported-by name is missing from the form');
 });
 
@@ -240,8 +276,8 @@ test('the endorsement name sits on the top row and the noted-by name on the bott
   // hence the noted-by line, which is lower on the page, has the smaller y.
   const runs = await form08Runs();
   const at = (needle) => runs.find((run) => run.text.includes(needle));
-  const endorsed = at("Ma'am Joyce");
-  const noted = at('Sir Francis');
+  const endorsed = at(TYPED_ENDORSEE);
+  const noted = at('MARICOR C. NAVARRO, RSW');
   const checked = at('Francis C. Patricio');
 
   assert.ok(endorsed, 'the endorsement name was not drawn');
@@ -254,8 +290,7 @@ test('the endorsement name sits on the top row and the noted-by name on the bott
     noted.y < endorsed.y,
     `the noted-by name (y=${noted.y}) is not below the endorsement name (y=${endorsed.y})`,
   );
-  // And the two bottom-row names share a row, which is where the duplicate shows
-  // up: "Checked by" and "Noted by" are the same person on this form.
+  // And the two bottom-row names share a row.
   assert.ok(
     Math.abs(checked.y - noted.y) < 5,
     `the checked-by and noted-by names are not on the same row (y=${checked.y} vs ${noted.y})`,

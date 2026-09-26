@@ -29,9 +29,9 @@ const baseController = createController('violations');
  *
  * Verification is a capability, not a role: the Social Worker, the Psychological
  * Staff and the Center Head hold `Violations:verify`, and everybody else with the
- * module (currently the Houseparent) holds `view` alone. Reading it off the
- * access snapshot keeps the answer identical to the one the SPA gets from
- * `usePermissions()`, so the tab and the API cannot disagree.
+ * module (currently the Houseparent, which holds `view` and `create`) does not.
+ * Reading it off the access snapshot keeps the answer identical to the one the
+ * SPA gets from `usePermissions()`, so the tab and the API cannot disagree.
  */
 function canVerify(req) {
   return hasPermission(snapshotFor(req), 'Violations', 'verify');

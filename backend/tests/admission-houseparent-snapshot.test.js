@@ -196,9 +196,12 @@ test('both slip renderers print the admission row\'s own value', () => {
   }
 });
 
-test('the edit form prefers the stored snapshot over the current assignment', () => {
-  // `source` is the latest *admission* row, so the assignment is a fallback for
-  // rows that predate the field — never an override of a recorded value.
+test('the edit form takes the Houseparent from the admission, never the assignment', () => {
+  // `source` is the latest *admission* row. The Case Load Manager
+  // (residentAssignments) is a separate field, so restoring the slip from it
+  // would make the HP on Duty follow a later reassignment — the exact thing the
+  // snapshot exists to prevent. The fallback was removed deliberately; it is
+  // pinned as an absence so it cannot come back in one line.
   const flat = flatten(childRecordsTsx);
   assert.match(
     flat,
@@ -207,12 +210,21 @@ test('the edit form prefers the stored snapshot over the current assignment', ()
   );
   assert.match(
     flat,
-    /houseparentOnDuty: source\.houseparentOnDuty \|\| assignment\?\.userLabel \|\| ''/,
-    'the stored name must win over the current assignment'
+    /houseparentOnDuty: source\.houseparentOnDuty \|\| ''/,
+    'the stored name must be restored from the admission alone'
   );
   assert.match(
     flat,
-    /assignedHouseparentId: source\.houseparentUserId \|\| assignment\?\.userId \|\| ''/,
-    'the stored id must win over the current assignment'
+    /assignedHouseparentId: source\.houseparentUserId \|\| ''/,
+    'the stored id must be restored from the admission alone'
+  );
+  // The two matches above are exact: `... || ''` has to be the end of the
+  // expression, so a reintroduced `|| assignment?.userId || ''` would fail them
+  // rather than slip through. The name fallback was `assignment?.userLabel`,
+  // which appears nowhere else in the file, so its absence is safe to pin too.
+  assert.doesNotMatch(
+    flat,
+    /assignment\?\.userLabel/,
+    'the edit form falls back to the current Case Load assignment for the HP on Duty name'
   );
 });

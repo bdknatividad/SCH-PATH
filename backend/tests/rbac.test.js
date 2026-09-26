@@ -817,16 +817,17 @@ test('every module the Houseparent holds declares its tabs, so none default open
   }
 });
 
-test('the Houseparent views incidents and interventions but creates neither', () => {
+test('the Houseparent reads incidents and logs them, but edits and verifies neither', () => {
   const snapshot = rbac.buildAccessSnapshot({ role: 'houseparent' });
 
   // "View Violation List" / "View Intervention Tracker".
   assert.equal(rbac.can(snapshot, 'Violations', 'view'), true);
 
-  // "Cannot: Create/Edit/Delete incidents unless explicitly permitted
-  // elsewhere." An incident is a violation, and nothing grants the role the
-  // capability, so every write verb is refused rather than merely unmentioned.
-  for (const permission of ['create', 'edit', 'delete', 'verify', 'approve']) {
+  // Item 37: the Houseparent who witnessed the incident files it, so `create` is
+  // granted. Everything past that — changing or removing a record, and the two
+  // reviewer sign-offs — stays with the roles the workflow assigns it to.
+  assert.equal(rbac.can(snapshot, 'Violations', 'create'), true, 'the Houseparent can no longer log a violation');
+  for (const permission of ['edit', 'delete', 'verify', 'approve']) {
     assert.equal(
       rbac.can(snapshot, 'Violations', permission),
       false,
@@ -840,10 +841,10 @@ test('the Houseparent grants no capability the specification withholds, on any m
 
   const allowed = {
     Dashboard: ['view'],
-    Activities: ['view', 'create', 'edit', 'export'],
+    Activities: ['view', 'export'],
     Assessments: ['view', 'export'],
     Houseparent: ['view', 'create', 'edit', 'export'],
-    Violations: ['view'],
+    Violations: ['view', 'create'],
   };
 
   for (const permission of rbac.PERMISSION_KEYS) {
@@ -869,10 +870,11 @@ test('the Houseparent manages TRI records and anecdotal reports within its own m
   // Deleting a TRI record is a reviewer action, not a Houseparent one.
   assert.equal(rbac.can(snapshot, 'Houseparent', 'delete'), false);
 
-  // "Access Activities" / "Access Assessments" — read plus the day-to-day
-  // activity writes, but scheduling an assessment is not an access capability.
+  // "Access Activities" / "Access Assessments" — read plus export. Scheduling or
+  // editing an activity is not an access capability, and the merged role matrix
+  // grants neither verb on either module.
   assert.equal(rbac.can(snapshot, 'Activities', 'view'), true);
-  assert.equal(rbac.can(snapshot, 'Activities', 'create'), true);
+  assert.equal(rbac.can(snapshot, 'Activities', 'create'), false);
   assert.equal(rbac.can(snapshot, 'Assessments', 'view'), true);
   assert.equal(rbac.can(snapshot, 'Assessments', 'create'), false);
   assert.equal(rbac.can(snapshot, 'Assessments', 'edit'), false);
@@ -1137,10 +1139,11 @@ test('a non-full-access role is held to its declared matrix', () => {
   assert.ok(rbac.hasModuleAccess(snapshot, 'Violations'));
   assert.equal(rbac.hasModuleAccess(snapshot, 'Education'), false, 'houseparent has no Education module');
   assert.equal(rbac.hasModuleAccess(snapshot, 'Account Management'), false);
-  // The Houseparent specification grants "View Violation List" and "View
-  // Intervention Tracker" and forbids creating, editing or deleting incidents.
+  // The merged Houseparent specification grants "View Violation List", "View
+  // Intervention Tracker" and the ability to log the incident it witnessed;
+  // editing, deleting and verifying an incident belong to other roles.
   assert.equal(rbac.can(snapshot, 'Violations', 'view'), true);
-  assert.equal(rbac.can(snapshot, 'Violations', 'create'), false);
+  assert.equal(rbac.can(snapshot, 'Violations', 'create'), true);
   assert.equal(rbac.can(snapshot, 'Violations', 'edit'), false);
   assert.equal(rbac.can(snapshot, 'Violations', 'delete'), false);
   assert.equal(rbac.can(snapshot, 'Violations', 'verify'), false);
@@ -2154,14 +2157,21 @@ test('the Houseparent is refused every module it does not hold over HTTP', async
   });
 });
 
-test('the Houseparent is refused incident writes over HTTP', async () => {
+test('the Houseparent may log an incident but not edit, delete or verify one', async () => {
   const app = loadApp(createPoolStub(houseparentAccount()));
 
   await withServer(app, async (base) => {
+    // Logging is granted (item 37), so the request has to get past the guards and
+    // fail later on the empty body — a 403 here would mean the SPA's "log a
+    // violation" form is dead on arrival.
+    const create = await send(base, '/api/violations', 'houseparent', { method: 'POST', body: {} });
+    assert.notEqual(create.status, 403, 'the Houseparent is refused the incident write the role grants');
+    assert.ok(create.status < 500, `logging an incident blew up with ${create.status}`);
+
     for (const [method, route] of [
-      ['POST', '/api/violations'],
       ['PUT', '/api/violations/V1'],
       ['DELETE', '/api/violations/V1'],
+      ['POST', '/api/violations/V1/review'],
     ]) {
       const response = await send(base, route, 'houseparent', { method, body: {} });
       assert.equal(response.status, 403, `${method} ${route} must be refused to the Houseparent`);

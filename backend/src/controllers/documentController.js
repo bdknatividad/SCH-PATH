@@ -1155,57 +1155,24 @@ async function getAllowedForRole(req, res, next) {
 const APPROVAL_STATUSES = ['Approved', 'Rejected', 'Reassessment', 'Under Review'];
 
 /**
- * Reopen the intervention a Form 08 belongs to when the report is sent back for
- * reassessment.
- *
- * "For Reassessment" means the Incident Report is not acceptable and has to be
- * produced again. Until now the decision wrote only `incidentReports.status`:
- * the violation's tracker rows stayed 'Completed'. The Intervention Tracker
- * therefore kept showing the case as finished, and — worse — every completion
- * gate was already satisfied by work that has to be redone, because
- * `violationController.markDone` and the Form 08 filing both require all tracker
- * rows 'Completed'. Reopening the intervention is what makes the decision mean
- * anything.
- *
- * Two writes, in one transaction:
- *
- *   - `intervention_tracker` back to 'In Progress', completion markers cleared.
- *     This is what the Tracker lists, what its counts read, and what both
- *     completion gates check. Reversible from the UI: the Tracker's own
- *     "Mark Complete" button puts the row back to 'Completed'.
- *
- *   - `violations` moved off 'Resolved'. The Tracker's active list excludes
- *     'Resolved', so leaving it there would keep the reopened intervention filed
- *     under Done even though its rows are pending again. Only a Resolved
- *     violation is moved — a violation still in progress is already pending, and
- *     its status is not ours to rewrite. Reversible via Mark Done.
- *
- * `intervention_requirements` is deliberately NOT reset, and that is worth
- * spelling out because resetting it looks like the obvious completion of this
- * fix. A requirement row only ever becomes 'Done' through the linked Assessment
- * created when the violation was verified (`violationController.review`), and
- * both paths that could set it back to 'Done' are unreachable afterwards:
- * `PUT /violation-guide/intervention-requirements/:id` has no caller in the SPA,
- * and the Assessments list refuses to re-complete an assessment that is already
- * 'Completed' (`item.status !== 'Completed'`). Resetting the rows would
- * therefore be irreversible through the UI, and `markDone` — which requires
- * every requirement 'Done' — could never pass again: the intervention would be
- * reopened with no way to close it. Leaving them alone costs nothing, because
- * every gate that matters also checks the tracker rows reset above, so the
- * reopened intervention is blocked on the tracker regardless.
- *
- * A 'Failed' decision deliberately does not come through here: it asks for the
- * report to be filled out again, not for the intervention to be reopened.
- *
- * @param {string} violationId - The violation the Form 08 was raised against.
- * @param {Object} [actor] - The authenticated user making the decision.
- */
-/**
  * A returned Incident Report is reopened for the form itself only. Prescribed
  * interventions and their linked assessments are historical/completed work and
  * must never be reset by a document review decision. The same violation remains
  * in its existing state; the Intervention Tracker explicitly surfaces the
  * returned Form 08 from the same incident record.
+ *
+ * The earlier version of this helper moved `intervention_tracker` rows back to
+ * 'In Progress' and pulled the violation off 'Resolved'. That was superseded:
+ * the decision returns the *report*, not the work. Resetting the rows also made
+ * the decision irreversible through the UI, because a requirement row only ever
+ * becomes 'Done' via the linked Assessment and neither path back is reachable
+ * from the SPA — so `markDone`, which requires every requirement 'Done', could
+ * never pass again. The reopened work is blocked on the Form 08 instead: the
+ * Tracker keeps "Fill Out Again" reachable and Mark Done stays disabled until
+ * the resubmitted report is approved.
+ *
+ * @param {string} violationId - The violation the Form 08 was raised against.
+ * @param {Object} [actor] - The authenticated user making the decision.
  */
 async function reopenInterventionForReassessment(violationId, actor) {
   // Kept as a no-op compatibility helper for older callers/tests. Reassessment

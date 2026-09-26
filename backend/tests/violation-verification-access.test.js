@@ -237,13 +237,22 @@ test('the SPA gates both verification surfaces on the same capability', () => {
   );
 });
 
-test('the Houseparent matrix grants the Violation List and nothing more', () => {
+test('the Houseparent matrix grants the Violation List and the ability to log, and nothing more', () => {
   const definition = JSON.parse(read(path.join(SRC, 'config/rbac.definition.json')));
   const houseparent = definition.roles.houseparent;
 
+  // Item 37: the Houseparent who witnessed the incident files it, so `create` is
+  // granted alongside the list. Everything past that — editing, deleting and the
+  // two reviewer sign-offs — is other roles' work.
   assert.deepEqual(
     houseparent.permissions.Violations,
-    ['view'],
-    'the Houseparent reads incidents; logging and verifying are other roles\' work',
+    ['view', 'create'],
+    'the Houseparent lost the Violation List or the ability to log a violation',
   );
+  for (const withheld of ['edit', 'delete', 'verify', 'approve']) {
+    assert.ok(
+      !houseparent.permissions.Violations.includes(withheld),
+      `the Houseparent must not hold Violations:${withheld}`,
+    );
+  }
 });

@@ -176,31 +176,32 @@ test('the generator stamps the saved signature onto the Houseparent line', () =>
   const source = read(PDF);
 
   assert.match(source, /const HOUSEPARENT_SIGNATURE_BOX/, 'the signature box is not defined');
-  // The Houseparent's line is the first entry of the one line list the writer
-  // iterates, so there is a single stamping path for all five lines.
-  assert.match(source, /const SIGNATURE_LINES = \[/, 'the writer has no line list');
+  // The five lines of the block are declared once, in `TRI_SIGNATORY_SLOTS`, and
+  // the writer iterates them — so there is a single stamping path.
+  assert.match(source, /const TRI_SIGNATORY_SLOTS = \[/, 'the writer has no line list');
   assert.match(
     source,
-    /key: 'houseparent',[\s\S]*?signatureColumn: 'houseparentSignature'/,
+    /\{ slot: 'houseparent', title: 'Houseparent', hasName: true \}/,
     "the Houseparent's line is not in the writer's line list",
   );
-  assert.match(source, /await drawLineSignature\(pdf, pages, record, line, nameWidth\)/, 'the signature is never stamped');
-  // The drawing is read through the line's own column, so a signature can never be
-  // stamped from another line's field.
+  // The Houseparent's signature is the one line that lives in its own column
+  // rather than in the `signatories` JSON, so it has its own entry point.
   assert.match(
     source,
-    /String\(\(record && record\[line\.signatureColumn\]\) \|\| ''\)/,
-    'the generator never reads the stored signature',
+    /async function drawHouseparentSignature\(pdf, pages, record\) \{[\s\S]*?return stampSignature\(pdf, pages\[HOUSEPARENT_SIGNATURE_BOX\.page\], signatorySignatureOf\(record, 'houseparent'\), HOUSEPARENT_SIGNATURE_BOX\);/,
+    'the signature is never stamped',
   );
+  // Every line resolves its signature through the slot accessor, so a signature
+  // can never be stamped from another line's field.
   assert.match(
     source,
-    /key: 'houseparent',[\s\S]*?signatureColumn: 'houseparentSignature'/,
-    "the Houseparent's line no longer reads the Houseparent signature column",
+    /function signatorySignatureOf\(record, slot\) \{[\s\S]*?slot === 'houseparent'[\s\S]*?record\.houseparentSignature[\s\S]*?signatoriesOf\(record\)\[slot\]\?\.signature/,
+    'the generator never reads the stored signature through the line\'s own field',
   );
   assert.match(source, /page\.drawImage\(/, 'the signature image is never drawn');
   assert.match(
     source,
-    /export[\s\S]*HOUSEPARENT_SIGNATURE_BOX|HOUSEPARENT_SIGNATURE_BOX,\n\};/,
+    /module\.exports = \{[\s\S]*?\bHOUSEPARENT_SIGNATURE_BOX,/,
     'the box is not exported, so a test cannot pin its geometry'
   );
 });
@@ -257,11 +258,18 @@ test('the printed Houseparent name is drawn below the signature, above the rule'
   const source = read(PDF);
 
   assert.match(source, /const HOUSEPARENT_NAME_POS/, 'the name position is not defined');
-  assert.match(source, /drawLineName\(pages, layout, line, record, bold\)/, 'the name is never drawn');
+  assert.match(source, /drawHouseparentName\(pages, record, bold\)/, 'the name is never drawn');
   assert.match(
     source,
     /record\.houseparentSignedBy \|\| record\.submittedBy/,
     'the name is not taken from the record, so the line cannot fill itself in'
+  );
+  // The name typed into the line's own text holder wins over the fallback, so a
+  // renamed signatory does not reprint the account that happened to submit it.
+  assert.match(
+    source,
+    /const typed = sanitize\(signatoriesOf\(record\)\.houseparent\?\.name \|\| ''\);/,
+    'the typed name in the text holder is no longer preferred'
   );
   assert.match(source, /module\.exports[\s\S]*HOUSEPARENT_NAME_POS/, 'the name position is not exported');
 });
@@ -296,8 +304,15 @@ test('the stamp lands on the last page, where the signature block is printed', (
   assert.equal(box.page, 7, `the signature is stamped on page index ${box.page}, not the signature page`);
   assert.match(
     read(PDF),
-    /pages\[line\.box\.page\]/,
-    'the stamp ignores the line\'s box page and always draws on page 1'
+    /pages\[HOUSEPARENT_SIGNATURE_BOX\.page\]/,
+    'the stamp ignores the box\'s page and always draws on page 1'
+  );
+  // The other four lines take their page from the layout, not from a constant, so
+  // moving the block in `triLayout.json` moves the stamp with it.
+  assert.match(
+    read(PDF),
+    /pages\[geometry\.page\]/,
+    'the other lines ignore their layout geometry\'s page'
   );
 });
 
@@ -311,25 +326,43 @@ test('the exported document says which lines carry a signature', () => {
   assert.match(source, /pdf\.setSubject\(/, 'the PDF subject is gone');
   assert.match(
     source,
-    /signedRoles\.length[\s\S]*?Left blank:[\s\S]*?blankRoles\.join/,
-    'the subject no longer says which lines are signed and which are still blank',
+    /\$\{signed\} of \$\{total\} signature lines are signed/,
+    'the subject no longer says how many lines are signed',
   );
-  // Every line is classified by what the stamping call actually returned, so a line
-  // cannot be reported as signed when no drawing was placed.
   assert.match(
     source,
-    /const stamped = await drawLineSignature\(pdf, pages, record, line, nameWidth\)/,
+    /the remaining signature lines are blank/,
+    'the subject no longer says that the unsigned lines are blank',
+  );
+  assert.match(
+    source,
+    /Signature lines are blank; this is not the signed original\./,
+    'the fully-unsigned subject is gone',
+  );
+  // Every line is classified by what the stamping call actually returned, so a line
+  // cannot be reported as signed when no drawing was placed. The Houseparent's line
+  // has its own call; the other four are counted by `drawOtherSignatories`, which
+  // increments only when `stampSignature` resolved true.
+  assert.match(
+    source,
+    /const houseparentSigned = await drawHouseparentSignature\(pdf, pages, record\)/,
     'the stamping result is not captured, so the subject cannot report it',
   );
   assert.match(
     source,
-    /\(stamped \? signedRoles : blankRoles\)\.push\(line\.label\)/,
+    /const othersSigned = await drawOtherSignatories\(pdf, pages, record, layout, bold\)/,
+    'the other lines\' stamping result is not captured',
+  );
+  assert.match(
+    source,
+    /if \(await stampSignature\(pdf, page, signatorySignatureOf\(record, slot\), box\)\) signed \+= 1;/,
     'a stamped line is not being recorded as signed',
   );
-  // And the labels come from the line list, so a rename cannot leave the subject
-  // naming a line the form no longer has.
-  assert.match(source, /label: 'Houseparent'/, 'the Houseparent line has no label for the subject');
-  assert.match(source, /label: 'SWO I\/Case Manager'/, 'the SWO I line has no label for the subject');
+  // And the count is over the declared line list, so a rename cannot leave the
+  // subject naming a line the form no longer has.
+  assert.match(source, /const total = TRI_SIGNATORY_SLOTS\.length;/, 'the subject no longer counts the declared lines');
+  assert.match(source, /title: 'Houseparent'/, 'the Houseparent line has no title');
+  assert.match(source, /title: 'SWO I \/ Case Manager'/, 'the SWO I line has no title');
 });
 
 /* ================================================================

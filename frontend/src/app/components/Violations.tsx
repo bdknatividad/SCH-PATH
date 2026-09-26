@@ -459,12 +459,24 @@ export function Violations() {
   // /resident-assignments/my-residents — the signed-in HP's active Case Load,
   // by account id), not from whatever the page happens to have cached.
   const [myAssignedResidents, setMyAssignedResidents] = useState<Child[] | null>(null);
+  /**
+   * Whether the Case Load request itself failed, as opposed to succeeding and
+   * returning nobody.
+   *
+   * Both outcomes leave the picker empty, and the empty-state copy below sends
+   * the Houseparent to a Center Head to have residents assigned — the wrong
+   * remedy, and a confusing one, when the real cause was a failed request. The
+   * two outcomes are kept apart so each can say something true.
+   */
+  const [myAssignedResidentsError, setMyAssignedResidentsError] = useState(false);
   const loadMyAssignedResidents = async () => {
     try {
       const result = await request<{ success: boolean; data?: Child[] }>('/resident-assignments/my-residents');
       setMyAssignedResidents((result?.data || []).filter((c) => c && c.status === 'Active'));
+      setMyAssignedResidentsError(false);
     } catch {
       setMyAssignedResidents([]);
+      setMyAssignedResidentsError(true);
     }
   };
   const residentChoices: Child[] = isHouseparentUser ? (myAssignedResidents || []) : children;
@@ -1201,7 +1213,14 @@ export function Violations() {
                 <div className="max-h-44 overflow-y-auto p-2">
                   <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
                     {isHouseparentUser && myAssignedResidents !== null && residentChoices.length === 0 && (
-                      <p className="col-span-full px-1 py-2 text-xs text-gray-500">No residents are assigned to you yet. A Center Head or Social Worker assigns them in Houseparent → Case Load.</p>
+                      myAssignedResidentsError ? (
+                        <div className="col-span-full flex flex-wrap items-center gap-2 px-1 py-2">
+                          <p className="text-xs text-red-600">Your assigned residents could not be loaded, so this list is empty. This is a loading failure, not a missing assignment.</p>
+                          <Button type="button" variant="outline" className="h-7 px-2 text-xs" onClick={() => { void loadMyAssignedResidents(); }}>Retry</Button>
+                        </div>
+                      ) : (
+                        <p className="col-span-full px-1 py-2 text-xs text-gray-500">No residents are assigned to you yet. A Center Head or Social Worker assigns them in Houseparent → Case Load.</p>
+                      )
                     )}
                     {filteredResidentChoices.map((child) => {
                       const checked = selectedResidentIds.includes(child.id);

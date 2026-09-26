@@ -23,13 +23,11 @@ const { ApiError } = require('../middleware/errorHandler');
 const { snapshotFor } = require('../middleware/rbac');
 const { hasModuleAccess } = require('../config/rbac');
 const { loadResidentScope } = require('../utils/residentScope');
-
-/** Today's date in Asia/Manila as `YYYY-MM-DD`, whatever the server's timezone. */
-function manilaToday(now = new Date()) {
-  return new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit',
-  }).format(now);
-}
+// The facility's "today" comes from the one shared helper. A local copy of the
+// `Intl.DateTimeFormat` call was here and was removed: two copies of the
+// timezone rule is how the reporting calendar drifts, and this file already
+// exports `manilaToday` so the duplicate was invisible from the outside.
+const { manilaToday } = require('../utils/triPeriod');
 
 function parseJson(value) {
   if (Array.isArray(value)) return value;

@@ -344,8 +344,27 @@ export interface AccessSubject {
   subModules?: Record<string, string[]> | string[] | string | null;
 }
 
+/**
+ * Is this already a resolved snapshot, or a subject that still needs resolving?
+ *
+ * The test has to key on `modules`, not on `fullAccess`. `AuthContext` stores
+ * `fullAccess` on the session user next to a null `access`, so testing for that
+ * key alone classified the *user object* as a snapshot, and the very next read —
+ * `snapshot.modules.some(...)` in `hasModuleAccess` — threw
+ * `Cannot read properties of undefined (reading 'some')`, which the error
+ * boundary turned into a whole-page failure.
+ *
+ * It was reachable for any session restored from localStorage that carries no
+ * `access` field, i.e. every role that is not a full-access role; a full-access
+ * role escaped only because `hasModuleAccess` returns before it touches
+ * `modules`.
+ *
+ * `buildAccessSnapshot` always sets `modules` as an array — in the full-access
+ * branch and in the merged-grants branch — so requiring the array is exact.
+ */
 function isSnapshot(subject: unknown): subject is AccessSnapshot {
-  return Boolean(subject && typeof subject === 'object' && 'fullAccess' in (subject as object));
+  if (!subject || typeof subject !== 'object') return false;
+  return Array.isArray((subject as AccessSnapshot).modules);
 }
 
 /** Merge a role's matrix with an account's stored overrides. */

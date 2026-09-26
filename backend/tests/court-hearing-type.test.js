@@ -132,9 +132,13 @@ test('hearingType stays free text, so the rename needs no migration', () => {
 });
 
 test('every display site renders the stored hearing type verbatim', () => {
+  // The Dashboard used to carry a "Hearing Schedule" card. It was removed: the
+  // "Scheduled Today" tile opens a dialog that already lists the day's
+  // hearings, so the page showed the same schedule twice. The Dashboard is
+  // therefore no longer a display site for the type — the three below are, and
+  // each has to print the stored value rather than map it to a friendly label.
   const sites = [
     ['frontend/src/app/components/CourtRecords.tsx', /record\.hearingType \|\| 'N\/A'/],
-    ['frontend/src/app/components/Dashboard.tsx', /h\.hearingType \|\| 'Hearing'/],
     ['frontend/src/app/components/SocialWorker.tsx', /hearing\.hearingType \|\| 'N\/A'/],
     ['frontend/src/app/components/UnifiedTimeline.tsx', /court\.hearingType \|\| 'Hearing'/],
   ];

@@ -132,9 +132,20 @@ test('the display text is a separate helper from the rule', () => {
 });
 
 test('the API refuses a review without a schedule for a schedulable type', () => {
+  // The rule is checked where the clinical decision is submitted — the
+  // Psychological Staff's verification. A Social Worker's verification that
+  // completes the pair re-uses the decision already recorded (and accepted) by
+  // the Psychological Staff, so it is not re-checked against the clock. The
+  // requirement is narrowed, not dropped: the schedule is still mandatory on the
+  // side that supplies it, which is what keeps the SPA's field load-bearing.
   assert.match(
     BACKEND,
-    /if \(status === 'Reviewed' && needsSchedule && !scheduleDateTime\) throw new ApiError\(400,/,
+    /const clinicalInputsFromRequest = verificationSide === 'psych';/,
+    'the API no longer distinguishes the side that supplies the clinical decision',
+  );
+  assert.match(
+    BACKEND,
+    /if \(status === 'Reviewed' && clinicalInputsFromRequest && needsSchedule && !scheduleDateTime\) throw new ApiError\(400,/,
     'the API no longer requires the schedule, so the SPA field is decorative',
   );
   assert.match(

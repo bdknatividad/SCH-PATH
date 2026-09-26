@@ -179,12 +179,15 @@ test('saving an Admission Slip does not create a Case Load assignment', () => {
   assert.doesNotMatch(CHILD_RECORDS, /\/resident-assignments\/\$\{editingAssignmentId\}\/end/, 'editing an admission still ends the Case Load assignment');
 });
 
-test('only the Center Head can assign or change a Case Load Manager', () => {
+test('only the Center Head, an admin or a Social Worker can assign a Case Load Manager', () => {
   const { canAssignCaseLoadManager } = require('../src/controllers/assignmentController');
   assert.equal(canAssignCaseLoadManager({ role: 'centerhead' }), true);
   assert.equal(canAssignCaseLoadManager({ role: 'Center Head' }), true);
   assert.equal(canAssignCaseLoadManager({ role: 'admin' }), true);
-  for (const role of ['socialworker', 'houseparent', 'nurse', 'psychologist', 'educator']) {
+  // The Social Worker holds the case and is allowed to hand it to a Houseparent;
+  // the SPA offers the buttons on the same three roles.
+  assert.equal(canAssignCaseLoadManager({ role: 'socialworker' }), true);
+  for (const role of ['houseparent', 'nurse', 'psychologist', 'educator']) {
     assert.equal(canAssignCaseLoadManager({ role }), false, `${role} may assign a Case Load Manager`);
   }
   for (const fn of ['async function create', 'async function update', 'async function end']) {

@@ -174,13 +174,13 @@ test('a role without the capability is refused, and a Houseparent is one', () =>
     'a Houseparent was allowed to verify an Incident Report',
   );
   // The refusal is the capability, not a name list: the definition gives the
-  // Houseparent `view` alone on Violations, and the route's requirePermission
+  // Houseparent `view` and `create` on Violations — enough to read the list and
+  // log an incident, never to verify one — and the route's requirePermission
   // reads the same thing.
   const definition = JSON.parse(read('backend/src/config/rbac.definition.json'));
-  assert.deepEqual(
-    definition.roles.houseparent.permissions.Violations,
-    ['view'],
-    'the Houseparent gained a Violations permission other than view',
+  assert.ok(
+    !definition.roles.houseparent.permissions.Violations.includes('verify'),
+    'the Houseparent gained Violations:verify, so it could sign off its own incident report',
   );
   for (const role of ['psychologist', 'socialworker']) {
     assert.ok(

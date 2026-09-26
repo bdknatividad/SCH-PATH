@@ -59,7 +59,7 @@ test('the medical sheet logs one consultation per row, each with its own date', 
   const form = recordFormSource();
   assert.match(
     form,
-    /\(\['date', 'findings', 'laboratoryProcedure', 'prescription', 'careProvider', 'doctorName', 'specialization'\] as const\)\.map/,
+    /\(\['date', 'findings', 'laboratoryProcedure', 'laboratoryResults', 'prescription', 'careProvider', 'doctorName', 'specialization'\] as const\)\.map/,
     'the row no longer renders every column, including the doctor and the specialization',
   );
   // The row builder has to be shared, or "Add entry" can create a row the table
@@ -134,9 +134,22 @@ test('BMI is derived from the recorded height and weight, never typed', () => {
     'the BMI is not computed from the weight and the height',
   );
   assert.match(HEALTH, /value > 3 \? value \/ 100 : value/, 'centimetres are not converted to metres');
-  // The reference range is the 18.5–24.9 band expressed as kilograms.
-  assert.match(HEALTH, /18\.5 \* metres \* metres/, 'the healthy-weight range is gone');
-  assert.match(HEALTH, /24\.9 \* metres \* metres/, 'the healthy-weight range is gone');
+  // The reference range is the 18.5–24.9 BMI band expressed as kilograms. It is
+  // held as named constants now — the same two the classification and the 6%
+  // "Above Healthy Weight" limit are derived from — so the printed range and the
+  // badge cannot drift apart.
+  assert.match(HEALTH, /const HEALTHY_BMI_MIN = 18\.5;/, 'the healthy-weight floor is gone');
+  assert.match(HEALTH, /const HEALTHY_BMI_MAX = 24\.9;/, 'the healthy-weight ceiling is gone');
+  assert.match(
+    HEALTH,
+    /HEALTHY_BMI_MIN \* metres \* metres/,
+    'the healthy-weight range is no longer derived from the floor of the band',
+  );
+  assert.match(
+    HEALTH,
+    /HEALTHY_BMI_MAX \* metres \* metres/,
+    'the healthy-weight range is no longer derived from the ceiling of the band',
+  );
 
   // And the sheet renders both from the measurements rather than from inputs.
   const form = recordFormSource();

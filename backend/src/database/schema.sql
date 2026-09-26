@@ -797,6 +797,24 @@ CREATE TABLE triRecords (
   houseparentSignature LONGTEXT NULL,
   houseparentSignedBy VARCHAR(100) NULL,
   houseparentSignedAt DATETIME NULL,
+  -- The other four page-8 lines, one triple each. These mirror the matching slot in
+  -- the `signatories` JSON, which is the authoritative store; the controller writes
+  -- both so a reader that only knows the columns still finds the drawing. They are
+  -- kept because the live records already hold signatures in them — `centerhead*` and
+  -- `sectionchief*` are the names those rows shipped with, and renaming them would
+  -- strand the stored drawings.
+  adminOfficerSignature LONGTEXT NULL,
+  adminOfficerSignedBy VARCHAR(100) NULL,
+  adminOfficerSignedAt DATETIME NULL,
+  swo1Signature LONGTEXT NULL,
+  swo1SignedBy VARCHAR(100) NULL,
+  swo1SignedAt DATETIME NULL,
+  centerheadSignature LONGTEXT NULL,
+  centerheadSignedBy VARCHAR(100) NULL,
+  centerheadSignedAt DATETIME NULL,
+  sectionchiefSignature LONGTEXT NULL,
+  sectionchiefSignedBy VARCHAR(100) NULL,
+  sectionchiefSignedAt DATETIME NULL,
   -- JSON: the Houseparent's typed name, and the typed name + E-Signature of the
   -- Administrative Officer and SWO I / Case Manager, plus the E-Signatures of
   -- MARICOR C. NAVARRO and NICOLAS Q. REGALARIO on the page-8 block.

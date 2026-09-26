@@ -8,6 +8,7 @@ const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8').replace(/\r\
 const DOC_CONTROLLER = read('backend/src/controllers/documentController.js');
 const INCIDENT_CONTROLLER = read('backend/src/controllers/incidentReportController.js');
 const TRACKER_UI = read('frontend/src/app/components/InterventionTracker.tsx');
+const INCIDENT_MODAL = read('frontend/src/app/components/IncidentReportModal.tsx');
 
 function between(source, startMarker, endMarker) {
   const from = source.indexOf(startMarker);
@@ -175,10 +176,19 @@ test('the returned report stays actionable, not just visible', () => {
     /request\(`\/incident-reports\/\$\{report\.id\}\/resubmit`/,
     'edit mode no longer resubmits the existing report',
   );
+  // The guard accepts every state a returned report can be in — 'Failed' and
+  // 'Reassessment' on the incident, plus 'Rejected' / 'For Reassessment' and the
+  // linked document's own 'Rejected' / 'Reassessment', which is what a report
+  // marked Failed before the reject route synchronised the incident reads as.
   assert.match(
     INCIDENT_CONTROLLER,
-    /if \(!\['Failed', 'Reassessment'\]\.includes\(existing\.status\)\)/,
+    /if \(!\['Failed', 'Reassessment', 'Rejected', 'For Reassessment'\]\.includes\(existing\.status\) && !\['Rejected', 'Reassessment'\]\.includes\(documentStatus\)\) \{/,
     'the resubmit endpoint no longer accepts a reassessment report',
+  );
+  assert.match(
+    INCIDENT_CONTROLLER,
+    /throw new ApiError\(409, 'Only failed or reassessment Incident Reports can be resubmitted\.'\)/,
+    'the resubmit endpoint no longer refuses a report that was never returned',
   );
 });
 

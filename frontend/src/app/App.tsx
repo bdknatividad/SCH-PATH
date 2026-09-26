@@ -48,10 +48,13 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boole
     this.state = { hasError: false, error: null };
   }
   static getDerivedStateFromError(error: Error) { return { hasError: true, error }; }
-  // The stack stays in the console for whoever is debugging; it is deliberately
-  // not rendered. This screen used to print `error.message` verbatim under a
-  // "May Error sa Component:" heading, which put a raw exception — often a fetch
-  // failure naming the API host — in front of staff as the page.
+  // The stack stays in the console for whoever is debugging. The message is
+  // also shown on the screen, truncated — a screenshot of this page is then
+  // enough to diagnose it, which matters because the person who sees it is
+  // usually not the person who can read a console. This screen used to print it
+  // verbatim under a "May Error sa Component:" heading; the presentation is
+  // bounded now, and the exception text is the same text `describeError()`
+  // already shows in a dialog, so it is not a new disclosure.
   componentDidCatch(error: Error, errorInfo: ErrorInfo) { console.error("Uncaught error:", error, errorInfo); }
   render() {
     if (this.state.hasError) {
