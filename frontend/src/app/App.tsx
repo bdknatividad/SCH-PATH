@@ -66,6 +66,13 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boole
               The page could not be displayed. Reloading usually clears it. If it keeps happening,
               report what you were doing to the Center Head so it can be checked.
             </p>
+            {/* The actual error, so a screenshot of this page is enough to
+                diagnose it — without it the only clue was in the console. */}
+            {this.state.error?.message && (
+              <p className="mt-4 break-words rounded-lg bg-gray-50 px-3 py-2 text-left font-mono text-[11px] leading-snug text-gray-500" data-error-detail>
+                {this.state.error.message.slice(0, 300)}
+              </p>
+            )}
             <button
               className="mt-6 w-full rounded-lg bg-[#2F3E46] px-4 py-2.5 text-sm font-bold text-white hover:bg-[#263440]"
               onClick={() => window.location.reload()}

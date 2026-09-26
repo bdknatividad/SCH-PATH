@@ -9,7 +9,7 @@ const router = express.Router();
 const { pool } = require('../config/database');
 const { RESOURCES } = require('../utils/constants');
 const { mapRow, generateId } = require('../utils/helpers');
-const { authenticate } = require('../middleware/auth');
+const { authenticate, authorize } = require('../middleware/auth');
 const { snapshotFor, requireModule, requirePermission } = require('../middleware/rbac');
 const { requireEducationPlacement } = require('../middleware/validation');
 const { hasModuleAccess } = require('../config/rbac');
@@ -45,6 +45,31 @@ const { createController } = require('../controllers/baseController');
 const { assignedResidentIds } = require('../utils/residentScope');
 
 // Public health check endpoint (must be before mounting routes)
+/**
+ * GET /api/health/schema — Center Head / Admin only.
+ * Lists anything the database is still missing compared with what the code
+ * expects (tables, columns, ENUM values), and `?fix=1` applies the additive
+ * fixes now instead of waiting for the next restart. Column names only; no data.
+ */
+router.get('/health/schema', authenticate, authorize('centerhead', 'admin'), async (req, res, next) => {
+  try {
+    const { pool } = require('../config/database');
+    const { diffSchema, syncSchema } = require('../utils/schemaSync');
+    if (String(req.query.fix || '') === '1') {
+      const result = await syncSchema(pool);
+      return res.json({ success: true, fixed: true, ...result });
+    }
+    const diff = await diffSchema(pool);
+    res.json({
+      success: true,
+      ok: !diff.missingTables.length && !diff.missingColumns.length && !diff.narrowEnums.length,
+      missingTables: diff.missingTables,
+      missingColumns: diff.missingColumns.map((m) => `${m.table}.${m.column.name}`),
+      enumsMissingValues: diff.narrowEnums.map((m) => `${m.table}.${m.column.name}`),
+    });
+  } catch (error) { next(error); }
+});
+
 router.get('/health', (req, res) => {
   res.json({
     success: true,

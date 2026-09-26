@@ -1354,6 +1354,11 @@ async function runMigrations() {
     await ensureColumn('assessments', 'violationIds', 'JSON NULL', 'triggeredBy');
     await ensureColumn('assessments', 'interventionTrackerId', 'VARCHAR(40) NULL', 'violationIds');
     await ensureColumn('assessments', 'interventionRequirementId', 'VARCHAR(40) NULL', 'interventionTrackerId');
+    // Written when verifying a violation schedules a Psychosocial Activity /
+    // Dialogue (violationController.review). It was declared only in
+    // schema.sql, so a database the server built itself never had it and that
+    // verification failed with "Unknown column 'psychosocialActivities'".
+    await ensureColumn('assessments', 'psychosocialActivities', 'JSON NULL', 'type');
     await ensureColumn('assessments', 'schedulingMode', "VARCHAR(30) NULL", 'interventionRequirementId');
 
     // review() writes values that outgrow the original widths, and MySQL answers
@@ -2692,6 +2697,16 @@ async function startServer() {
 
     // Run schema migrations
     await runMigrations();
+
+    // Then make sure nothing the code uses is still missing — a hosted
+    // database where one migration step failed would otherwise break features
+    // one "Unknown column" at a time. Additive only; never fatal.
+    try {
+      const { syncSchema } = require('./utils/schemaSync');
+      await syncSchema(pool);
+    } catch (error) {
+      console.warn('Schema sync warning:', error.message);
+    }
 
     // ── Fail fast on a missing Anecdotal Report template ──
     // Accepted Anecdotal Reports are published as the official form with the

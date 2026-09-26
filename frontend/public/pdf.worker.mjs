@@ -1,3 +1,6 @@
+/* SCH-PATH: polyfills for browsers older than Chrome/Edge/Firefox 126 (see src/polyfills.ts). */
+if (typeof URL.parse !== "function") { URL.parse = function (url, base) { try { return base === undefined ? new URL(url) : new URL(url, base); } catch (e) { return null; } }; }
+if (typeof Promise.withResolvers !== "function") { Promise.withResolvers = function () { let resolve, reject; const promise = new Promise(function (res, rej) { resolve = res; reject = rej; }); return { promise: promise, resolve: resolve, reject: reject }; }; }
 /**
  * @licstart The following is the entire license notice for the
  * JavaScript code in this page

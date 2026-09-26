@@ -18,6 +18,7 @@ const {
   determineOffenseLevel,
 } = require('../utils/violationGuideHelper');
 const notifications = require('../services/notificationService');
+const { assertResidentNotAbsconded } = require('../utils/abscond');
 const { canAccessResident } = require('./assignmentController');
 const { pointsForSeverity } = require('../utils/violationPoints');
 
@@ -531,6 +532,8 @@ async function create(req, res, next) {
   try {
     const residentId = String(req.body?.residentId || '').trim();
     const violationType = String(req.body?.type || '').trim();
+    // An absconded resident's record is view-only.
+    await assertResidentNotAbsconded(residentId, 'given a new incident');
 
     if (!residentId) {
       throw new ApiError(400, 'Resident is required.');
@@ -575,6 +578,9 @@ async function create(req, res, next) {
 
     const body = {
       ...req.body,
+      // A new incident starts unverified by either side.
+      psychVerifiedBy: undefined, psychVerifiedAt: undefined, psychVerification: undefined,
+      swVerifiedBy: undefined, swVerifiedAt: undefined,
       residentId,
       type: guide.name,
       severity: guide.category,
@@ -681,16 +687,104 @@ async function getReviewPreview(req, res, next) {
   }
 }
 
+/**
+ * Which verification a reviewer is giving: 'psych' (Psychological Support
+ * Staff) or 'sw' (Social Worker). A full-access account (Center Head / Admin)
+ * holds both roles, so it must say which side it signs — otherwise one account
+ * could complete the pair alone.
+ */
+function resolveViolationVerificationSide(user, requested) {
+  const role = String(user?.role || '').toLowerCase().replace(/[\s_-]+/g, '');
+  if (role === 'psychologist') return 'psych';
+  if (role === 'socialworker') return 'sw';
+  const side = String(requested || '').toLowerCase();
+  if (side === 'psych' || side === 'sw') return side;
+  throw new ApiError(400, 'verificationSide must be "psych" or "sw" for this account.');
+}
+
+/**
+ * The dual-verification columns, added on demand if the database is missing
+ * them (the boot migration normally adds them; this covers a database whose
+ * migration did not run, so Verify never fails with "Unknown column").
+ * Runs once per process.
+ */
+let verificationColumnsReady = null;
+function ensureViolationVerificationColumns() {
+  if (!verificationColumnsReady) {
+    verificationColumnsReady = (async () => {
+      const [rows] = await pool.query(
+        `SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+          WHERE TABLE_SCHEMA = DATABASE() AND LOWER(TABLE_NAME) = 'violations'`
+      );
+      const existing = new Set(rows.map((row) => String(row.COLUMN_NAME).toLowerCase()));
+      for (const [column, definition] of [
+        ['psychVerifiedBy', 'VARCHAR(100) NULL'],
+        ['psychVerifiedAt', 'DATETIME NULL'],
+        ['psychVerification', 'LONGTEXT NULL'],
+        ['swVerifiedBy', 'VARCHAR(100) NULL'],
+        ['swVerifiedAt', 'DATETIME NULL'],
+      ]) {
+        if (!existing.has(column.toLowerCase())) {
+          await pool.query(`ALTER TABLE violations ADD COLUMN \`${column}\` ${definition}`);
+          console.log(`Migration (on demand): violations.${column} added.`);
+        }
+      }
+    })().catch((error) => {
+      verificationColumnsReady = null; // try again on the next review
+      throw error;
+    });
+  }
+  return verificationColumnsReady;
+}
+
 async function review(req, res, next) {
+  try {
+    await ensureViolationVerificationColumns();
+  } catch (error) {
+    return next(error);
+  }
   const connection = await pool.getConnection();
   try {
     const { id } = req.params;
-    const { status, actionTaken, reviewedBy, scheduleDateTime, psychosocialActivities } = req.body || {};
+    const { status, reviewedBy } = req.body || {};
+    let { actionTaken, scheduleDateTime, psychosocialActivities } = req.body || {};
     if (!['Reviewed', 'Rejected'].includes(status)) throw new ApiError(400, 'Review decision must be Reviewed or Rejected.');
     const [rows] = await connection.query('SELECT * FROM violations WHERE id = ? FOR UPDATE', [id]);
     if (!rows.length) throw new ApiError(404, 'Violation not found');
     const violation = rows[0];
     if (violation.status !== 'Pending Review') throw new ApiError(400, 'This violation has already been reviewed.');
+
+    // ── Dual verification ────────────────────────────────────────────────
+    // A logged incident is verified by BOTH the Psychological Support Staff and
+    // the Social Worker, and proceeds (interventions assigned) only when both
+    // have. The Psychological Staff's verification carries the clinical
+    // decision — action taken, schedule, psychosocial activities — exactly as
+    // before; the Social Worker's is their own verification of the incident.
+    // Whichever comes second completes the review with the Psychological
+    // Staff's recorded decision. Either side may reject.
+    let verificationSide = null;
+    let completesDualVerification = false;
+    if (status === 'Reviewed') {
+      verificationSide = resolveViolationVerificationSide(req.user, req.body?.verificationSide);
+      const otherBy = verificationSide === 'psych' ? violation.swVerifiedBy : violation.psychVerifiedBy;
+      const ownBy = verificationSide === 'psych' ? violation.psychVerifiedBy : violation.swVerifiedBy;
+      if (ownBy) {
+        throw new ApiError(409, `This incident is already verified by the ${verificationSide === 'psych' ? 'Psychological Support Staff' : 'Social Worker'} (${ownBy}).`);
+      }
+      // One person cannot supply both verifications.
+      if (otherBy && String(otherBy) === String(req.user?.username || '')) {
+        throw new ApiError(409, 'The second verification must come from a different person.');
+      }
+      completesDualVerification = Boolean(otherBy);
+      if (verificationSide === 'sw' && completesDualVerification) {
+        // The Psychological Staff verified first: complete with their decision.
+        let stored = {};
+        try { stored = JSON.parse(violation.psychVerification || '{}') || {}; } catch { stored = {}; }
+        actionTaken = stored.actionTaken ?? null;
+        scheduleDateTime = stored.scheduleDateTime ?? null;
+        psychosocialActivities = Array.isArray(stored.psychosocialActivities) ? stored.psychosocialActivities : [];
+      }
+    }
     const guide = await getGuideForViolation(connection, violation);
     if (!guide || guide.status !== 'Active') {
       throw new ApiError(400, 'The violation is not linked to an active entry in Manage Violations & Interventions.');
@@ -717,10 +811,66 @@ async function review(req, res, next) {
     }
     const needsSchedule = requirements.some((item) => isSchedulingInterventionType(item.interventionType));
     const isPsychosocial = requirements.some((item) => String(item.interventionType || '').trim().toLowerCase().replace(/\s+/g, ' ') === 'psychosocial activity');
-    if (status === 'Reviewed' && needsSchedule && !scheduleDateTime) throw new ApiError(400, 'A schedule date and time is required for this intervention.');
-    if (status === 'Reviewed' && scheduleDateTime && new Date(scheduleDateTime).getTime() <= Date.now()) throw new ApiError(400, 'The intervention schedule must be in the future.');
+    // The clinical inputs are checked when the Psychological Staff submits
+    // them. A Social Worker's verification that completes the pair re-uses the
+    // recorded decision as it was accepted, so it is not re-checked against the
+    // clock (the schedule may be closer by then, not invalid).
+    const clinicalInputsFromRequest = verificationSide === 'psych';
+    if (status === 'Reviewed' && clinicalInputsFromRequest && needsSchedule && !scheduleDateTime) throw new ApiError(400, 'A schedule date and time is required for this intervention.');
+    if (status === 'Reviewed' && clinicalInputsFromRequest && scheduleDateTime && new Date(scheduleDateTime).getTime() <= Date.now()) throw new ApiError(400, 'The intervention schedule must be in the future.');
     await connection.beginTransaction();
     const reviewer = reviewedBy || req.user?.username || null;
+
+    if (status === 'Reviewed') {
+      if (verificationSide === 'psych') {
+        await connection.query(
+          'UPDATE violations SET psychVerifiedBy = ?, psychVerifiedAt = NOW(), psychVerification = ? WHERE id = ?',
+          [req.user?.username || reviewer, JSON.stringify({
+            actionTaken: actionTaken || null,
+            scheduleDateTime: scheduleDateTime || null,
+            psychosocialActivities: Array.isArray(psychosocialActivities) ? psychosocialActivities : [],
+          }), id]
+        );
+      } else {
+        await connection.query(
+          'UPDATE violations SET swVerifiedBy = ?, swVerifiedAt = NOW() WHERE id = ?',
+          [req.user?.username || reviewer, id]
+        );
+      }
+      if (!completesDualVerification) {
+        // First of the two verifications: recorded, and the incident waits.
+        await notifications.markRelatedRead(req.user, 'violation', id, connection);
+        await connection.commit();
+        try {
+          const otherRole = verificationSide === 'psych' ? 'socialworker' : 'psychologist';
+          const others = await notifications.usersWithAnyRole([otherRole]);
+          if (others.length) {
+            const residentName = await getResidentName(violation.residentId);
+            await notifications.notifyUsers(others.map((u) => u.id), {
+              type: 'Violation Verification',
+              title: `Incident awaiting your verification${residentName ? ` — ${residentName}` : ''}`,
+              message: `${req.user?.username || 'A reviewer'} verified the logged incident. It proceeds once you verify it too.`,
+              priority: 'High',
+              actionRequired: 'Verify the logged incident.',
+              residentId: violation.residentId,
+              relatedRecordType: 'violation',
+              relatedRecordId: id,
+              actorUsername: req.user?.username || null,
+            });
+          }
+        } catch (notifyErr) {
+          console.error('[ViolationController] Second-verification notice failed (non-fatal):', notifyErr.message);
+        }
+        const [pending] = await pool.query('SELECT * FROM violations WHERE id = ?', [id]);
+        const waitingFor = verificationSide === 'psych' ? 'the Social Worker' : 'the Psychological Support Staff';
+        return res.json({
+          success: true,
+          data: mapRow('violations', pending[0]),
+          pendingSecondVerification: true,
+          message: `Verification recorded. The incident proceeds once ${waitingFor} also verifies it.`,
+        });
+      }
+    }
     await connection.query('UPDATE violations SET status = ?, actionTaken = ?, reviewedBy = ?, severity = ?, points = ?, guideId = ? WHERE id = ?', [status, actionTaken || null, reviewer, guide.category, pointsForSeverity(guide.category), guide.id, id]);
     if (status === 'Reviewed') {
       const residentName = await getResidentName(violation.residentId);
@@ -1088,6 +1238,11 @@ async function getResidentName(residentId) {
  * agrees, whichever one the caller used.
  */
 async function update(req, res, next) {
+  // The two verifications are written only by POST /:id/review — never by a
+  // plain edit, or a verification could be recorded without being given.
+  if (req.body) {
+    for (const field of ['psychVerifiedBy', 'psychVerifiedAt', 'psychVerification', 'swVerifiedBy', 'swVerifiedAt']) delete req.body[field];
+  }
   if (req.body && req.body.severity !== undefined) {
     req.body.points = pointsForSeverity(req.body.severity);
   }
@@ -1095,6 +1250,7 @@ async function update(req, res, next) {
 }
 
 module.exports = {
+  resolveViolationVerificationSide,
   getAll,
   getById,
   create,

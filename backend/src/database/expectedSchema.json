@@ -1,0 +1,4504 @@
+{
+ "$comment": "The complete schema the backend expects (every table and column), captured from a database the server itself built. utils/schemaSync.js adds anything a deployed database is missing. Regenerate after adding columns.",
+ "tables": {
+  "accessRequests": [
+   {
+    "name": "id",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "requesterId",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "requesterUsername",
+    "type": "varchar(100)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "requesterRole",
+    "type": "varchar(50)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "targetUserId",
+    "type": "varchar(40)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "targetRole",
+    "type": "varchar(50)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "documentId",
+    "type": "varchar(40)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "residentId",
+    "type": "varchar(40)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "moduleName",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "recordTab",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "reason",
+    "type": "text",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "status",
+    "type": "enum('Pending','Approved','Rejected')",
+    "nullable": false,
+    "default": "Pending",
+    "extra": ""
+   },
+   {
+    "name": "reviewedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "reviewedById",
+    "type": "varchar(40)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "reviewedAt",
+    "type": "timestamp",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "reviewerNote",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED"
+   },
+   {
+    "name": "updatedAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+   }
+  ],
+  "activities": [
+   {
+    "name": "id",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "title",
+    "type": "varchar(150)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "date",
+    "type": "date",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "time",
+    "type": "varchar(50)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "type",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "category",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "location",
+    "type": "varchar(150)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "status",
+    "type": "varchar(50)",
+    "nullable": false,
+    "default": "Upcoming",
+    "extra": ""
+   },
+   {
+    "name": "description",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "notes",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "personInCharge",
+    "type": "json",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "facilitators",
+    "type": "json",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "participants",
+    "type": "json",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "selectedResidentIds",
+    "type": "json",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "recommendedResidentIds",
+    "type": "json",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "notRecommendedResidentIds",
+    "type": "json",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "notRecommendedReasons",
+    "type": "json",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "violationIds",
+    "type": "json",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "modifiedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED"
+   },
+   {
+    "name": "updatedAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+   }
+  ],
+  "activityEvaluations": [
+   {
+    "name": "id",
+    "type": "varchar(80)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "activityId",
+    "type": "varchar(40)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "residentId",
+    "type": "varchar(40)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "residentName",
+    "type": "varchar(150)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "rating",
+    "type": "int",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "remarks",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "dateEvaluated",
+    "type": "datetime",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED"
+   },
+   {
+    "name": "updatedAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+   },
+   {
+    "name": "createdBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "modifiedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   }
+  ],
+  "admissions": [
+   {
+    "name": "id",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "residentId",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "admissionNumber",
+    "type": "int",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "admissionDate",
+    "type": "date",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "name",
+    "type": "varchar(150)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "age",
+    "type": "int",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "sex",
+    "type": "enum('Male','Female')",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "birthDate",
+    "type": "date",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "religion",
+    "type": "varchar(100)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "address",
+    "type": "text",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "residentSignature",
+    "type": "longtext",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "residentImage",
+    "type": "longtext",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "guardianName",
+    "type": "varchar(150)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "guardianContact",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "guardianAddress",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "guardianSignature",
+    "type": "longtext",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "referringParty",
+    "type": "varchar(150)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "referringPartyContact",
+    "type": "varchar(100)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "referringPartySignature",
+    "type": "longtext",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "houseparentOnDuty",
+    "type": "varchar(150)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "houseparentUserId",
+    "type": "varchar(50)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "houseparentSignature",
+    "type": "longtext",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "legalCategory",
+    "type": "varchar(150)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "specificOffense",
+    "type": "text",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "caseHistory",
+    "type": "text",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "admissionStatus",
+    "type": "varchar(40)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "expectedDischargeDate",
+    "type": "date",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "status",
+    "type": "enum('Active','Closed')",
+    "nullable": false,
+    "default": "Active",
+    "extra": ""
+   },
+   {
+    "name": "closedDate",
+    "type": "date",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "modifiedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED"
+   },
+   {
+    "name": "updatedAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+   }
+  ],
+  "alertReads": [
+   {
+    "name": "alertId",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "userId",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "readAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED"
+   }
+  ],
+  "alerts": [
+   {
+    "name": "id",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "residentId",
+    "type": "varchar(40)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "type",
+    "type": "varchar(50)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "title",
+    "type": "varchar(150)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "message",
+    "type": "text",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "priority",
+    "type": "enum('Low','Medium','High','Urgent')",
+    "nullable": false,
+    "default": "Medium",
+    "extra": ""
+   },
+   {
+    "name": "isRead",
+    "type": "tinyint(1)",
+    "nullable": false,
+    "default": "0",
+    "extra": ""
+   },
+   {
+    "name": "readBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "readAt",
+    "type": "timestamp",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "actionRequired",
+    "type": "varchar(255)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "actionTaken",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "relatedRecordType",
+    "type": "varchar(50)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "relatedRecordId",
+    "type": "varchar(40)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "targetRole",
+    "type": "varchar(50)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "targetUserId",
+    "type": "varchar(40)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "actorUsername",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "dedupeKey",
+    "type": "varchar(191)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED"
+   },
+   {
+    "name": "updatedAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+   }
+  ],
+  "assessments": [
+   {
+    "name": "id",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "title",
+    "type": "varchar(150)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "date",
+    "type": "date",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "time",
+    "type": "varchar(50)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "type",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "assessor",
+    "type": "varchar(150)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "status",
+    "type": "enum('Scheduled','Completed')",
+    "nullable": false,
+    "default": "Scheduled",
+    "extra": ""
+   },
+   {
+    "name": "forResidents",
+    "type": "json",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "description",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "results",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "triggeredBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "violationIds",
+    "type": "json",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "interventionTrackerId",
+    "type": "varchar(40)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "interventionRequirementId",
+    "type": "varchar(40)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "schedulingMode",
+    "type": "varchar(30)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "modifiedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED"
+   },
+   {
+    "name": "updatedAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+   },
+   {
+    "name": "psychosocialActivities",
+    "type": "json",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   }
+  ],
+  "children": [
+   {
+    "name": "id",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "name",
+    "type": "varchar(150)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "age",
+    "type": "int",
+    "nullable": false,
+    "default": "0",
+    "extra": ""
+   },
+   {
+    "name": "gender",
+    "type": "enum('Male','Female')",
+    "nullable": false,
+    "default": "Male",
+    "extra": ""
+   },
+   {
+    "name": "status",
+    "type": "enum('Active','Discharged','Absconded')",
+    "nullable": false,
+    "default": "Active",
+    "extra": ""
+   },
+   {
+    "name": "createdAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED"
+   },
+   {
+    "name": "updatedAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+   },
+   {
+    "name": "admissionDate",
+    "type": "date",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "legalCategory",
+    "type": "varchar(150)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "caseType",
+    "type": "varchar(150)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "casePhase",
+    "type": "varchar(150)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "isRepeatOffender",
+    "type": "tinyint(1)",
+    "nullable": false,
+    "default": "0",
+    "extra": ""
+   },
+   {
+    "name": "previousCaseDetails",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "previousCases",
+    "type": "json",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "birthDate",
+    "type": "date",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "address",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "documentsComplete",
+    "type": "tinyint(1)",
+    "nullable": false,
+    "default": "0",
+    "extra": ""
+   },
+   {
+    "name": "documents",
+    "type": "json",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "medicalRecords",
+    "type": "json",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "lastCheckup",
+    "type": "date",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "notes",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "behaviorNotes",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "guardianName",
+    "type": "varchar(150)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "guardianContact",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "behavioralLogs",
+    "type": "json",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "assessments",
+    "type": "json",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "phaseTasksCompleted",
+    "type": "json",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "needsPsychAssessment",
+    "type": "tinyint(1)",
+    "nullable": false,
+    "default": "0",
+    "extra": ""
+   },
+   {
+    "name": "readmissionDate",
+    "type": "date",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "readmissionDatetime",
+    "type": "datetime",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "modifiedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "abscondedAt",
+    "type": "datetime",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "abscondedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "lrn",
+    "type": "varchar(50)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "traineeNumber",
+    "type": "varchar(50)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   }
+  ],
+  "courtRecords": [
+   {
+    "name": "id",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "residentId",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "caseNumber",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "courtName",
+    "type": "varchar(150)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "judge",
+    "type": "varchar(150)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "prosecutor",
+    "type": "varchar(150)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "publicAttorney",
+    "type": "varchar(150)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "hearingType",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "hearingDate",
+    "type": "date",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "hearingTime",
+    "type": "varchar(50)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "courtOrder",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "nextHearingDate",
+    "type": "date",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "status",
+    "type": "enum('Scheduled','Completed','Postponed','Cancelled')",
+    "nullable": false,
+    "default": "Scheduled",
+    "extra": ""
+   },
+   {
+    "name": "notes",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "modifiedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED"
+   },
+   {
+    "name": "updatedAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+   }
+  ],
+  "dischargeExtensions": [
+   {
+    "name": "id",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "residentId",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "admissionId",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "triRecordId",
+    "type": "varchar(40)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "recommendationId",
+    "type": "varchar(40)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "previousDischargeDate",
+    "type": "date",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "newDischargeDate",
+    "type": "date",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "extensionDays",
+    "type": "int",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "reason",
+    "type": "text",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "relatedViolationId",
+    "type": "varchar(40)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "decidedBy",
+    "type": "varchar(100)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "decidedAt",
+    "type": "datetime",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED"
+   },
+   {
+    "name": "createdAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED"
+   }
+  ],
+  "dischargeRecommendations": [
+   {
+    "name": "id",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "residentId",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "admissionId",
+    "type": "varchar(40)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "triRecordId",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "reportingYear",
+    "type": "smallint",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "reportingMonth",
+    "type": "tinyint",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "majorCount",
+    "type": "int",
+    "nullable": false,
+    "default": "0",
+    "extra": ""
+   },
+   {
+    "name": "minorCount",
+    "type": "int",
+    "nullable": false,
+    "default": "0",
+    "extra": ""
+   },
+   {
+    "name": "thresholdType",
+    "type": "varchar(50)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "recommendationNote",
+    "type": "text",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "status",
+    "type": "enum('Pending','Reviewed','Dismissed','Decision Made')",
+    "nullable": false,
+    "default": "Pending",
+    "extra": ""
+   },
+   {
+    "name": "reviewedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "reviewedAt",
+    "type": "datetime",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED"
+   },
+   {
+    "name": "updatedAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+   }
+  ],
+  "documentRevisions": [
+   {
+    "name": "id",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "documentId",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "revision",
+    "type": "int",
+    "nullable": false,
+    "default": "1",
+    "extra": ""
+   },
+   {
+    "name": "action",
+    "type": "enum('Uploaded','Submitted','Resubmitted','Approved','Rejected','Reassessment','Updated','Archived')",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "status",
+    "type": "varchar(40)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "actor",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "actorRole",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "reason",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "notes",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "snapshot",
+    "type": "json",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED"
+   }
+  ],
+  "documents": [
+   {
+    "name": "id",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "residentId",
+    "type": "varchar(40)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "healthRecordId",
+    "type": "varchar(40)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "quarterlyReportId",
+    "type": "varchar(40)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "triRecordId",
+    "type": "varchar(40)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "admissionId",
+    "type": "varchar(40)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "anecdotalReportId",
+    "type": "varchar(40)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "residentName",
+    "type": "varchar(150)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "staffId",
+    "type": "varchar(40)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "assessmentId",
+    "type": "varchar(40)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "title",
+    "type": "varchar(150)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "type",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "category",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "documentCategory",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "description",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "fileName",
+    "type": "varchar(255)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "fileSize",
+    "type": "int",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "filePath",
+    "type": "varchar(500)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "fileData",
+    "type": "longtext",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "fileType",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "uploaderRole",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "status",
+    "type": "enum('Draft','Submitted','Under Review','Approved','Rejected','Archived','Reassessment')",
+    "nullable": false,
+    "default": "Draft",
+    "extra": ""
+   },
+   {
+    "name": "revision",
+    "type": "int",
+    "nullable": false,
+    "default": "1",
+    "extra": ""
+   },
+   {
+    "name": "submittedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "submittedAt",
+    "type": "timestamp",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "uploadedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "uploadedAt",
+    "type": "timestamp",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "reviewedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "reviewedAt",
+    "type": "timestamp",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "approvedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "approvedAt",
+    "type": "timestamp",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "rejectedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "rejectedAt",
+    "type": "timestamp",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "phase",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "requiredFor",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "rejectionReason",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "notes",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "modifiedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED"
+   },
+   {
+    "name": "updatedAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+   }
+  ],
+  "education_monthly_reports": [
+   {
+    "name": "id",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "educationRecordId",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "residentId",
+    "type": "varchar(40)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "reportMonth",
+    "type": "varchar(7)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "reportData",
+    "type": "json",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "status",
+    "type": "enum('Draft','Submitted','Approved','Rejected')",
+    "nullable": false,
+    "default": "Draft",
+    "extra": ""
+   },
+   {
+    "name": "submittedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "submittedAt",
+    "type": "datetime",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "reviewedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "reviewedAt",
+    "type": "datetime",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "modifiedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED"
+   },
+   {
+    "name": "updatedAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+   }
+  ],
+  "education_progress_reports": [
+   {
+    "name": "id",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "educationRecordId",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "residentId",
+    "type": "varchar(40)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "month",
+    "type": "varchar(7)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "subject",
+    "type": "varchar(150)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "result",
+    "type": "enum('Passed','Failed')",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "academicProgress",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "participation",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "strengths",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "areasForImprovement",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "overallDevelopment",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "schoolVisits",
+    "type": "int",
+    "nullable": false,
+    "default": "0",
+    "extra": ""
+   },
+   {
+    "name": "createdBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "modifiedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED"
+   },
+   {
+    "name": "updatedAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+   }
+  ],
+  "education_records": [
+   {
+    "name": "id",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "residentId",
+    "type": "varchar(40)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "name",
+    "type": "varchar(150)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "age",
+    "type": "int",
+    "nullable": false,
+    "default": "0",
+    "extra": ""
+   },
+   {
+    "name": "gender",
+    "type": "enum('Male','Female')",
+    "nullable": false,
+    "default": "Male",
+    "extra": ""
+   },
+   {
+    "name": "educationLevel",
+    "type": "varchar(150)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "gradeSection",
+    "type": "varchar(150)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "school",
+    "type": "varchar(255)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "enrollmentDate",
+    "type": "date",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "status",
+    "type": "enum('Active','Completed','Dropped')",
+    "nullable": false,
+    "default": "Active",
+    "extra": ""
+   },
+   {
+    "name": "address",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "guardianName",
+    "type": "varchar(150)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "guardianContact",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "notes",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "lrn",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "traineeNumber",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "files",
+    "type": "json",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "modifiedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED"
+   },
+   {
+    "name": "updatedAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+   }
+  ],
+  "education_school_visits": [
+   {
+    "name": "id",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "educationRecordId",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "residentId",
+    "type": "varchar(40)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "visitDate",
+    "type": "date",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "school",
+    "type": "varchar(255)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "purpose",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "findings",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "status",
+    "type": "enum('Scheduled','Completed')",
+    "nullable": false,
+    "default": "Completed",
+    "extra": ""
+   },
+   {
+    "name": "fileName",
+    "type": "varchar(255)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "fileData",
+    "type": "longtext",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "modifiedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED"
+   },
+   {
+    "name": "updatedAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+   }
+  ],
+  "guide_interventions": [
+   {
+    "name": "id",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "guideId",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "offenseLevel",
+    "type": "varchar(50)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "interventionType",
+    "type": "varchar(100)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "duration",
+    "type": "int",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "unit",
+    "type": "varchar(50)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "metadata",
+    "type": "json",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "status",
+    "type": "enum('Active','Inactive')",
+    "nullable": false,
+    "default": "Active",
+    "extra": ""
+   },
+   {
+    "name": "createdAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED"
+   },
+   {
+    "name": "updatedAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+   }
+  ],
+  "healthRecords": [
+   {
+    "name": "id",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "residentId",
+    "type": "varchar(40)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "residentName",
+    "type": "varchar(150)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "recordType",
+    "type": "varchar(100)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "date",
+    "type": "date",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "assessmentType",
+    "type": "varchar(150)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "findings",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "status",
+    "type": "varchar(50)",
+    "nullable": false,
+    "default": "Completed",
+    "extra": ""
+   },
+   {
+    "name": "recordedBy",
+    "type": "varchar(150)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "allergies",
+    "type": "varchar(200)",
+    "nullable": true,
+    "default": "None",
+    "extra": ""
+   },
+   {
+    "name": "conditions",
+    "type": "varchar(200)",
+    "nullable": true,
+    "default": "None",
+    "extra": ""
+   },
+   {
+    "name": "medicationName",
+    "type": "varchar(150)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "dosage",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "frequency",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "duration",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "prescribedBy",
+    "type": "varchar(150)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "treatmentType",
+    "type": "varchar(150)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "procedure_",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "outcome",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "followUpDate",
+    "type": "date",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "details",
+    "type": "json",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "modifiedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED"
+   },
+   {
+    "name": "updatedAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+   }
+  ],
+  "incidentReports": [
+   {
+    "name": "id",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "violationId",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "residentId",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "interventionTrackerId",
+    "type": "varchar(40)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "pdfDocumentId",
+    "type": "varchar(40)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "reportTypes",
+    "type": "json",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "othersSpecify",
+    "type": "varchar(255)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "incidentDateTime",
+    "type": "datetime",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "summary",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "actionTaken",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "result",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "reportedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "endorsedTo",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "checkedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "notedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "psychStaffSignature",
+    "type": "longtext",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "notedBySignature",
+    "type": "longtext",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "checkedBySignature",
+    "type": "longtext",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "endorsedToSignature",
+    "type": "longtext",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "reportedBySignature",
+    "type": "longtext",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "status",
+    "type": "enum('Submitted','Pending Review','Verified','Failed','Reassessment','For Reassessment','Rejected')",
+    "nullable": false,
+    "default": "Submitted",
+    "extra": ""
+   },
+   {
+    "name": "interventionType",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "interventionScheduleDate",
+    "type": "date",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "verifiedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "verifiedAt",
+    "type": "datetime",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "psychVerifiedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "psychVerifiedAt",
+    "type": "datetime",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "swVerifiedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "swVerifiedAt",
+    "type": "datetime",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED"
+   },
+   {
+    "name": "updatedAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+   }
+  ],
+  "intervention_requirements": [
+   {
+    "name": "id",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "interventionId",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "residentId",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "title",
+    "type": "varchar(150)",
+    "nullable": false,
+    "default": "Intervention Requirement",
+    "extra": ""
+   },
+   {
+    "name": "status",
+    "type": "enum('Pending','In Progress','Done','Overdue')",
+    "nullable": false,
+    "default": "Pending",
+    "extra": ""
+   },
+   {
+    "name": "startedAt",
+    "type": "date",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "dueDate",
+    "type": "date",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "completedAt",
+    "type": "datetime",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "completedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "notes",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED"
+   },
+   {
+    "name": "updatedAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+   }
+  ],
+  "intervention_tracker": [
+   {
+    "name": "id",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "residentId",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "violationId",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "guideId",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "guideInterventionId",
+    "type": "varchar(40)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "offenseLevel",
+    "type": "varchar(50)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "interventionType",
+    "type": "varchar(100)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "duration",
+    "type": "int",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "unit",
+    "type": "varchar(50)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "metadata",
+    "type": "json",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "status",
+    "type": "enum('In Progress','Completed')",
+    "nullable": false,
+    "default": "In Progress",
+    "extra": ""
+   },
+   {
+    "name": "scheduledAt",
+    "type": "datetime",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "psychosocialActivities",
+    "type": "json",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "startDate",
+    "type": "date",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "endDate",
+    "type": "date",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "completionDate",
+    "type": "date",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "notes",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "completedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED"
+   },
+   {
+    "name": "updatedAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+   }
+  ],
+  "intervention_types": [
+   {
+    "name": "id",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "type",
+    "type": "varchar(100)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "description",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "requiresDuration",
+    "type": "tinyint(1)",
+    "nullable": false,
+    "default": "1",
+    "extra": ""
+   },
+   {
+    "name": "createdAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED"
+   }
+  ],
+  "phaseProgress": [
+   {
+    "name": "id",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "residentId",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "admissionId",
+    "type": "varchar(40)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "phaseName",
+    "type": "varchar(100)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "enteredAt",
+    "type": "date",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "completedAt",
+    "type": "date",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "tasksRequired",
+    "type": "json",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "tasksCompleted",
+    "type": "json",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "notes",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "enteredBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "completedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "isCurrent",
+    "type": "tinyint(1)",
+    "nullable": false,
+    "default": "0",
+    "extra": ""
+   },
+   {
+    "name": "violationCount",
+    "type": "int",
+    "nullable": false,
+    "default": "0",
+    "extra": ""
+   },
+   {
+    "name": "advancementBlocked",
+    "type": "tinyint(1)",
+    "nullable": false,
+    "default": "0",
+    "extra": ""
+   },
+   {
+    "name": "demotionRecommended",
+    "type": "tinyint(1)",
+    "nullable": false,
+    "default": "0",
+    "extra": ""
+   },
+   {
+    "name": "demotionCount",
+    "type": "int",
+    "nullable": false,
+    "default": "0",
+    "extra": ""
+   },
+   {
+    "name": "createdAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED"
+   },
+   {
+    "name": "updatedAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+   },
+   {
+    "name": "modifiedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   }
+  ],
+  "quarterlyProgressReportSections": [
+   {
+    "name": "id",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "reportId",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "aspectKey",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "aspectLabel",
+    "type": "varchar(100)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "sortOrder",
+    "type": "tinyint",
+    "nullable": false,
+    "default": "0",
+    "extra": ""
+   },
+   {
+    "name": "assignedTo",
+    "type": "varchar(40)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "assignedToName",
+    "type": "varchar(150)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "assignedToRole",
+    "type": "varchar(50)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "assembledPresentLevel",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "assembledObservations",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "assembledInterventions",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "presentLevel",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "observations",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "interventions",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "status",
+    "type": "enum('Not Started','In Progress','Submitted','Returned')",
+    "nullable": false,
+    "default": "Not Started",
+    "extra": ""
+   },
+   {
+    "name": "signedByName",
+    "type": "varchar(150)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "signature",
+    "type": "longtext",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "returnedReason",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "submittedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "submittedAt",
+    "type": "datetime",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED"
+   },
+   {
+    "name": "updatedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "updatedAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+   }
+  ],
+  "quarterlyProgressReports": [
+   {
+    "name": "id",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "residentId",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "periodStart",
+    "type": "date",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "periodEnd",
+    "type": "date",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "periodLabel",
+    "type": "varchar(60)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "identifyingInformation",
+    "type": "json",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "narrative",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "status",
+    "type": "enum('Draft','Submitted','Under Review','Returned','Finalized')",
+    "nullable": false,
+    "default": "Draft",
+    "extra": ""
+   },
+   {
+    "name": "preparedByName",
+    "type": "varchar(150)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "preparedBySignature",
+    "type": "longtext",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "attestedByName",
+    "type": "varchar(150)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "attestedBySignature",
+    "type": "longtext",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "notedByName",
+    "type": "varchar(150)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "notedBySignature",
+    "type": "longtext",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED"
+   },
+   {
+    "name": "updatedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "updatedAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+   },
+   {
+    "name": "submittedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "submittedAt",
+    "type": "datetime",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "reviewedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "reviewedAt",
+    "type": "datetime",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "finalizedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "finalizedAt",
+    "type": "datetime",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "reviewNotes",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   }
+  ],
+  "reports": [
+   {
+    "name": "id",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "title",
+    "type": "varchar(150)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "type",
+    "type": "varchar(50)",
+    "nullable": false,
+    "default": "daily",
+    "extra": ""
+   },
+   {
+    "name": "date",
+    "type": "date",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "generatedBy",
+    "type": "varchar(150)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "status",
+    "type": "varchar(50)",
+    "nullable": false,
+    "default": "Completed",
+    "extra": ""
+   },
+   {
+    "name": "summary",
+    "type": "json",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdBy",
+    "type": "varchar(150)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "modifiedBy",
+    "type": "varchar(150)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED"
+   },
+   {
+    "name": "updatedAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+   }
+  ],
+  "residentAssignments": [
+   {
+    "name": "id",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "residentId",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "staffId",
+    "type": "varchar(40)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "userId",
+    "type": "varchar(40)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "assignmentType",
+    "type": "varchar(50)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "status",
+    "type": "enum('Active','Ended')",
+    "nullable": false,
+    "default": "Active",
+    "extra": ""
+   },
+   {
+    "name": "startAt",
+    "type": "datetime",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "endAt",
+    "type": "datetime",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "source",
+    "type": "varchar(50)",
+    "nullable": false,
+    "default": "manual",
+    "extra": ""
+   },
+   {
+    "name": "notes",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "updatedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED"
+   },
+   {
+    "name": "updatedAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+   }
+  ],
+  "residentPerformanceRatings": [
+   {
+    "name": "residentId",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "ratingYear",
+    "type": "smallint",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "ratingMonth",
+    "type": "tinyint",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "rating",
+    "type": "varchar(30)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "points",
+    "type": "int",
+    "nullable": false,
+    "default": "0",
+    "extra": ""
+   },
+   {
+    "name": "createdAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED"
+   },
+   {
+    "name": "updatedAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+   }
+  ],
+  "staff": [
+   {
+    "name": "id",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "name",
+    "type": "varchar(150)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "position",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "department",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "email",
+    "type": "varchar(150)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "phone",
+    "type": "varchar(50)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "status",
+    "type": "enum('Active','Inactive')",
+    "nullable": false,
+    "default": "Active",
+    "extra": ""
+   },
+   {
+    "name": "joinDate",
+    "type": "date",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "endDate",
+    "type": "date",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "documents",
+    "type": "json",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "userId",
+    "type": "varchar(40)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED"
+   },
+   {
+    "name": "updatedAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+   },
+   {
+    "name": "createdBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "modifiedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   }
+  ],
+  "triRecords": [
+   {
+    "name": "id",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "residentId",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "caseCycleKey",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "formVersion",
+    "type": "varchar(30)",
+    "nullable": false,
+    "default": "TRI-2025-PDF",
+    "extra": ""
+   },
+   {
+    "name": "reportingYear",
+    "type": "smallint",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "reportingMonth",
+    "type": "tinyint",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "status",
+    "type": "enum('Draft','Submitted','Under Review','Returned','For Reassessment','Finalized')",
+    "nullable": false,
+    "default": "Draft",
+    "extra": ""
+   },
+   {
+    "name": "responses",
+    "type": "json",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "partOnePoints",
+    "type": "int",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "deductions",
+    "type": "int",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "finalPoints",
+    "type": "int",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "rating",
+    "type": "varchar(30)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "previousPoints",
+    "type": "int",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "previousRating",
+    "type": "varchar(30)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "submissionDeadline",
+    "type": "date",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "effectiveDate",
+    "type": "date",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "submittedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "submittedAt",
+    "type": "datetime",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "reviewedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "reviewedAt",
+    "type": "datetime",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "finalizedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "finalizedAt",
+    "type": "datetime",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "reviewNotes",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "houseparentSignature",
+    "type": "longtext",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "houseparentSignedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "houseparentSignedAt",
+    "type": "datetime",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "signatories",
+    "type": "longtext",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "updatedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED"
+   },
+   {
+    "name": "updatedAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+   }
+  ],
+  "users": [
+   {
+    "name": "id",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "username",
+    "type": "varchar(100)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "displayName",
+    "type": "varchar(150)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "fullName",
+    "type": "varchar(150)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "password",
+    "type": "varchar(255)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "role",
+    "type": "varchar(50)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "accessibleModules",
+    "type": "json",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "childRecordTabs",
+    "type": "json",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "subModules",
+    "type": "json",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "status",
+    "type": "enum('Active','Inactive')",
+    "nullable": false,
+    "default": "Active",
+    "extra": ""
+   },
+   {
+    "name": "createdDate",
+    "type": "date",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "modifiedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED"
+   },
+   {
+    "name": "updatedAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+   }
+  ],
+  "violation_guide": [
+   {
+    "name": "id",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "name",
+    "type": "varchar(500)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "metadata",
+    "type": "json",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "category",
+    "type": "enum('Minor','Major')",
+    "nullable": false,
+    "default": "Minor",
+    "extra": ""
+   },
+   {
+    "name": "description",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "status",
+    "type": "enum('Active','Inactive')",
+    "nullable": false,
+    "default": "Active",
+    "extra": ""
+   },
+   {
+    "name": "createdBy",
+    "type": "varchar(100)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED"
+   },
+   {
+    "name": "updatedAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+   },
+   {
+    "name": "updatedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   }
+  ],
+  "violations": [
+   {
+    "name": "id",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "residentId",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "date",
+    "type": "date",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "type",
+    "type": "varchar(100)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "description",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "severity",
+    "type": "enum('Minor','Major','Critical')",
+    "nullable": false,
+    "default": "Minor",
+    "extra": ""
+   },
+   {
+    "name": "points",
+    "type": "int",
+    "nullable": false,
+    "default": "1",
+    "extra": ""
+   },
+   {
+    "name": "location",
+    "type": "varchar(150)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "bodyLocation",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "witnesses",
+    "type": "varchar(255)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "reportedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "reviewedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "psychVerifiedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "psychVerifiedAt",
+    "type": "datetime",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "psychVerification",
+    "type": "longtext",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "swVerifiedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "swVerifiedAt",
+    "type": "datetime",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "actionTaken",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "status",
+    "type": "enum('Pending Review','Under Investigation','Reviewed','Resolved','Escalated','Rejected')",
+    "nullable": false,
+    "default": "Pending Review",
+    "extra": ""
+   },
+   {
+    "name": "requiresAssessment",
+    "type": "tinyint(1)",
+    "nullable": false,
+    "default": "1",
+    "extra": ""
+   },
+   {
+    "name": "assessmentTriggered",
+    "type": "tinyint(1)",
+    "nullable": false,
+    "default": "0",
+    "extra": ""
+   },
+   {
+    "name": "assessmentCompleted",
+    "type": "tinyint(1)",
+    "nullable": false,
+    "default": "0",
+    "extra": ""
+   },
+   {
+    "name": "offenseNumber",
+    "type": "varchar(20)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "interventionStartDate",
+    "type": "date",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "interventionMonth",
+    "type": "varchar(7)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "clearedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "clearedAt",
+    "type": "datetime",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "incidentGroupId",
+    "type": "varchar(60)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "guideId",
+    "type": "varchar(40)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "modifiedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED"
+   },
+   {
+    "name": "updatedAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+   }
+  ]
+ }
+}

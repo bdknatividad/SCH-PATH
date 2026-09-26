@@ -22,12 +22,37 @@ import { lazy, ComponentType } from 'react';
  * list. The explicit form also keeps each chunk's name stable in the build
  * output, which matters when reading a deployed bundle's network waterfall.
  */
+const CHUNK_RELOAD_KEY = 'sch-path:chunk-reload';
+
+/** A failed dynamic import of a build chunk (stale deploy, network blip). */
+export function isChunkLoadError(error: unknown): boolean {
+  const text = String((error as { message?: string })?.message || error || '');
+  return /Failed to fetch dynamically imported module|Importing a module script failed|error loading dynamically imported module|Loading chunk .* failed|is not a valid JavaScript MIME type|Expected a JavaScript module/i.test(text);
+}
+
 export function lazyComponent<T extends ComponentType<any>>(
   loader: () => Promise<Record<string, unknown>>,
   exportName: string,
 ): React.LazyExoticComponent<T> {
   return lazy(async () => {
-    const mod = await loader();
+    let mod: Record<string, unknown>;
+    try {
+      mod = await loader();
+      // Loaded fine: allow a future stale-chunk reload again.
+      sessionStorage.removeItem(CHUNK_RELOAD_KEY);
+    } catch (error) {
+      // After a new deploy the page's chunk file names change, so a tab that
+      // was already open asks for files that no longer exist (the host then
+      // serves index.html, "not a JavaScript module"). Reload once to pick up
+      // the new build instead of showing the error page. The guard stops a
+      // reload loop if the chunk is genuinely broken.
+      if (isChunkLoadError(error) && !sessionStorage.getItem(CHUNK_RELOAD_KEY)) {
+        sessionStorage.setItem(CHUNK_RELOAD_KEY, String(Date.now()));
+        window.location.reload();
+        return new Promise<never>(() => {});
+      }
+      throw error;
+    }
 
     // A default export wins when the name asked for is `default`.
     if (exportName === 'default') {
