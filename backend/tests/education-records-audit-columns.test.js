@@ -95,6 +95,26 @@ test('both audit columns are added to an existing database at boot', () => {
   }
 });
 
+test('the sort column is indexed, so the filesort cannot exhaust the sort buffer', () => {
+  // The missing column was only the FIRST failure on this query.
+  //
+  // `files` holds the learner's uploads as JSON, and one live row measured
+  // 277 KB of it (EDU001, two images). `SELECT * ... ORDER BY createdAt DESC`
+  // therefore has to filesort rows that size inside `sort_buffer_size`, which
+  // defaults to 256 KB, and the endpoint answered 400 a second time — with a
+  // different masked message (ER_OUT_OF_SORTMEMORY). It only became visible once
+  // the unknown column stopped aborting the statement during preparation, which
+  // is why fixing the column alone did not restore the module.
+  //
+  // An index on the sort column lets InnoDB return the rows in index order and
+  // skip the filesort, so this is pinned alongside the columns.
+  assert.match(
+    SERVER,
+    /ensureIndex\(\s*'education_records'\s*,\s*'idx_education_createdAt'\s*,\s*'createdAt'\s*\)/,
+    'server.js no longer indexes education_records.createdAt; a deployed database whose `files` payload is large keeps 400ing on GET /api/education-records',
+  );
+});
+
 test('the migration sits inside runMigrations, where ensureColumn is in scope', () => {
   // `ensureColumn` is a nested helper. A call placed outside `runMigrations()`
   // would be a ReferenceError at boot, not a syntax error, so `node --check`
@@ -106,4 +126,12 @@ test('the migration sits inside runMigrations, where ensureColumn is in scope', 
 
   const callAt = SERVER.search(/ensureColumn\(\s*'education_records'\s*,\s*'createdAt'/);
   assert.ok(callAt > helperAt, 'the education_records migration is declared before ensureColumn is defined');
+
+  // Same hazard for the index: `ensureIndex` is a second nested helper, and a
+  // call placed outside `runMigrations()` is a ReferenceError at boot, invisible
+  // to `node --check`.
+  const indexHelperAt = SERVER.indexOf('async function ensureIndex(', start);
+  assert.ok(indexHelperAt > start, 'ensureIndex is no longer declared inside runMigrations()');
+  const indexCallAt = SERVER.search(/ensureIndex\(\s*'education_records'/);
+  assert.ok(indexCallAt > indexHelperAt, 'the education_records index is declared before ensureIndex is defined');
 });

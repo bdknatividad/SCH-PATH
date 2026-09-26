@@ -2581,6 +2581,25 @@ async function runMigrations() {
   await ensureColumn('education_records', 'createdAt', 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP');
   await ensureColumn('education_records', 'updatedAt', 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP');
 
+  // The same list query has a SECOND failure behind the first.
+  //
+  // `files` holds the learner's uploaded documents as JSON, and one row on the
+  // live database measured 277 KB of it (EDU001, two images). The list endpoint
+  // is `SELECT * ... ORDER BY createdAt DESC`, so MySQL has to filesort rows that
+  // size inside `sort_buffer_size`, which defaults to 256 KB. The sort therefore
+  // failed with ER_OUT_OF_SORTMEMORY and the endpoint answered 400 again -- with
+  // a different masked message, and only once the missing column above stopped
+  // aborting the query first. An unknown column is rejected while the statement
+  // is being prepared, so the sort was never reached and this was invisible.
+  //
+  // An index on the sort column is the fix rather than a larger sort buffer: the
+  // buffer is a managed-database setting we do not control, whereas an index
+  // lets InnoDB return the rows in index order and skip the filesort entirely.
+  // The payload is deliberately NOT trimmed instead: the Education UI renders
+  // `student.files` (count, list, and per-file removal) straight off this
+  // response, so dropping the column would fix the query by breaking the page.
+  await ensureIndex('education_records', 'idx_education_createdAt', 'createdAt');
+
   // ── Quarterly Progress Report ──
   // Created here rather than only in schema.sql so an already-provisioned
   // database picks the module up on the next boot without a manual migration.
