@@ -161,11 +161,17 @@ const saveProgress = (r: ProgressReport[]) => {
 // is not enrolled at all (the enrollment window closed, or they are between
 // schools) is recorded as Tutorial rather than being forced into a school level
 // they do not have.
+//
+// The generic 'Alternative Learning System (ALS)' is deliberately absent: with
+// ALS Elementary / Junior High / Senior High separated, it was the one option
+// that said nothing about where the learner actually is, and it was the only
+// remaining level offered here whose legacy counterpart had already been
+// retired. It stays in the type union and the colour maps so a record written
+// before the split still renders and still filters.
 const EDUCATION_LEVELS: EducationLevel[] = [
   'High School',
   'Senior High School',
   'Tutorial',
-  'Alternative Learning System (ALS)',
   'ALS Elementary',
   'ALS Junior High School',
   'ALS Senior High School',
