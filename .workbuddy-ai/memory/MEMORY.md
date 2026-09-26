@@ -24,6 +24,13 @@ against the live pair. Rationale for every rule below is in the daily logs; this
   parse (it does not see an `Object.entries` literal). `mapRow` emits only `col in row`, so a
   `constants.js` column is load-bearing for the read path — and a key absent from every row proves the
   column is missing from the deployed DB.
+- **A wide JSON/TEXT column turns `ORDER BY` into a 400.** MySQL filesorts a row together with the
+  columns it carries, inside `sort_buffer_size` (256 KB default) — a 277 KB `files` blob on
+  `education_records` gave `ER_OUT_OF_SORTMEMORY`, masked by `errorHandler` and swallowed by the UI as
+  "no records". An index is **not** sufficient (with few rows the optimizer keeps the filesort): set
+  `sortInApplication: true` on the resource in `constants.js` and let `baseController.getAll` sort in JS
+  (NULLs last, numeric-aware). An unknown column is rejected at prepare time, so the sort error is
+  invisible until the column exists — expect two sequential fixes, not one.
 - **A resident-scoped filter must know how the resource is keyed** — `rowResidentIds()` reads
   `residentId`, but a `children` row is keyed by `id`, so the Houseparent filter in `/store` dropped
   every resident. Fixed in `ab3fc51`, pinned by `tests/store-houseparent-caseload.test.js`.
@@ -43,9 +50,14 @@ boundary (`utils/serverTime.js` + `middleware/isoTimestamps.js`). `DATE` stays b
 ## Build and deploy
 
 - Lazy routes via `@/app/utils/lazyComponent`. **Never add `pdfjs-dist` to `manualChunks`**. Entry chunk
-  budget ≈ 142 kB gzip (currently 111 kB / 32.9 kB gzip).
+  budget ≈ 142 kB gzip (currently 112.15 kB / 33.28 kB gzip).
 - `vite build` does not run `tsc`; 9 known type errors in 4 components don't block it. It cannot empty
-  `dist/assets` here — build to a fresh dir with `--emptyOutDir`.
+  `dist/assets` here — build to a fresh dir with `--emptyOutDir`. **The build is the only gate that sees
+  a `.tsx` parse error**: `node --check` only takes `.js`/`.mjs`, and the suite reads `.tsx` as *text*,
+  so a duplicate declaration (e.g. `const isAbsconded` twice in `ChildDetail.tsx` after a merge splice)
+  is invisible to both and shows up only as `[vite:esbuild] Transform failed`. Run the build before
+  claiming a merge is clean. Note `.gitignore` has `dist/` and `dist-verify*/` but **not** `dist-<anything
+  else>/` — a build dir with another name shows up as untracked.
 - Uploads are **base64 in MySQL `LONGTEXT`**. Docker context is the **repository root** (Railway
   `dockerfilePath = backend/Dockerfile`): the backend reads PDF templates and the logo from the frontend
   tree at runtime.
@@ -58,6 +70,13 @@ boundary (`utils/serverTime.js` + `middleware/isoTimestamps.js`). `DATE` stays b
 - **`schema.sql` is never executed** — only boot migrations in `server.js` and lazy `CREATE TABLE`s shape
   a deployed DB. `/store` swallows per-table errors into `[]`; a literal route after a `/:param` sibling
   404s. **There is no CI** — `master` auto-deploys on both hosts.
+- A new **index** needs `ensureIndex(table, name, column)` inside `runMigrations()`, alongside
+  `ensureColumn` — `CREATE TABLE IF NOT EXISTS` never revisits an existing table. A helper called
+  *outside* `runMigrations()` is a boot-time ReferenceError that `node --check` cannot see.
+- **When a fix makes an endpoint fail *differently*, that is progress, not a regression.** Read the new
+  error instead of re-opening the old one: `/api/education-records` went `ER_BAD_FIELD_ERROR` →
+  `ER_OUT_OF_SORTMEMORY` → 200 across three commits, and the second failure was only reachable after the
+  first was fixed.
 
 ## Notifications and access
 
@@ -68,6 +87,12 @@ in `services/alertStream.js` (`GET /api/alerts/stream`, read with `fetch` + `Rea
 - **An empty `accessibleModules` means "fall back to the role's full matrix".** Read the role definition,
   never the stored grant; a dropped alias in `accessDefaults.canonicalizeModules` is a **silent
   revocation**.
+- **A session with `fullAccess` but no `modules` is not a resolved snapshot.** `isSnapshot()` must require
+  `Array.isArray(subject.modules)`; `AuthContext` stores `fullAccess` on the *user* beside a null `access`,
+  so a loose guard mistook the user object for a snapshot and `snapshot.modules.some(...)` crashed
+  `/violations` for every session restored from localStorage (i.e. every non-full-access role). Build test
+  fixtures from the server's own `buildAccessSnapshot()` + `listAccessibleMenus()` — a hand-rolled fixture
+  with `access: null, fullAccess: false` nearly got this dismissed as an artifact.
 - **A notification is invisible to its own actor** — `visibilityClause` ends with `actorUsername <> ?`.
   Never diagnose a "missing" notification from the actor's own account.
 - `/alerts`, `/violations`, `/phaseProgress` have no module guard; `DELETE /api/alerts/:id` lets any
@@ -76,7 +101,9 @@ in `services/alertStream.js` (`GET /api/alerts/stream`, read with `fetch` + `Rea
   are in `backend/src/scripts/seedDatabase.js` (`centerhead`/`centerhead123` works live). **There is no
   `admin` account**, and the live `socialworker` password is **not** the seed — do not reset a real
   account to get a token.
-- `/store` answers `{success, data}`. `/api/children` is ungated at the mount and scopes Houseparents
+- `/store` answers `{success, data}` — mounted **under `/api`**, so the path is `/api/store`; a bare
+  `/store` is a 404 (same for `/api/dashboard/schedule-summary`). `/api/children` is ungated at the
+  mount and scopes Houseparents
   inside the controller; `/store` has no `children` key in `STORE_MODULE_BY_RESOURCE`. `/api/tri` (list)
   is gated by the **Houseparent** module while `/api/tri/monitor` and `/summary` are role-gated. A 404 on
   `GET /api/admissions`, `/resident-assignments`, `/discharge-plans` or `/incident-reports` is correct —
@@ -107,6 +134,8 @@ in `services/alertStream.js` (`GET /api/alerts/stream`, read with `fetch` + `Rea
   the token. **Windows traps:** Python text-mode writes convert LF → CRLF (use `newline=''`); python's
   `/tmp` is `C:\tmp` but `$(cygpath -w /tmp)` is `%TEMP%`; restore a mutated file with `Path.write_bytes`.
   Heredocs piped to `node -e` get shell-mangled — write the script with the file tool.
+  `subprocess.run(['npx', …])` is **not** resolvable on Windows (`FileNotFoundError`) — pass a command
+  string with `shell=True`, and restore mutated files in a `finally` that verifies by sha256.
 
 ## Skills
 
