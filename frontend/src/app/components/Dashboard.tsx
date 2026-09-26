@@ -689,6 +689,12 @@ interface NurseDashboardProps {
  *    endorsement thread (`ChildDetail` appends a `[ENDORSEMENTS]` block to the
  *    same column), so only the part above the marker is a medical note.
  */
+/**
+ * The `id` of the Nurse's Upcoming Assessments card, so the tile above it can
+ * scroll to the list rather than linking to a module the role cannot open.
+ */
+const NURSE_UPCOMING_ANCHOR = 'nurse-upcoming-assessments';
+
 function NurseDashboard({
   displayRole, children, documents, healthRecords, onOpen,
 }: NurseDashboardProps) {
@@ -780,6 +786,7 @@ function NurseDashboard({
       caption: overdueCount ? `${overdueCount} overdue` : 'Follow-ups in 30 days',
       icon: AlertCircle,
       path: '/health',
+      scrollTo: null,
     },
     {
       title: 'Health Updates',
@@ -787,15 +794,21 @@ function NurseDashboard({
       caption: 'Records logged this week',
       icon: HeartPulse,
       path: '/health',
+      scrollTo: null,
     },
     {
       title: 'Upcoming Assessments',
       value: upcoming.length,
-      caption: 'Scheduled from today',
+      caption: 'Scheduled from today — see the list below',
       icon: Calendar,
-      // No path: the Nurse reads the schedule but holds no Assessments module,
-      // so the Assessments page would bounce straight back out.
+      // No route: the Nurse reads the schedule but holds no Assessments module,
+      // so `/assessments` answers 403 and the page would bounce straight back
+      // out. The count is still worth acting on, and the list it counts is
+      // already further down this same page, so the tile scrolls to it instead
+      // of doing nothing. Each row there opens the resident's record, which the
+      // Nurse does hold.
       path: null,
+      scrollTo: NURSE_UPCOMING_ANCHOR,
     },
     {
       title: 'Health Documents',
@@ -803,6 +816,7 @@ function NurseDashboard({
       caption: 'Filed under Medical Records',
       icon: FileText,
       path: '/documents?tab=folders',
+      scrollTo: null,
     },
   ];
 
@@ -819,12 +833,27 @@ function NurseDashboard({
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {tiles.map((tile) => {
           const Icon = tile.icon;
-          const clickable = Boolean(tile.path);
+          const clickable = Boolean(tile.path || tile.scrollTo);
           return (
             <Card
               key={tile.title}
               className={`border-none shadow-sm ${clickable ? 'cursor-pointer hover:shadow-md hover:ring-2 hover:ring-[#FFD100] active:scale-95 transition-all' : ''}`}
-              onClick={clickable ? () => onOpen(tile.path as string) : undefined}
+              onClick={
+                clickable
+                  ? () => {
+                      if (tile.path) { onOpen(tile.path as string); return; }
+                      // A tile for a module this role cannot open still has an
+                      // answer on this page. Scroll to it and hand it focus, so
+                      // the interaction works for keyboard and screen-reader
+                      // users too — a bare scroll leaves focus where it was.
+                      const target = document.getElementById(tile.scrollTo as string);
+                      if (!target) return;
+                      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                      target.setAttribute('tabindex', '-1');
+                      target.focus({ preventScroll: true });
+                    }
+                  : undefined
+              }
             >
               <CardContent className="p-4">
                 <div className="flex items-start justify-between">
@@ -921,8 +950,9 @@ function NurseDashboard({
           </CardContent>
         </Card>
 
-        {/* Upcoming Assessments */}
-        <Card className="border-none shadow-sm">
+        {/* Upcoming Assessments — the target of the tile above. `scroll-mt`
+            keeps the heading clear of the sticky top bar when scrolled to. */}
+        <Card id={NURSE_UPCOMING_ANCHOR} className="border-none shadow-sm scroll-mt-24 outline-none">
           <CardHeader className="border-b border-gray-100 pb-3">
             <CardTitle className="flex items-center gap-2 text-[#2F3E46]">
               <Calendar className="w-5 h-5 text-[#FFD100]" /> Upcoming Assessments
