@@ -600,11 +600,9 @@ async function assignInterventions(req, res, next) {
  */
 async function getScheduledInterventions(req, res, next) {
   try {
-    // The facility's today, not UTC's. `new Date().toISOString()` is the UTC
-    // date, which in GMT+8 is still *yesterday* until 08:00 — so for the first
-    // eight hours of every day the default window was a day behind and the
-    // dashboard's "Assigned Schedules" listed the wrong day's sessions.
-    const today = manilaToday();
+    // Today in the facility's timezone. `toISOString()` is UTC, which is still
+    // yesterday until 08:00 in the Philippines.
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
     const from = String(req.query.from || today).slice(0, 10);
     const to = String(req.query.to || from).slice(0, 10);
 

@@ -14,11 +14,7 @@ const {
 } = require('../utils/constants');
 const notifications = require('../services/notificationService');
 const { canAccessResident } = require('./assignmentController');
-const BODY_MARKINGS = require('../config/bodyMarkings.json');
 const { ABSCONDED_STATUS } = require('../utils/abscond');
-
-const MARKING_TYPES = BODY_MARKINGS.markingTypes;
-const MARKING_LOCATIONS = BODY_MARKINGS.locations;
 
 function normalizeName(value) {
   return String(value || '')

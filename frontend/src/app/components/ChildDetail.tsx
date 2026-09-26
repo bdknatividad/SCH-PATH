@@ -182,6 +182,12 @@ const casePhases = PHASE_CONFIG.map((p) => p.label);
 interface ChildDetailProps {
   id?: string;
   onBack?: () => void;
+  /**
+   * The tab to open on when the page is embedded (e.g. inside the Houseparent
+   * Case Load). An embedded page does not read `?tab=` — that belongs to the
+   * page hosting it.
+   */
+  initialTab?: string;
 }
 
 interface AdmissionRecord {
@@ -222,7 +228,7 @@ interface AdmissionRecord {
 const PDF_WIDTH = 936;
 const PDF_HEIGHT = 612;
 
-export function ChildDetail({ id: idProp, onBack }: ChildDetailProps = {}) {
+export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps = {}) {
   const { id: idParam } = useParams();
   const id = idProp ?? idParam;
   const navigate = useNavigate();
@@ -258,6 +264,7 @@ export function ChildDetail({ id: idProp, onBack }: ChildDetailProps = {}) {
     : rbacChildRecordTabs;
 
   const [activeTab, setActiveTab] = useState(() => {
+    if (idProp) return initialTab || 'personal';
     const params = new URLSearchParams(location.search);
     const tab = params.get('tab');
     return tab || 'personal';
@@ -271,6 +278,7 @@ export function ChildDetail({ id: idProp, onBack }: ChildDetailProps = {}) {
    * was. Re-sync whenever the query string changes.
    */
   useEffect(() => {
+    if (idProp) return;
     const tab = new URLSearchParams(location.search).get('tab');
     if (tab && tab !== activeTab) {
       setActiveTab(tab);
@@ -302,6 +310,8 @@ export function ChildDetail({ id: idProp, onBack }: ChildDetailProps = {}) {
   // Medical Notes and the medical documents are managed by the Nurse and the
   // Center Head only — the same `Health` edit capability the Health module gates
   // its own create/edit on, so the two surfaces cannot disagree.
+  const isAbsconded = children.find(c => c.id === id)?.status === 'Absconded';
+  // An absconded resident's record is view-only.
   const canEditMedical = can('Health', 'edit') && !isAbsconded;
   const [isEditingMedicalNotes, setIsEditingMedicalNotes] = useState(false);
   const [medicalNotesDraft, setMedicalNotesDraft] = useState('');
@@ -917,7 +927,7 @@ export function ChildDetail({ id: idProp, onBack }: ChildDetailProps = {}) {
 
   if (!child) return <div className="p-10 text-center">Resident record not found.</div>;
 
-  // Abscond — Center Head / Admin / Social Worker only (the API enforces the same).
+  // Abscond — Center Head / Social Worker only (the API enforces the same).
   const canMarkAbscond = ['centerhead', 'admin', 'socialworker'].includes(String(user?.role || '').toLowerCase().replace(/[\s_-]+/g, ''));
   const handleAbscond = async () => {
     const confirmed = await systemDialog.confirm({
@@ -979,7 +989,7 @@ export function ChildDetail({ id: idProp, onBack }: ChildDetailProps = {}) {
           the original even 5-column layout.
         */}
         <TabsList
-          className="flex w-full max-w-full items-center justify-start gap-1 overflow-x-auto bg-gray-100/50 p-1 lg:grid"
+          className="flex w-full max-w-full items-center justify-start gap-1 overflow-x-auto overflow-y-hidden bg-gray-100/50 p-1 lg:grid"
           // The grid used to be a fixed 5 columns. The tab count is the role's
           // now, so it is derived rather than assumed.
           style={{ gridTemplateColumns: `repeat(${Math.max(childRecordTabs.length, 1)}, minmax(0, 1fr))` }}

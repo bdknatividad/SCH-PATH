@@ -774,13 +774,16 @@ async function runMigrations() {
   // the body" — so the record needs somewhere to say *which* part.
   await ensureColumn('violations', 'bodyLocation', 'VARCHAR(100) NULL', 'location');
 
-  // `type` holds `guide.name`, so it has to be as wide as the guide name it
-  // copies: violationController.create() writes `type: guide.name` straight
-  // through buildInsertPayload. violation_guide.name is VARCHAR(500) and 10 of
-  // the 33 official names exceed 100 characters (the longest is 189), so at
-  // VARCHAR(100) logging any of those violations failed with ER_DATA_TOO_LONG —
-  // which the user sees as "Database error occurred" with no column named.
-  await ensureColumnLength('violations', 'type', 500, 'VARCHAR(500) NOT NULL');
+  // Dual verification of a logged incident: the Psychological Support Staff and
+  // the Social Worker each verify it, and it proceeds only when both have.
+  // `psychVerification` keeps the clinical decision the Psychological Staff made
+  // (action taken, schedule, psychosocial activities) until the second
+  // verification completes the review.
+  await ensureColumn('violations', 'psychVerifiedBy', 'VARCHAR(100) NULL', 'reviewedBy');
+  await ensureColumn('violations', 'psychVerifiedAt', 'DATETIME NULL', 'psychVerifiedBy');
+  await ensureColumn('violations', 'psychVerification', 'LONGTEXT NULL', 'psychVerifiedAt');
+  await ensureColumn('violations', 'swVerifiedBy', 'VARCHAR(100) NULL', 'psychVerification');
+  await ensureColumn('violations', 'swVerifiedAt', 'DATETIME NULL', 'swVerifiedBy');
 
   console.log('Migration: violations table ensured.');
 
@@ -1211,6 +1214,33 @@ async function runMigrations() {
     console.warn('Migration warning (residentAssignments):', err.message);
   }
 
+  // End every Houseparent Case Load assignment that was created automatically
+  // rather than by a person in the Houseparent Module:
+  //   - source 'system'                     the boot seed that assigned every
+  //                                         Active resident to every Houseparent
+  //   - source 'admission' / 'admission-update'
+  //                                         the old Admission Slip code that turned
+  //                                         the HP on Duty into the Case Load Manager
+  // Neither writer exists any more. The rows are ended (status 'Ended'), not
+  // deleted, so the history stays. Idempotent: once ended there is nothing left
+  // to match, and manual assignments (source 'caseload' / 'manual') are untouched.
+  try {
+    const [result] = await pool.query(
+      `UPDATE residentAssignments
+          SET status = 'Ended', endAt = COALESCE(endAt, NOW()), updatedBy = 'system-cleanup',
+              notes = CONCAT(COALESCE(notes, ''), CASE WHEN notes IS NULL OR notes = '' THEN '' ELSE ' ' END,
+                             '[Ended: automatic assignment, not made in the Houseparent Module]')
+        WHERE status = 'Active'
+          AND LOWER(TRIM(assignmentType)) = 'houseparent'
+          AND source IN ('system', 'admission', 'admission-update')`
+    );
+    if (result?.affectedRows) {
+      console.log(`Migration: ended ${result.affectedRows} automatic Houseparent assignment(s); assign Case Load Managers from the Houseparent Module.`);
+    }
+  } catch (err) {
+    console.warn('Migration warning (automatic Houseparent assignments):', err.message);
+  }
+
   try {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS triRecords (
@@ -1252,6 +1282,7 @@ async function runMigrations() {
         sectionchiefSignature LONGTEXT NULL,
         sectionchiefSignedBy VARCHAR(100) NULL,
         sectionchiefSignedAt DATETIME NULL,
+        signatories LONGTEXT NULL,
         createdBy VARCHAR(100) NULL,
         updatedBy VARCHAR(100) NULL,
         createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -1263,6 +1294,95 @@ async function runMigrations() {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
     console.log('Migration: triRecords table ensured.');
+
+    // The page-8 block's per-line columns. These are NOT legacy: the PDF renderer
+    // reads the Houseparent's E-Signature straight out of `houseparentSignature`,
+    // and each other line is mirrored here so a signature is never held in only
+    // one store. `centerhead*` / `sectionchief*` keep the names they shipped with
+    // (the SWO II / Center Head and SWO III / Section Chief lines) so signatures
+    // already stored on live records are not moved.
+    for (const [column, definition] of [
+      ['houseparentSignature', 'LONGTEXT NULL'],
+      ['houseparentSignedBy', 'VARCHAR(100) NULL'],
+      ['houseparentSignedAt', 'DATETIME NULL'],
+      ['adminOfficerSignature', 'LONGTEXT NULL'],
+      ['adminOfficerSignedBy', 'VARCHAR(100) NULL'],
+      ['adminOfficerSignedAt', 'DATETIME NULL'],
+      ['swo1Signature', 'LONGTEXT NULL'],
+      ['swo1SignedBy', 'VARCHAR(100) NULL'],
+      ['swo1SignedAt', 'DATETIME NULL'],
+      ['centerheadSignature', 'LONGTEXT NULL'],
+      ['centerheadSignedBy', 'VARCHAR(100) NULL'],
+      ['centerheadSignedAt', 'DATETIME NULL'],
+      ['sectionchiefSignature', 'LONGTEXT NULL'],
+      ['sectionchiefSignedBy', 'VARCHAR(100) NULL'],
+      ['sectionchiefSignedAt', 'DATETIME NULL'],
+    ]) {
+      try {
+        await pool.query(`ALTER TABLE triRecords ADD COLUMN ${column} ${definition}`);
+        console.log(`Migration: triRecords.${column} added`);
+      } catch (err) {
+        // 1060 = duplicate column, the normal case on every boot after the first.
+        if (err && err.errno === 1060) continue;
+        console.warn(`Migration warning (triRecords.${column}):`, err.message);
+      }
+    }
+
+    // Backfill: a signature recorded through the older per-line route lives only in
+    // its column. Copy it into the matching `signatories` slot so the renderer sees
+    // it. A slot that already holds a signature is never overwritten, and this is
+    // idempotent — after the first pass every column has a slot to match.
+    try {
+      let backfilled = 0;
+      const [triRows] = await pool.query(
+        `SELECT id, signatories,
+                adminOfficerSignature, adminOfficerSignedBy, adminOfficerSignedAt,
+                swo1Signature, swo1SignedBy, swo1SignedAt,
+                centerheadSignature, centerheadSignedBy, centerheadSignedAt,
+                sectionchiefSignature, sectionchiefSignedBy, sectionchiefSignedAt
+           FROM triRecords`
+      );
+      for (const row of triRows) {
+        let store = row.signatories;
+        if (typeof store === 'string') {
+          try { store = JSON.parse(store); } catch { store = null; }
+        }
+        if (!store || typeof store !== 'object') store = {};
+
+        let touched = false;
+        for (const [slot, prefix] of [
+          ['administrativeOfficer', 'adminOfficer'],
+          ['caseManager', 'swo1'],
+          ['centerHead', 'centerhead'],
+          ['sectionChief', 'sectionchief'],
+        ]) {
+          if (store[slot] && store[slot].signature) continue;
+          const signature = row[`${prefix}Signature`];
+          if (!signature) continue;
+          const signedAt = row[`${prefix}SignedAt`];
+          store[slot] = {
+            ...(store[slot] || {}),
+            signature,
+            signedBy: row[`${prefix}SignedBy`] || null,
+            signedAt: signedAt ? new Date(signedAt).toISOString() : null,
+          };
+          touched = true;
+        }
+
+        if (touched) {
+          await pool.query(
+            'UPDATE triRecords SET signatories = ?, updatedBy = ? WHERE id = ?',
+            [JSON.stringify(store), 'migration-signatories-backfill', row.id]
+          );
+          backfilled += 1;
+        }
+      }
+      if (backfilled) {
+        console.log(`Migration: backfilled signatories for ${backfilled} TRI record(s) from the per-line columns.`);
+      }
+    } catch (err) {
+      console.warn('Migration warning (signatories backfill):', err.message);
+    }
   } catch (err) {
     console.warn('Migration warning (triRecords):', err.message);
   }
@@ -1604,6 +1724,9 @@ async function runMigrations() {
         modifiedBy: 'VARCHAR(100) NULL',
         createdAt: 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP',
         updatedAt: 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP',
+        // When and by whom a resident was marked Absconded.
+        abscondedAt: 'DATETIME NULL',
+        abscondedBy: 'VARCHAR(100) NULL',
       };
       for (const [column, definition] of Object.entries(childColumnDefinitions)) {
         if (!existingChildColumns.has(column)) {
@@ -1611,10 +1734,9 @@ async function runMigrations() {
           console.log(`Migration: added children.${column}.`);
         }
       }
-      // When and by whom a resident was marked Absconded is added below, in its
-      // own try/catch, rather than here: this block abandons every remaining
-      // statement once one throws, and those two columns are read by the generic
-      // /store contract for `children`.
+      // An existing database has the two-value status; widen it so a resident
+      // can be marked Absconded. Idempotent, and no existing value changes.
+      await pool.query(`ALTER TABLE children MODIFY COLUMN status ENUM('Active', 'Discharged', 'Absconded') NOT NULL DEFAULT 'Active'`);
     }
   } catch (err) {
     console.warn('Migration warning (childRecordTabs):', err.message);
@@ -2088,18 +2210,10 @@ async function runMigrations() {
     ['houseparentSignature', 'LONGTEXT NULL'],
     ['houseparentSignedBy', 'VARCHAR(100) NULL'],
     ['houseparentSignedAt', 'DATETIME NULL'],
-    ['adminOfficerSignature', 'LONGTEXT NULL'],
-    ['adminOfficerSignedBy', 'VARCHAR(100) NULL'],
-    ['adminOfficerSignedAt', 'DATETIME NULL'],
-    ['swo1Signature', 'LONGTEXT NULL'],
-    ['swo1SignedBy', 'VARCHAR(100) NULL'],
-    ['swo1SignedAt', 'DATETIME NULL'],
-    ['centerheadSignature', 'LONGTEXT NULL'],
-    ['centerheadSignedBy', 'VARCHAR(100) NULL'],
-    ['centerheadSignedAt', 'DATETIME NULL'],
-    ['sectionchiefSignature', 'LONGTEXT NULL'],
-    ['sectionchiefSignedBy', 'VARCHAR(100) NULL'],
-    ['sectionchiefSignedAt', 'DATETIME NULL'],
+    // The typed names and E-Signatures of the other page-8 signature lines
+    // (Houseparent name, Administrative Officer, SWO I / Case Manager, and the
+    // two pre-printed signatories), stored as JSON.
+    ['signatories', 'LONGTEXT NULL'],
   ]) {
     try {
       await pool.query(`ALTER TABLE triRecords ADD COLUMN ${column} ${definition}`);
@@ -2183,7 +2297,7 @@ async function runMigrations() {
   }
   // Form 08's four sign-offs used to be printed names only. Each now also keeps
   // the signature that was drawn for it, stored beside the name it belongs to.
-  for (const column of ['reportedBySignature', 'endorsedToSignature', 'checkedBySignature', 'notedBySignature']) {
+  for (const column of ['reportedBySignature', 'endorsedToSignature', 'checkedBySignature', 'notedBySignature', 'psychStaffSignature']) {
     try {
       await ensureColumn('incidentReports', column, 'LONGTEXT NULL', 'notedBy');
     } catch (err) {

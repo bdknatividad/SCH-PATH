@@ -1650,10 +1650,9 @@ function AdmissionSlipEditor({
                     (
                       houseparent
                     ) => {
-                      const isFull =
-                        houseparent.assignedCount >=
-                        houseparent.maxCaseload;
-
+                      // HP on Duty is not a Case Load assignment, so the
+                      // Houseparent's case-load size neither shows here nor
+                      // blocks choosing them as the one on duty.
                       return (
                         <SelectItem
                           key={
@@ -1662,25 +1661,10 @@ function AdmissionSlipEditor({
                           value={
                             houseparent.id
                           }
-                          disabled={
-                            isFull
-                          }
                         >
                           {
                             houseparent.label
                           }
-                          {' — '}
-                          {
-                            houseparent.assignedCount
-                          }
-                          /
-                          {
-                            houseparent.maxCaseload
-                          }
-
-                          {isFull
-                            ? ' (Full)'
-                            : ''}
                         </SelectItem>
                       );
                     }
@@ -2221,16 +2205,15 @@ export function ChildRecords() {
       referringPartySignature: /^data:image\/(png|jpeg|jpg);base64,/i.test(String(source.referringPartySignature || ''))
         ? source.referringPartySignature
         : '',
-      houseparentOnDuty: source.houseparentOnDuty || assignment?.userLabel || '',
+      houseparentOnDuty: source.houseparentOnDuty || '',
       houseparentSignature: source.houseparentSignature || '',
       residentImage: source.residentImage || '',
       /*
-       * The admission's own id first, because it is what was chosen when this
-       * admission was created; the assignment row is the fallback for
-       * admissions that predate the column. Preferring the assignment would
-       * re-point a historical admission at whoever holds the resident now.
+       * The Houseparent on Duty comes from the admission alone. The Case Load
+       * Manager (residentAssignments) is a separate field and must never be
+       * read back into the slip as if it were the HP on Duty.
        */
-      assignedHouseparentId: source.houseparentUserId || assignment?.userId || '',
+      assignedHouseparentId: source.houseparentUserId || '',
     });
     setFormErrors({});
     setFormStep(1);
@@ -2358,20 +2341,9 @@ export function ChildRecords() {
         });
       }
 
-      // Keep the assignment table synchronized with the HP selected on the slip.
-      if (form.assignedHouseparentId && form.assignedHouseparentId !== editingAssignedHouseparentId) {
-        if (editingAssignmentId && form.assignedHouseparentId !== '') {
-          await request(`/resident-assignments/${editingAssignmentId}/end`, { method: 'POST', body: JSON.stringify({}) });
-        }
-        if (!editingAssignmentId || form.assignedHouseparentId !== '') {
-          await request(`/resident-assignments/resident/${editingId}`, {
-            method: 'POST',
-            body: JSON.stringify({ userId: form.assignedHouseparentId, assignmentType: 'houseparent', startAt: new Date().toISOString(), source: 'admission-update' }),
-          });
-        }
-      } else if (!form.assignedHouseparentId && editingAssignmentId) {
-        await request(`/resident-assignments/${editingAssignmentId}/end`, { method: 'POST', body: JSON.stringify({}) });
-      }
+      // The Houseparent on Duty is saved on the admission above and is not
+      // synchronised into the Case Load: the Case Load Manager is a separate
+      // assignment that only the Center Head makes, in the Houseparent module.
 
       await refreshData();
       setIsFormOpen(false);
@@ -4087,44 +4059,11 @@ export function ChildRecords() {
         }
 
         /*
-         * Keep assignment in the existing
-         * resident assignment system.
+         * The Houseparent on Duty selected on the slip is saved on the
+         * admission only. It does NOT make that Houseparent the resident's
+         * Case Load Manager — the Center Head assigns the Case Load Manager
+         * separately from the Houseparent module's Case Load tab.
          */
-        if (
-          form.assignedHouseparentId
-        ) {
-          try {
-            await request(
-              `/resident-assignments/resident/${response.data.resident.id}`,
-              {
-                method:
-                  'POST',
-
-                body:
-                  JSON.stringify({
-                    userId:
-                      form.assignedHouseparentId,
-
-                    assignmentType:
-                      'houseparent',
-
-                    startAt:
-                      new Date().toISOString(),
-
-                    source:
-                      'admission',
-                  }),
-              }
-            );
-          } catch (
-            assignmentError
-          ) {
-            console.error(
-              'Houseparent assignment failed:',
-              assignmentError
-            );
-          }
-        }
 
         await refreshData();
 

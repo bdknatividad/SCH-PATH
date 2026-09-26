@@ -1,7 +1,7 @@
 const { pool } = require('../config/database');
 const { insertWithGeneratedId, toMysqlDateTime } = require('../utils/helpers');
 const { ApiError } = require('../middleware/errorHandler');
-const { normalizeRole, isManager } = require('../utils/authorization');
+const { normalizeRole, isManager, hasRole } = require('../utils/authorization');
 const notifications = require('../services/notificationService');
 
 function roleOf(user) {
@@ -11,6 +11,26 @@ function roleOf(user) {
 function canManage(user) {
   return isManager(user);
 }
+
+/**
+ * Who may assign or transfer a resident's Houseparent Case Load Manager.
+ *
+ * The Center Head and the Social Worker. `admin` is included because it is the
+ * Center Head's system account (the Dashboard labels it CENTER HEAD).
+ * Houseparents and every other role can never assign or change it.
+ */
+function canAssignCaseLoadManager(user) {
+  return hasRole(user, 'centerhead', 'admin', 'socialworker');
+}
+
+function isHouseparentAssignmentType(value) {
+  return String(value || '').trim().toLowerCase() === 'houseparent';
+}
+
+/** The only sources a Houseparent Case Load assignment may come from. */
+const MANUAL_ASSIGNMENT_SOURCES = ['caseload', 'manual'];
+
+const CENTER_HEAD_ONLY_MESSAGE = 'Only the Center Head or a Social Worker can assign or transfer a resident\'s Houseparent Case Load Manager.';
 
 async function canAccessResident(user, residentId) {
   if (canManage(user)) return true;
@@ -31,44 +51,10 @@ async function canAccessResident(user, residentId) {
       LIMIT 1`,
     [residentId, user?.id || null, user?.id || null]
   );
-  if (rows.length > 0) return true;
-
-  // Legacy compatibility: older admissions stored the assigned Houseparent
-  // only in admissions.houseparentOnDuty. Treat that as an assignment when it
-  // matches the authenticated HP. This repairs old records without changing the
-  // database schema or exposing another HP's residents.
-  //
-  // The id is checked first, and the name match applies only to rows that
-  // predate `admissions.houseparentUserId`. A name is not a relationship — it
-  // moves when someone is renamed and collides when two people share one — so it
-  // is a migration aid, not a key.
-  const [legacyRows] = await pool.query(
-    `SELECT a.id
-       FROM admissions a
-       JOIN users u ON u.id = ?
-      WHERE a.residentId = ?
-        AND a.status = 'Active'
-        AND (
-          a.houseparentUserId = u.id
-          OR (
-            a.houseparentUserId IS NULL
-            AND (
-              LOWER(TRIM(a.houseparentOnDuty)) = LOWER(TRIM(u.username))
-              OR (u.displayName IS NOT NULL AND LOWER(TRIM(a.houseparentOnDuty)) = LOWER(TRIM(u.displayName)))
-              OR (u.fullName IS NOT NULL AND LOWER(TRIM(a.houseparentOnDuty)) = LOWER(TRIM(u.fullName)))
-              OR EXISTS (
-                SELECT 1 FROM staff s
-                 WHERE s.userId = u.id
-                   AND s.name IS NOT NULL
-                   AND LOWER(TRIM(a.houseparentOnDuty)) = LOWER(TRIM(s.name))
-              )
-            )
-          )
-        )
-      LIMIT 1`,
-    [user?.id || null, residentId]
-  );
-  return legacyRows.length > 0;
+  // The Houseparent on Duty recorded on the Admission Slip is NOT a Case Load
+  // assignment. Only an explicit residentAssignments row, created by the Center
+  // Head, puts a resident on a Houseparent's case load.
+  return rows.length > 0;
 }
 
 async function ensureResident(residentId) {
@@ -165,6 +151,9 @@ async function notifyAssignment(userId, assignment, action, actor) {
 async function create(req, res, next) {
   try {
     if (!canManage(req.user)) throw new ApiError(403, 'Only Center Head or Social Worker can manage assignments');
+    if (isHouseparentAssignmentType(req.body?.assignmentType) && !canAssignCaseLoadManager(req.user)) {
+      throw new ApiError(403, CENTER_HEAD_ONLY_MESSAGE);
+    }
     const { residentId } = req.params;
     // `startAt` and `endAt` arrive as ISO 8601 from the browser
     // (`new Date().toISOString()`), which MySQL rejects for a DATETIME column
@@ -180,11 +169,27 @@ async function create(req, res, next) {
     const endAt = toMysqlDateTime(rawEndAt);
     if (!assignmentType || !startAt) throw new ApiError(400, 'assignmentType and startAt are required');
     if (!staffId && !userId) throw new ApiError(400, 'staffId or userId is required');
+    // A Case Load Manager is linked by the Houseparent's account id, never by a
+    // staff row or a display name, so a rename cannot move or break it.
+    if (isHouseparentAssignmentType(assignmentType) && !userId) {
+      throw new ApiError(400, 'userId (the Houseparent\'s account id) is required for a Case Load assignment');
+    }
+    // A Case Load Manager is assigned only by hand, from the Houseparent Module
+    // (Assign Resident / Transfer, which send source 'caseload'). Anything else —
+    // in particular an older Admission Slip screen still posting its HP on Duty
+    // as 'admission' / 'admission-update' — is refused here, on the server, so
+    // no client can turn the HP on Duty into the Case Load Manager.
+    if (isHouseparentAssignmentType(assignmentType) && !MANUAL_ASSIGNMENT_SOURCES.includes(String(source || '').trim().toLowerCase())) {
+      throw new ApiError(403, 'A Case Load Manager can only be assigned from the Houseparent Module (Assign Resident). The HP on Duty on the Admission Slip is not an assignment.');
+    }
     if (endAt && new Date(endAt) < new Date(startAt)) throw new ApiError(400, 'endAt cannot be before startAt');
     await ensureResident(residentId);
     if (userId) {
       const [users] = await pool.query('SELECT id, status, role FROM users WHERE id = ?', [userId]);
       if (!users[0] || users[0].status !== 'Active') throw new ApiError(400, 'Assigned user is not active');
+      if (isHouseparentAssignmentType(assignmentType) && normalizeRole(users[0].role) !== 'houseparent') {
+        throw new ApiError(400, 'The selected account is not a Houseparent');
+      }
 
       // Cap each Houseparent at 3 active residents — checked here (not just in
       // the UI) so the limit holds even if two requests race or the frontend
@@ -202,6 +207,32 @@ async function create(req, res, next) {
       const [staff] = await pool.query('SELECT id, status FROM staff WHERE id = ?', [staffId]);
       if (!staff[0] || staff[0].status !== 'Active') throw new ApiError(400, 'Assigned staff member is not active');
     }
+    // A resident has one Case Load Manager at a time. Assigning a new one ends
+    // the previous assignment here, on the server, so the resident can never be
+    // left on two Houseparents' case loads (or on none, if the client stops
+    // half-way through a change).
+    let replacedAssignments = [];
+    if (isHouseparentAssignmentType(assignmentType)) {
+      const [activeRows] = await pool.query(
+        `SELECT * FROM residentAssignments
+          WHERE residentId = ? AND status = 'Active'
+            AND LOWER(TRIM(assignmentType)) = 'houseparent'`,
+        [residentId]
+      );
+      if (activeRows.some((row) => String(row.userId) === String(userId))) {
+        throw new ApiError(409, 'This Houseparent is already the resident\'s Case Load Manager.');
+      }
+      if (activeRows.length > 0) {
+        await pool.query(
+          `UPDATE residentAssignments SET status = 'Ended', endAt = NOW(), updatedBy = ?
+            WHERE residentId = ? AND status = 'Active'
+              AND LOWER(TRIM(assignmentType)) = 'houseparent'`,
+          [req.user.username, residentId]
+        );
+        replacedAssignments = activeRows;
+      }
+    }
+
     // Two concurrent assignments can derive the same id; retry instead of 500.
     const id = await insertWithGeneratedId(pool, {
       table: 'residentAssignments',
@@ -218,7 +249,10 @@ async function create(req, res, next) {
     // Tell the Houseparent they now hold this resident. `household` rows are
     // the shared whole-facility placeholder and are deliberately silent: every
     // Houseparent has one, so notifying on them would be pure noise.
-    if (assignmentType === 'houseparent' && userId) {
+    for (const previous of replacedAssignments) {
+      if (previous.userId) await notifyAssignment(previous.userId, previous, 'ended', req.user);
+    }
+    if (isHouseparentAssignmentType(assignmentType) && userId) {
       await notifyAssignment(userId, rows[0], 'created', req.user);
     }
 
@@ -230,6 +264,12 @@ async function update(req, res, next) {
   try {
     if (!canManage(req.user)) throw new ApiError(403, 'Only Center Head or Social Worker can manage assignments');
     const { id } = req.params;
+    const [existingRows] = await pool.query('SELECT assignmentType FROM residentAssignments WHERE id = ?', [id]);
+    if (!existingRows[0]) throw new ApiError(404, 'Assignment not found');
+    if ((isHouseparentAssignmentType(existingRows[0].assignmentType) || isHouseparentAssignmentType(req.body?.assignmentType))
+      && !canAssignCaseLoadManager(req.user)) {
+      throw new ApiError(403, CENTER_HEAD_ONLY_MESSAGE);
+    }
     const allowed = ['staffId', 'userId', 'assignmentType', 'status', 'startAt', 'endAt', 'source', 'notes'];
     const updates = [];
     const values = [];
@@ -249,6 +289,10 @@ async function end(req, res, next) {
   try {
     if (!canManage(req.user)) throw new ApiError(403, 'Only Center Head or Social Worker can end assignments');
     const { id } = req.params;
+    const [existingRows] = await pool.query('SELECT assignmentType FROM residentAssignments WHERE id = ?', [id]);
+    if (existingRows[0] && isHouseparentAssignmentType(existingRows[0].assignmentType) && !canAssignCaseLoadManager(req.user)) {
+      throw new ApiError(403, CENTER_HEAD_ONLY_MESSAGE);
+    }
     const [result] = await pool.query(
       `UPDATE residentAssignments SET status = 'Ended', endAt = COALESCE(?, NOW()), updatedBy = ? WHERE id = ? AND status = 'Active'`,
       [req.body?.endAt || null, req.user.username, id]
@@ -357,6 +401,11 @@ async function getCaseload(req, res, next) {
     // residents.
     const houseparents = await activeHouseparents();
 
+    // Straight from the database, keyed by the Houseparent's account id and the
+    // resident id — never by a display name, so renaming an HP changes only
+    // the label on the card. Only residents currently in the facility (status
+    // Active) are listed: a discharged or absconded resident is no longer on
+    // anyone's case load, even if an old assignment row was never ended.
     const [rows] = await pool.query(
       `SELECT COALESCE(ra.userId, s.userId) AS userId, c.id AS residentId, c.name AS residentName
          FROM residentAssignments ra
@@ -364,50 +413,23 @@ async function getCaseload(req, res, next) {
          JOIN children c ON c.id = ra.residentId
         WHERE LOWER(TRIM(ra.assignmentType)) = 'houseparent'
           AND ra.status = 'Active'
-          AND COALESCE(ra.userId, s.userId) IS NOT NULL`,
+          AND c.status = 'Active'
+          AND COALESCE(ra.userId, s.userId) IS NOT NULL
+        ORDER BY ra.startAt DESC, ra.createdAt DESC`,
       []
     );
 
-    // Backward-compatible source of truth for older records: some admissions
-    // were saved with houseparentOnDuty before the explicit assignment row was
-    // introduced. Resolve those records against the current HP account and
-    // merge them into the same Case Load response.
-    //
-    // `houseparentUserId` is the real link; the name match is kept only for rows
-    // admitted before that column existed and never backfilled.
-    const [legacyRows] = await pool.query(
-      `SELECT u.id AS userId, c.id AS residentId, c.name AS residentName
-         FROM users u
-         JOIN admissions a ON a.status = 'Active'
-         JOIN children c ON c.id = a.residentId
-        WHERE u.status = 'Active'
-          AND LOWER(TRIM(u.role)) IN ('houseparent', 'house_parent', 'house parent')
-          AND (
-            a.houseparentUserId = u.id
-            OR (
-              a.houseparentUserId IS NULL
-              AND (
-                LOWER(TRIM(a.houseparentOnDuty)) = LOWER(TRIM(u.username))
-                OR (u.displayName IS NOT NULL AND LOWER(TRIM(a.houseparentOnDuty)) = LOWER(TRIM(u.displayName)))
-                OR (u.fullName IS NOT NULL AND LOWER(TRIM(a.houseparentOnDuty)) = LOWER(TRIM(u.fullName)))
-                OR EXISTS (
-                  SELECT 1 FROM staff s
-                   WHERE s.userId = u.id
-                     AND s.name IS NOT NULL
-                     AND LOWER(TRIM(a.houseparentOnDuty)) = LOWER(TRIM(s.name))
-                )
-              )
-            )
-          )`,
-      []
-    );
-
-    const mergedRows = new Map();
-    [...rows, ...legacyRows].forEach((r) => {
-      const key = `${String(r.userId)}|${String(r.residentId)}`;
-      if (!mergedRows.has(key)) mergedRows.set(key, r);
+    // Only explicit Center Head / Social Worker assignments count. The
+    // Houseparent on Duty on the Admission Slip is a separate field and never
+    // feeds the Case Load. A resident has ONE Case Load Manager: if legacy
+    // data left more than one active row for a resident, the most recent
+    // assignment is the one shown, so no resident is counted under two HPs.
+    const byResident = new Map();
+    rows.forEach((r) => {
+      const key = String(r.residentId);
+      if (!byResident.has(key)) byResident.set(key, r);
     });
-    const effectiveRows = [...mergedRows.values()];
+    const effectiveRows = [...byResident.values()];
 
     const caseload = houseparents.map((hp) => {
       // The Case Load roster (which children are assigned to each HP) is
@@ -416,15 +438,20 @@ async function getCaseload(req, res, next) {
       // for a Houseparent is opening a resident's actual record — that
       // boundary is enforced separately by canAccessResident() and by the
       // /store caseload filter, neither of which this roster listing feeds.
+      // Every Houseparent sees the whole assignment roster — which residents
+      // (id and name only) are assigned to each HP, their own and others'.
+      // Opening a resident's full record stays limited to the Houseparent's
+      // own Case Load: canAccessResident() and the /store caseload filter
+      // enforce that, and this listing carries nothing beyond the name.
       const residents = effectiveRows
         .filter((r) => String(r.userId) === String(hp.id))
-        // Never expose another Houseparent's resident roster in an HP response.
-        // The signed-in HP receives only their own assigned residents; managers
-        // retain the existing facility-wide case-load response.
-        .filter((r) => scope.kind !== 'self' || String(hp.id) === String(scope.userId))
         .map((r) => ({ id: r.residentId, name: r.residentName }));
       const label = hp.displayLabel || hp.username;
       return {
+        // Whether this card is the signed-in Houseparent's own, decided on the
+        // server by account id (users.id), so the page never has to match a
+        // username or display name to know which residents may be opened.
+        isSelf: String(hp.id) === String(req.user?.id ?? ''),
         userId: hp.id,
         username: hp.username,
         displayName: hp.displayLabel || null,
@@ -454,4 +481,4 @@ async function getMyResidents(req, res, next) {
   } catch (error) { next(error); }
 }
 
-module.exports = { getByResident, create, update, end, canAccessResident, canManage, getCaseload, caseloadScope, activeHouseparents, getMyResidents };
+module.exports = { getByResident, create, update, end, canAccessResident, canManage, canAssignCaseLoadManager, getCaseload, caseloadScope, activeHouseparents, getMyResidents };

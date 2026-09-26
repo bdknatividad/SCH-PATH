@@ -209,12 +209,12 @@ export function Notifications() {
       case 'admissions':
       case 'children':
         // Medical Notes changes open the resident's Medical tab. A Houseparent
-        // has no Child Records module, so they are sent to the Houseparent Case
-        // Load instead — the one place they can reach the same resident.
+        // has no Child Records module, so they are sent to the same record
+        // inside their Houseparent Case Load instead.
         if (alert.type === 'medical-notes-updated' && resident) {
           target = canReach('/children')
             ? childTab('medical')
-            : '/tri?tab=caseload';
+            : `/tri?tab=caseload&caseloadResidentId=${encodeURIComponent(resident)}&childTab=medical`;
           break;
         }
         target = childTab('personal') || '/children';

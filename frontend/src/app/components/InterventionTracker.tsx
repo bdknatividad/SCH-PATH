@@ -737,7 +737,12 @@ export function InterventionTracker({ embedded = false }: { embedded?: boolean }
                                   </li>
                                 );
                               })}
-                              {form8Section(track).visible && (
+                              {/* The Form 08 row appears once every requirement is complete — and
+                                  always while its report is Failed / For Reassessment, so "Fill Out
+                                  Again" is reachable even when a reassessment has reopened the
+                                  intervention's requirements. */}
+                              {((track.interventions.length > 0 && track.interventions.every((s: any) => s.status === 'Completed'))
+                                || incidentReportNeedsRework(incidentReportsByViolation[track.violation.id])) && (
                                 <li className="rounded-lg border border-blue-200 bg-blue-50 p-2 mt-2">
                                   <div className="flex items-center gap-2">
                                     <span className="font-bold shrink-0 w-5 h-5 rounded-full flex items-center justify-center text-[9px] bg-blue-500 text-white">8</span>

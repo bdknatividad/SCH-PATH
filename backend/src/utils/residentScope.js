@@ -46,69 +46,11 @@ async function assignedResidentIds(user, executor = pool) {
   );
   const ids = new Set(rows.map((row) => String(row.residentId)).filter(Boolean));
 
-  // Backward compatibility for admissions created before the explicit
-  // residentAssignments table was used. Those admissions carry the assigned
-  // Houseparent, so they must continue to appear in every HP-scoped resident
-  // list without changing the database schema.
-  //
-  // The link is the stored user id. The name is only consulted for rows that
-  // predate `admissions.houseparentUserId` and have not been backfilled, because
-  // matching on a name is not a relationship: renaming a Houseparent used to
-  // move their caseload, and two people sharing a display name used to see each
-  // other's residents. Both were silent — nothing errored, the wrong list was
-  // simply returned.
-  try {
-    const [legacyRows] = await executor.query(
-      `SELECT DISTINCT a.residentId
-         FROM admissions a
-         JOIN users u ON u.id = ?
-        WHERE a.status = 'Active'
-          AND (
-            a.houseparentUserId = u.id
-            OR (
-              a.houseparentUserId IS NULL
-              AND (
-                LOWER(TRIM(a.houseparentOnDuty)) = LOWER(TRIM(u.username))
-                OR (u.displayName IS NOT NULL AND LOWER(TRIM(a.houseparentOnDuty)) = LOWER(TRIM(u.displayName)))
-                OR (u.fullName IS NOT NULL AND LOWER(TRIM(a.houseparentOnDuty)) = LOWER(TRIM(u.fullName)))
-                OR EXISTS (
-                  SELECT 1 FROM staff s
-                   WHERE s.userId = u.id
-                     AND s.name IS NOT NULL
-                     AND LOWER(TRIM(a.houseparentOnDuty)) = LOWER(TRIM(s.name))
-                )
-              )
-            )
-          )`,
-      [user.id]
-    );
-    for (const row of legacyRows) {
-      if (row.residentId) ids.add(String(row.residentId));
-    }
-  } catch (error) {
-    // Some older deployments do not have users.fullName, and some predate
-    // admissions.houseparentUserId entirely. The explicit assignment rows above
-    // remain authoritative if this compatibility query cannot run.
-    if (!/fullName|houseparentUserId/i.test(String(error?.message || ''))) throw error;
-    try {
-      const [legacyRows] = await executor.query(
-        `SELECT DISTINCT a.residentId
-           FROM admissions a
-           JOIN users u ON u.id = ?
-          WHERE a.status = 'Active'
-            AND (
-              LOWER(TRIM(a.houseparentOnDuty)) = LOWER(TRIM(u.username))
-              OR (u.displayName IS NOT NULL AND LOWER(TRIM(a.houseparentOnDuty)) = LOWER(TRIM(u.displayName)))
-            )`,
-        [user.id]
-      );
-      for (const row of legacyRows) {
-        if (row.residentId) ids.add(String(row.residentId));
-      }
-    } catch {
-      // Keep explicit assignment results if legacy compatibility is unavailable.
-    }
-  }
+  // The Houseparent on Duty recorded on the Admission Slip
+  // (admissions.houseparentOnDuty / houseparentUserId) is deliberately NOT read
+  // here. It is a separate field from the Case Load Manager: only an explicit
+  // residentAssignments row, created by the Center Head, puts a resident on a
+  // Houseparent's case load.
 
   return [...ids];
 }

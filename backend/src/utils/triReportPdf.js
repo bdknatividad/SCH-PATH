@@ -15,19 +15,13 @@
  * overlay reads too — one copy, so the exported PDF and the on-screen form cannot
  * drift apart.
  *
- * NOTE ON SIGNATURES: the official TRI carries five signature lines (Houseparent,
- * Administrative Officer, SWO I/Case Manager, SWO II/Center Head, SWO III/Section
- * Chief). All five are filled in when their drawing has been recorded. On the three
- * lines the template leaves blank the writer also prints the name (the Houseparent
- * comes from the record; the two officials come from `triLayout.json`), placed below
- * the signature so the rule underlines it. The block's second row already carries
- * its two names on the form itself, so only a signature is stamped there.
- *
- * The published document is still titled as a system copy: it reproduces the
- * recorded answers and whatever signatures are stored, it is not the fully executed
- * instrument, and it does not pretend to be. The subject line names exactly which
- * lines were signed and which were left blank.
- */
+ * NOTE ON SIGNATURES: the official TRI carries five signature lines. For the
+ * Houseparent, the Administrative Officer and the SWO I / Case Manager, the E-Signature
+ * (drawn or uploaded) is stamped at the top, and the typed name sits below it on the
+ * rule, above the printed caption. For MARICOR C. NAVARRO (SWO II / Center Head) and
+ * NICOLAS Q. REGALARIO (SWO III / Section Chief), whose names are pre-printed on the
+ * form, only the E-Signature is stamped, directly above their printed name. A line
+ * nobody has signed is left blank. */
 
 const fs = require('fs');
 const path = require('path');
@@ -53,123 +47,34 @@ const TOTAL_POINTS_POS = { page: 5, x: 307, y: 602 };
 const SUMMARY = { page: 6, x: 482, previous: 273, earned: 252, deductions: 231, final: 210, rating: 189, previousRating: 168 };
 
 /**
- * The "Assessed by" block on the last page (page 8, index 7), in pdf-lib's
- * bottom-left coordinate space.
+ * The "Houseparent" line on the last page (page 8, index 7), in pdf-lib's
+ * bottom-left coordinate space. Order, top to bottom: E-Signature, typed name,
+ * the printed underscore rule, the caption.
  *
- * Five lines in two rows, measured against the template rather than guessed:
+ * Measured against the template: the rule is a run of underscores at x 72.02
+ * width 90.24 whose ink sits at y 770.57–772.5, and the line of text above the
+ * block has its descenders at y 811.40. The typed name sits on the rule with its
+ * baseline at y 775 (an 8pt bold face reaches 783.56 at most), and the signature
+ * band fills 784–810 above it.
  *
- *   Row 1 — rules' ink at y 770.57-772.5, captions at y 752.11
- *     Houseparent             x 72.02  w 90.24
- *     Administrative Officer  x 223.75 w 95.03
- *     SWO I/Case Manager      x 346.2  w 115.25   (three underscore runs)
- *   Row 2 — rules' ink at y 668-670.25, printed names at y 649.61, captions y 638.09
- *     SWO II/Center Head      name x 72.02  w 179.32
- *     SWO III/Section Chief   name x 329.88 w 188.12
- *
- * The template leaves row 1 completely blank, so this writer fills all three of
- * its printed names. Row 2 already carries the facility's two names, printed
- * correctly by the form itself, so nothing is drawn there — only the signature
- * is stamped. Nothing is ever painted white: there is no stale text to hide.
- *
- * Every line reads the same way on the three lines the template leaves blank: the
- * signature sits in the blank band above the rule and the printed name sits below the
- * signature, so the rule doubles as the underline of the name. Row 2 is the template's
- * own arrangement and is not the same: it prints its names BELOW its rules, so the app
- * draws no name there and only stamps a signature above the rule.
- *
- * `tri-houseparent-signature.test.js` and `tri-designated-signatures.test.js` assert
- * the boxes stay inside those bands and inside each rule's horizontal extent.
+ * `tri-houseparent-signature.test.js` pins these against the template.
  */
-const HOUSEPARENT_SIGNATURE_BOX = { page: 7, x: 72.02, y: 786, width: 90.24, height: 20 };
+const HOUSEPARENT_SIGNATURE_BOX = { page: 7, x: 72.02, y: 784, width: 90.24, height: 26 };
+
+/** The Houseparent's typed name, on the rule and below the E-Signature. */
+const HOUSEPARENT_NAME_POS = { page: 7, x: 72.02, y: 775, size: 8, width: 90.24 };
 
 /**
- * Where the Houseparent's PRINTED NAME goes: below the signature and directly
- * above the rule, so the rule underlines the name.
- *
- * Baseline y 777 puts the 8pt ascenders at 782.7 — clear of the 786 box bottom
- * above them — and the descenders at 775.3, clear of the rule's ink at 772.5.
- * The name is shrunk to the rule's width so a long name cannot run into the
- * "Administrative Officer" line beside it.
+ * All five signature lines of the page-8 "Assessed by" block. `hasName` marks the
+ * three lines whose name is typed in (a text holder); the other two carry a name
+ * pre-printed on the form.
  */
-const HOUSEPARENT_NAME_POS = { page: 7, x: 72.02, y: 777, size: 8, width: 90.24 };
-
-/** Row 1's middle line — "Administrative Officer", captioned at y 752.11. */
-const ADMIN_OFFICER_SIGNATURE_BOX = { page: 7, x: 223.75, y: 786, width: 95.03, height: 20 };
-const ADMIN_OFFICER_NAME_POS = { page: 7, x: 223.75, y: 777, size: 8, width: 95.03 };
-
-/** Row 1's right line — "SWO I/Case Manager". Its rule is three underscore runs. */
-const SWO1_SIGNATURE_BOX = { page: 7, x: 346.2, y: 786, width: 115.25, height: 20 };
-const SWO1_NAME_POS = { page: 7, x: 346.2, y: 777, size: 8, width: 115.25 };
-
-/**
- * Row 2's two lines. Their names are already on the form, so the x and width
- * here are the template's own printed-name extent rather than the rule's — that
- * is the width the signature is centred over.
- */
-const SWO2_SIGNATURE_BOX = { page: 7, x: 72.02, y: 672, width: 179.32, height: 20 };
-const SWO3_SIGNATURE_BOX = { page: 7, x: 329.88, y: 672, width: 188.12, height: 20 };
-
-/**
- * The five lines, in the order they appear across the page. One list, so the
- * layout cross-check, the name drawing and the stamping cannot disagree about
- * which column and which coordinates belong together.
- *
- * `nameFrom` says where the printed name comes from:
- *   'record'   — the Houseparent who prepared the report; not a fixed person
- *   'layout'   — one of the facility's four designated officials
- *   'template' — the form already prints it, so the app draws nothing
- *
- * `nameInkWidth` is only needed for the 'template' lines, where there is no
- * drawn name to measure. Every other line measures its own text.
- */
-const SIGNATURE_LINES = [
-  {
-    key: 'houseparent',
-    label: 'Houseparent',
-    box: HOUSEPARENT_SIGNATURE_BOX,
-    namePos: HOUSEPARENT_NAME_POS,
-    nameFrom: 'record',
-    signatureColumn: 'houseparentSignature',
-  },
-  {
-    key: 'adminofficer',
-    label: 'Administrative Officer',
-    box: ADMIN_OFFICER_SIGNATURE_BOX,
-    namePos: ADMIN_OFFICER_NAME_POS,
-    nameFrom: 'layout',
-    signatureColumn: 'adminOfficerSignature',
-  },
-  {
-    key: 'swo1',
-    label: 'SWO I/Case Manager',
-    box: SWO1_SIGNATURE_BOX,
-    namePos: SWO1_NAME_POS,
-    nameFrom: 'layout',
-    signatureColumn: 'swo1Signature',
-  },
-  {
-    key: 'swo2',
-    label: 'SWO II/Center Head',
-    box: SWO2_SIGNATURE_BOX,
-    namePos: null,
-    nameFrom: 'template',
-    nameInkWidth: 179.32,
-    // The SWO II/Center Head line's drawing is stored under the column it shipped
-    // with (`centerheadSignature`), not under its key, so the signatures already
-    // saved on live records keep working. The key names the line; the column names
-    // where its drawing lives.
-    signatureColumn: 'centerheadSignature',
-  },
-  {
-    key: 'swo3',
-    label: 'SWO III/Section Chief',
-    box: SWO3_SIGNATURE_BOX,
-    namePos: null,
-    nameFrom: 'template',
-    nameInkWidth: 188.12,
-    // Same as `swo2`: the line's key is `swo3`, its column is `sectionchiefSignature`.
-    signatureColumn: 'sectionchiefSignature',
-  },
+const TRI_SIGNATORY_SLOTS = [
+  { slot: 'houseparent', title: 'Houseparent', hasName: true },
+  { slot: 'administrativeOfficer', title: 'Administrative Officer', hasName: true },
+  { slot: 'caseManager', title: 'SWO I / Case Manager', hasName: true },
+  { slot: 'centerHead', title: 'SWO II / Center Head', printedName: 'MARICOR C. NAVARRO, RSW, MSSW', hasName: false },
+  { slot: 'sectionChief', title: 'SWO III / Section Chief', printedName: 'NICOLAS Q. REGALARIO, RSW, MSSW', hasName: false },
 ];
 
 let cachedTemplateBytes = null;
@@ -206,16 +111,23 @@ function loadLayout() {
   // export stamps the same line. Two copies of a coordinate drift; a mismatch means
   // the exported PDF and the published copy would place the signature differently,
   // so it is a hard error rather than a silent difference.
-  for (const [key, expected] of [
-    ['houseparentSignatureBox', HOUSEPARENT_SIGNATURE_BOX],
-    ['houseparentNamePos', HOUSEPARENT_NAME_POS],
-    ['adminOfficerSignatureBox', ADMIN_OFFICER_SIGNATURE_BOX],
-    ['adminOfficerNamePos', ADMIN_OFFICER_NAME_POS],
-    ['swo1SignatureBox', SWO1_SIGNATURE_BOX],
-    ['swo1NamePos', SWO1_NAME_POS],
-    ['swo2SignatureBox', SWO2_SIGNATURE_BOX],
-    ['swo3SignatureBox', SWO3_SIGNATURE_BOX],
-  ]) {
+  if (!raw.signatories) throw new Error(`The TRI layout is missing "signatories" (${LAYOUT_PATH})`);
+  for (const { slot, hasName } of TRI_SIGNATORY_SLOTS) {
+    const geometry = raw.signatories[slot];
+    const required = hasName
+      ? ['page', 'x', 'width', 'signatureY', 'signatureHeight', 'nameY', 'nameSize']
+      : ['page', 'x', 'width', 'signatureY', 'signatureHeight'];
+    if (!geometry || required.some((field) => !Number.isFinite(Number(geometry[field])))) {
+      throw new Error(`The TRI layout's signatories.${slot} is incomplete (${LAYOUT_PATH})`);
+    }
+  }
+  // The Houseparent's slot and the two legacy Houseparent keys must agree.
+  const hp = raw.signatories.houseparent;
+  if (hp.signatureY !== HOUSEPARENT_SIGNATURE_BOX.y || hp.signatureHeight !== HOUSEPARENT_SIGNATURE_BOX.height
+    || hp.nameY !== HOUSEPARENT_NAME_POS.y || hp.x !== HOUSEPARENT_SIGNATURE_BOX.x) {
+    throw new Error(`The TRI layout's signatories.houseparent disagrees with the Houseparent signature box (${LAYOUT_PATH})`);
+  }
+  for (const [key, expected] of [['houseparentSignatureBox', HOUSEPARENT_SIGNATURE_BOX], ['houseparentNamePos', HOUSEPARENT_NAME_POS]]) {
     const declared = raw[key];
     if (!declared) continue; // a layout file written before the geometry was shared
     for (const [field, value] of Object.entries(expected)) {
@@ -279,105 +191,85 @@ function safeFileName(value) {
   return String(value || 'resident').replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '') || 'resident';
 }
 
+/** The record's `signatories` column, as an object. */
+function signatoriesOf(record) {
+  return asObject(record && record.signatories);
+}
+
 /**
  * The name that belongs on the Houseparent line.
  *
- * Prefers whoever actually signed, then whoever submitted — the TRI is submitted by
- * the Houseparent, so either one identifies them. Returns '' when neither is known,
- * which leaves the line blank rather than printing a guess.
+ * The name typed into the Houseparent's text holder wins. A record signed before
+ * the text holder existed falls back to whoever signed, then whoever submitted,
+ * so an older TRI still prints the name it always printed. Returns '' when none
+ * is known, which leaves the line blank rather than printing a guess.
  */
 function houseparentNameOf(record) {
+  const typed = sanitize(signatoriesOf(record).houseparent?.name || '');
+  if (typed) return typed;
   return sanitize((record && (record.houseparentSignedBy || record.submittedBy)) || '');
 }
 
-/**
- * Shrinks `text` until it fits `maxWidth`, returning the size and the width it
- * ended up at. The width is what the signature gets centred over, so it has to
- * come from the same font and size the name is actually drawn with.
- */
-function fitText(text, font, size, maxWidth) {
+/** The typed name for a signature line ('' when the line has no text holder). */
+function signatoryNameOf(record, slot) {
+  if (slot === 'houseparent') return houseparentNameOf(record);
+  const definition = TRI_SIGNATORY_SLOTS.find((entry) => entry.slot === slot);
+  if (!definition || !definition.hasName) return '';
+  return sanitize(signatoriesOf(record)[slot]?.name || '');
+}
+
+/** The E-Signature data URL for a signature line ('' when unsigned). */
+function signatorySignatureOf(record, slot) {
+  const value = slot === 'houseparent'
+    ? record && record.houseparentSignature
+    : signatoriesOf(record)[slot]?.signature;
+  return String(value || '');
+}
+
+/** Draws `text` left-aligned at `x`, shrunk to fit `width`. */
+function drawFittedText(page, text, x, y, width, size, font) {
   let fitted = size;
-  while (fitted > 4 && font.widthOfTextAtSize(text, fitted) > maxWidth) fitted -= 0.25;
-  return { size: fitted, width: font.widthOfTextAtSize(text, fitted) };
-}
-
-/** The designated official's printed name, read from the shared layout. */
-function designatedNameOf(layout, key) {
-  const person = layout && layout.designatedPersonnel && layout.designatedPersonnel[key];
-  return sanitize(person && person.name);
+  while (fitted > 4 && font.widthOfTextAtSize(text, fitted) > width) fitted -= 0.25;
+  page.drawText(text, { x, y, size: fitted, font, color: rgb(0.08, 0.08, 0.08) });
 }
 
 /**
- * The printed name for a line, or '' when the form prints it itself.
+ * Prints the Houseparent's name on the page-8 rule, below the E-Signature.
  *
- * The Houseparent's line is not a fixed person — it is whoever prepared and signed
- * the report — so it comes from the record. The four officials are the facility's
- * designated personnel, so they come from the shared layout. The two second-row
- * lines are already printed correctly by the template, so nothing is drawn for them.
+ * Returns false when there is no name to print. The text is shrunk to the width of
+ * the rule so a long name cannot run into the \"Administrative Officer\" line printed
+ * beside it.
  */
-function lineNameOf(line, record, layout) {
-  if (line.nameFrom === 'record') return houseparentNameOf(record);
-  if (line.nameFrom === 'layout') return designatedNameOf(layout, line.key);
-  return '';
+function drawHouseparentName(pages, record, font) {
+  const page = pages[HOUSEPARENT_NAME_POS.page];
+  const name = houseparentNameOf(record);
+  if (!page || !name) return false;
+  drawFittedText(page, name, HOUSEPARENT_NAME_POS.x, HOUSEPARENT_NAME_POS.y, HOUSEPARENT_NAME_POS.width, HOUSEPARENT_NAME_POS.size, font);
+  return true;
 }
 
 /**
- * Prints a line's name below its signature and above its rule, so the rule doubles
- * as the underline of the name.
- *
- * Returns the name's rendered width, so the signature can be centred over the name
- * rather than over the box, or null when there is no name to draw. The text is
- * shrunk to its slot so a long name cannot run into the line printed beside it.
- */
-function drawLineName(pages, layout, line, record, bold) {
-  if (!line.namePos) return null;
-  const page = pages[line.namePos.page];
-  const name = lineNameOf(line, record, layout);
-  if (!page || !name) return null;
-
-  const fitted = fitText(name, bold, line.namePos.size, line.namePos.width);
-  page.drawText(name, {
-    x: line.namePos.x,
-    y: line.namePos.y,
-    size: fitted.size,
-    font: bold,
-    color: rgb(0.08, 0.08, 0.08),
-  });
-  return fitted.width;
-}
-
-/**
- * Stamps a line's drawn signature into the blank band above its rule.
- *
- * The image is scaled to fit the band and then centred on the printed name rather
- * than on the box: the name is left-aligned and usually narrower than its slot, so
- * centring on the box would leave the signature floating away from the name it
- * belongs to. The two lines the template prints itself have no drawn name to
- * measure, so their measured extent from the template is used instead.
+ * Stamps one E-Signature image into `box`, scaled to fit, centred horizontally
+ * and resting on the bottom of the band so it sits just above the name / rule.
  *
  * Returns false and leaves the line blank when there is no signature, when it is
  * not a PNG/JPEG data URL, or when it cannot be decoded — an unsigned TRI is still
  * a perfectly valid export, so a bad image must never abort the document.
  */
-async function drawLineSignature(pdf, pages, record, line, nameWidth) {
-  const dataUrl = String((record && record[line.signatureColumn]) || '');
-  const match = dataUrl.match(/^data:image\/(png|jpeg|jpg);base64,/i);
-  if (!match) return false;
-  const page = pages[line.box.page];
-  if (!page) return false;
-
+async function stampSignature(pdf, page, dataUrl, box) {
+  const match = String(dataUrl || '').match(/^data:image\/(png|jpeg|jpg);base64,/i);
+  if (!match || !page) return false;
   try {
     const image = match[1].toLowerCase() === 'png'
       ? await pdf.embedPng(dataUrl)
       : await pdf.embedJpg(dataUrl);
-    const box = line.box;
     const scale = Math.min(box.width / image.width, box.height / image.height);
     const width = image.width * scale;
     const height = image.height * scale;
     const anchorWidth = nameWidth != null ? nameWidth : (line.nameInkWidth || box.width);
     page.drawImage(image, {
-      x: box.x + (anchorWidth - width) / 2,
-      y: box.y + (box.height - height) / 2,
+      x: box.x + (box.width - width) / 2,
+      y: box.y,
       width,
       height,
     });
@@ -385,6 +277,40 @@ async function drawLineSignature(pdf, pages, record, line, nameWidth) {
   } catch {
     return false;
   }
+}
+
+/** Stamps the Houseparent's E-Signature onto the form's \"Houseparent\" line. */
+async function drawHouseparentSignature(pdf, pages, record) {
+  return stampSignature(pdf, pages[HOUSEPARENT_SIGNATURE_BOX.page], signatorySignatureOf(record, 'houseparent'), HOUSEPARENT_SIGNATURE_BOX);
+}
+
+/**
+ * Fills the other four signature lines — Administrative Officer, SWO I / Case
+ * Manager (E-Signature + typed name), and MARICOR C. NAVARRO / NICOLAS Q. REGALARIO
+ * (E-Signature above the pre-printed name).
+ *
+ * @returns {Promise<number>} how many of the four carry a signature.
+ */
+async function drawOtherSignatories(pdf, pages, record, layout, font) {
+  let signed = 0;
+  for (const { slot, hasName } of TRI_SIGNATORY_SLOTS) {
+    if (slot === 'houseparent') continue;
+    const geometry = layout.signatories[slot];
+    const page = pages[geometry.page];
+    if (!page) continue;
+    if (hasName) {
+      const name = signatoryNameOf(record, slot);
+      if (name) drawFittedText(page, name, geometry.x, geometry.nameY, geometry.width, geometry.nameSize, font);
+    }
+    const box = { x: geometry.x, y: geometry.signatureY, width: geometry.width, height: geometry.signatureHeight };
+    if (await stampSignature(pdf, page, signatorySignatureOf(record, slot), box)) signed += 1;
+  }
+  return signed;
+}
+
+/** How many of the five signature lines carry an E-Signature. */
+function signedLineCount(record) {
+  return TRI_SIGNATORY_SLOTS.filter(({ slot }) => /^data:image\/(png|jpeg|jpg);base64,/i.test(signatorySignatureOf(record, slot))).length;
 }
 
 /**
@@ -454,35 +380,20 @@ async function buildTriReportPdf(record = {}, { residentName, room } = {}) {
   draw(summary, rating, SUMMARY.x, SUMMARY.rating, 9, bold);
   draw(summary, record.previousRating || '', SUMMARY.x, SUMMARY.previousRating, 9, font);
 
-  // All five lines of the block are filled in now. On each one the printed name goes
-  // down first — below the signature, directly above the rule — and the drawn
-  // signature is stamped over it, centred on the name. The two second-row lines
-  // already carry their names on the form itself, so only their signatures are
-  // stamped and `drawLineName` draws nothing for them.
-  //
-  // Metadata only beyond that — no overlay text, so nothing can collide with the
-  // form's own footer. The "system copy" distinction is carried by the Documents
-  // entry title and description, which is where a reader actually looks.
-  const signedRoles = [];
-  const blankRoles = [];
-  for (const line of SIGNATURE_LINES) {
-    const nameWidth = drawLineName(pages, layout, line, record, bold);
-    const stamped = await drawLineSignature(pdf, pages, record, line, nameWidth);
-    (stamped ? signedRoles : blankRoles).push(line.label);
-  }
+  // Every signature line of the page-8 block: E-Signature on top, typed name on
+  // the rule below it (Houseparent, Administrative Officer, SWO I / Case Manager),
+  // and an E-Signature above each pre-printed name (MARICOR C. NAVARRO, NICOLAS
+  // Q. REGALARIO). An unsigned line stays blank.
+  drawHouseparentName(pages, record, bold);
+  const houseparentSigned = await drawHouseparentSignature(pdf, pages, record);
+  const othersSigned = await drawOtherSignatories(pdf, pages, record, layout, bold);
+  const signed = (houseparentSigned ? 1 : 0) + othersSigned;
+  const total = TRI_SIGNATORY_SLOTS.length;
 
   pdf.setTitle(`TRI ${periodLabel(record.reportingYear, record.reportingMonth)} - ${residentName || record.residentId}`);
-  // The subject has to describe the page it is attached to. Which lines carry a
-  // signature is variable — any of the five may be signed independently — so it is
-  // built from what was actually drawn rather than from a fixed sentence that a
-  // second signer would make untrue.
-  pdf.setSubject(
-    'System-generated copy of the Treatment and Rehabilitation Indicator. '
-    + (signedRoles.length
-      ? `Signed: ${signedRoles.join(', ')}.`
-        + (blankRoles.length ? ` Left blank: ${blankRoles.join(', ')}.` : '')
-      : 'No signature line is signed; this is not the signed original.'),
-  );
+  pdf.setSubject(signed
+    ? `System-generated copy of the Treatment and Rehabilitation Indicator. ${signed} of ${total} signature lines are signed${signed < total ? '; the remaining signature lines are blank' : ''}.`
+    : 'System-generated copy of the Treatment and Rehabilitation Indicator. Signature lines are blank; this is not the signed original.');
   pdf.setProducer('SCH-PATH');
   pdf.setCreator('SCH-PATH');
 
@@ -528,15 +439,9 @@ module.exports = {
   LAYOUT_PATH,
   HOUSEPARENT_SIGNATURE_BOX,
   HOUSEPARENT_NAME_POS,
-  ADMIN_OFFICER_SIGNATURE_BOX,
-  ADMIN_OFFICER_NAME_POS,
-  SWO1_SIGNATURE_BOX,
-  SWO1_NAME_POS,
-  SWO2_SIGNATURE_BOX,
-  SWO3_SIGNATURE_BOX,
-  SIGNATURE_LINES,
-  fitText,
+  TRI_SIGNATORY_SLOTS,
   houseparentNameOf,
-  lineNameOf,
-  designatedNameOf,
+  signatoryNameOf,
+  signatorySignatureOf,
+  signedLineCount,
 };

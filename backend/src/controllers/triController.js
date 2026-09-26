@@ -8,7 +8,7 @@ const notifications = require('../services/notificationService');
 // Official TRI scoring thresholds, shared with the PDF writer so the summary block
 // cannot be labelled with a different band than the one stored on the record.
 const { TRI_SCORING, MAX_TRI_PART_ONE_POINTS, ratingForPoints } = require('../utils/triScoring');
-const { buildTriReportDocument } = require('../utils/triReportPdf');
+const { buildTriReportDocument, TRI_SIGNATORY_SLOTS, signedLineCount } = require('../utils/triReportPdf');
 const { buildRecommendationForTri } = require('./dischargeController');
 // Published TRI reports are filed in the TRI Records folder like any other
 // document; the folder comes from the routing rules so it cannot drift.
@@ -17,6 +17,65 @@ const { folderForType } = require('../utils/documentCategory');
 const TRI_TEMPLATE_VERSION = 'TRI-2025-PDF';
 const TRI_FOLDER = folderForType('TRI');
 const VALID_STATUSES = new Set(['Draft', 'Submitted', 'Under Review', 'Returned', 'For Reassessment', 'Finalized']);
+
+// ─── Page-8 signature storage ────────────────────────────────────────────────
+// The page-8 block is stored in `triRecords.signatories` — one JSON entry per slot
+// — AND mirrored into the per-line columns the app shipped with. Both stores are
+// kept in step: the JSON is what the PDF renderer reads for the four reviewer
+// lines, and the columns hold what older records and readers already contain, so
+// neither store can go stale and no signature can be lost.
+//
+// The Houseparent line is the exception, by design: its E-Signature lives in the
+// `houseparent*` columns (see `signatorySignatureOf` in utils/triReportPdf.js) and
+// the JSON holds only the typed name.
+const SIGNATORY_COLUMNS = {
+  houseparent: ['houseparentSignature', 'houseparentSignedBy', 'houseparentSignedAt'],
+  administrativeOfficer: ['adminOfficerSignature', 'adminOfficerSignedBy', 'adminOfficerSignedAt'],
+  caseManager: ['swo1Signature', 'swo1SignedBy', 'swo1SignedAt'],
+  centerHead: ['centerheadSignature', 'centerheadSignedBy', 'centerheadSignedAt'],
+  sectionChief: ['sectionchiefSignature', 'sectionchiefSignedBy', 'sectionchiefSignedAt'],
+};
+
+// The `signatories` slot a signed line writes to, found from the line's own column
+// names (the table below is the single source of truth for those, so the two
+// cannot drift). Returns null if a line has no mapped slot.
+function slotForSignatureLine(line) {
+  return Object.keys(SIGNATORY_COLUMNS)
+    .find((slot) => SIGNATORY_COLUMNS[slot][0] === line.signature) || null;
+}
+
+/**
+ * Copy one slot's E-Signature into that line's columns, so the JSON and the
+ * columns never drift apart.
+ *
+ * Only mirrors fields the entry actually carries: an entry that says nothing
+ * about `signature` must not blank a column that holds one. A database that
+ * predates a column (1054 unknown column / 1060 duplicate column) is tolerated —
+ * the JSON is authoritative and the boot migration adds the columns next start.
+ */
+async function mirrorSignatoryToColumns(recordId, slot, entry, updatedBy) {
+  const columns = SIGNATORY_COLUMNS[slot];
+  if (!columns || !entry || !('signature' in entry)) return;
+  const [signatureColumn, signedByColumn, signedAtColumn] = columns;
+  const signed = entry.signature || null;
+  try {
+    await pool.query(
+      `UPDATE triRecords
+          SET ${signatureColumn} = ?, ${signedByColumn} = ?, ${signedAtColumn} = ?, updatedBy = ?
+        WHERE id = ?`,
+      [
+        signed,
+        signed ? entry.signedBy || null : null,
+        signed ? (entry.signedAt ? new Date(entry.signedAt) : new Date()) : null,
+        updatedBy,
+        recordId,
+      ]
+    );
+  } catch (error) {
+    if (error && (error.errno === 1054 || error.errno === 1060)) return;
+    throw error;
+  }
+}
 
 // ─── TRI Part II: Official offense-deduction table (Pages 6–7)
 // Keyword → deduct-points per the PDF "Homelife Discipline" table.
@@ -238,7 +297,7 @@ async function previousFinalized(residentId, year, month) {
 }
 
 function mapRecord(row) {
-  return { ...row, responses: asObject(row.responses) };
+  return { ...row, responses: asObject(row.responses), signatories: asObject(row.signatories) };
 }
 
 async function list(req, res, next) {
@@ -546,9 +605,14 @@ async function publishDocumentForTri(record, actor) {
   const reviewer = record.reviewedBy || approver;
   const description = `Official Treatment and Rehabilitation Indicator for ${periodLabel(record.reportingYear, record.reportingMonth)}. `
     + `Rating: ${record.rating || 'Not rated'} (${record.finalPoints ?? 0} points). System-generated copy — `
-    + (record.houseparentSignature
-      ? 'the Houseparent signature line is signed; the remaining four signature lines are blank.'
-      : 'signature lines are blank.');
+    + (() => {
+      const signed = signedLineCount(record);
+      const total = TRI_SIGNATORY_SLOTS.length;
+      if (!signed) return 'signature lines are blank.';
+      return signed === total
+        ? 'all five signature lines are signed.'
+        : `${signed} of ${total} signature lines are signed; the remaining signature lines are blank.`;
+    })();
   const fileData = buffer.toString('base64');
 
   const [existing] = await pool.query('SELECT id FROM documents WHERE triRecordId = ? LIMIT 1', [record.id]);
@@ -686,19 +750,98 @@ async function sign(req, res, next) {
 }
 
 /**
- * POST /:id/signature/:line — sign one of the two official lines on the TRI.
+ * PUT /:id/signatories — the typed names and E-Signatures of the page-8 block.
  *
- * Separate from `sign()` above rather than a `line` parameter on it, so the
- * Houseparent's line keeps its `houseparent`-only gate and this handler can never
- * touch it. `line` is a path segment validated against `OFFICIAL_SIGNATURE_LINES`
- * — an unknown one is a 400, not a fallback — so it selects a row in a fixed map
- * and cannot reach the SQL text as anything else.
+ * Body: `{ slot, name?, signature? }`. A field that is left out is unchanged; an
+ * empty string clears it.
+ *
+ *   - `houseparent`            name only (the Houseparent's E-Signature keeps its
+ *                              own endpoint, POST /:id/signature). Houseparent only.
+ *   - `administrativeOfficer`, `caseManager`
+ *                              name + E-Signature.
+ *   - `centerHead` (MARICOR C. NAVARRO), `sectionChief` (NICOLAS Q. REGALARIO)
+ *                              E-Signature only; the name is pre-printed.
+ *
+ * Every line except the Houseparent's is filled in by a reviewer (Social Worker,
+ * Center Head, Admin). A finalized TRI is the published instrument, so it is frozen.
+ */
+async function updateSignatories(req, res, next) {
+  try {
+    const slot = String(req.body?.slot || '');
+    const definition = TRI_SIGNATORY_SLOTS.find((entry) => entry.slot === slot);
+    if (!definition) throw new ApiError(400, `slot must be one of: ${TRI_SIGNATORY_SLOTS.map((entry) => entry.slot).join(', ')}`);
+
+    if (slot === 'houseparent') {
+      // The Houseparent's typed name may be entered by the Houseparent or by a
+      // reviewer. (Name only — the Houseparent's E-Signature is refused below and
+      // stays on POST /:id/signature, which only a Houseparent may call.)
+      if (roleOf(req.user) !== 'houseparent' && !canReview(req.user)) {
+        throw new ApiError(403, 'Only the Houseparent, a Social Worker or the Center Head can enter the Houseparent name.');
+      }
+    } else if (!canReview(req.user)) {
+      throw new ApiError(403, 'Only a Social Worker or the Center Head can fill in this signature line.');
+    }
+
+    const record = await getRecord(req.params.id);
+    if (!await canAccessResident(req.user, record.residentId)) throw new ApiError(403, 'You are not assigned to this resident');
+    if (record.status === 'Finalized') throw new ApiError(409, 'A finalized TRI cannot be changed.');
+
+    const { name, signature } = req.body || {};
+    if (name === undefined && signature === undefined) throw new ApiError(400, 'name or signature is required');
+    if (name !== undefined && !definition.hasName) throw new ApiError(400, 'This signature line has a pre-printed name.');
+    if (signature !== undefined && slot === 'houseparent') {
+      throw new ApiError(400, 'The Houseparent signature is saved through POST /tri/:id/signature.');
+    }
+
+    const current = asObject(record.signatories);
+    const entry = { ...(current[slot] || {}) };
+
+    if (name !== undefined) {
+      const text = name === null ? '' : String(name).trim();
+      if (text.length > 150) throw new ApiError(400, 'name must be 150 characters or fewer');
+      entry.name = text || null;
+    }
+    if (signature !== undefined) {
+      const value = signature === null ? '' : String(signature);
+      if (value && !/^data:image\/(png|jpeg|jpg);base64,/i.test(value)) {
+        throw new ApiError(400, 'signature must be a PNG or JPEG data URL');
+      }
+      if (value.length > 2_000_000) throw new ApiError(413, 'signature image is too large');
+      entry.signature = value || null;
+      entry.signedBy = value ? req.user.username : null;
+      entry.signedAt = value ? new Date().toISOString() : null;
+    }
+
+    const next = { ...current, [slot]: entry };
+    await pool.query(
+      'UPDATE triRecords SET signatories = ?, updatedBy = ? WHERE id = ?',
+      [JSON.stringify(next), req.user.username, record.id]
+    );
+    // Keep the line's own columns in step with the JSON, so nothing that reads
+    // the columns (older records, the reports, the guard tests) goes stale.
+    await mirrorSignatoryToColumns(record.id, slot, entry, req.user.username);
+
+    res.json({
+      success: true,
+      data: mapRecord(await getRecord(record.id)),
+      message: `${definition.title} line saved.`,
+    });
+  } catch (error) { next(error); }
+}
+
+/**
+ * POST /:id/signature/:line — the original per-line signing route, kept so its
+ * callers keep working.
+ *
+ * It writes through the same storage as `PUT /:id/signatories`: the slot's entry
+ * in `signatories` is updated and then mirrored into that line's columns, so the
+ * two stores cannot disagree. `line` is one of `adminofficer`, `swo1`, `swo2`,
+ * `swo3` — the Houseparent line keeps its own route (`POST /:id/signature`).
  *
  * Same contract as the Houseparent's line otherwise: a PNG/JPEG data URL or an
  * explicit clear, capped at 2,000,000 characters, refused on a Finalized record.
- * Signing here never submits or advances the record — the officials sign a TRI
- * that is already in front of them, and auto-submitting on their signature would
- * let a reviewer push a record through on their own signature.
+ * Signing never submits or advances the record — the officials sign a TRI that is
+ * already in front of them.
  */
 async function signOfficialLine(req, res, next) {
   try {
@@ -707,6 +850,8 @@ async function signOfficialLine(req, res, next) {
     if (!line) {
       throw new ApiError(400, `line must be one of ${Object.keys(OFFICIAL_SIGNATURE_LINES).join(', ')}`);
     }
+    const slot = slotForSignatureLine(line);
+    if (!slot) throw new ApiError(500, `No storage slot is mapped for the ${line.label} line.`);
     if (!canReview(req.user)) {
       throw new ApiError(403, `Only a Social Worker or Center Head can sign the ${line.label} line.`);
     }
@@ -724,19 +869,17 @@ async function signOfficialLine(req, res, next) {
     }
     if (signature.length > 2_000_000) throw new ApiError(413, 'signature image is too large');
 
+    const current = asObject(record.signatories);
+    const entry = { ...(current[slot] || {}) };
+    entry.signature = signature || null;
+    entry.signedBy = signature ? req.user.username : null;
+    entry.signedAt = signature ? new Date().toISOString() : null;
+
     await pool.query(
-      `UPDATE triRecords
-         SET ${line.signature} = ?, ${line.signedBy} = ?, ${line.signedAt} = ?,
-             updatedBy = ?
-       WHERE id = ?`,
-      [
-        signature || null,
-        signature ? req.user.username : null,
-        signature ? new Date() : null,
-        req.user.username,
-        record.id,
-      ]
+      'UPDATE triRecords SET signatories = ?, updatedBy = ? WHERE id = ?',
+      [JSON.stringify({ ...current, [slot]: entry }), req.user.username, record.id]
     );
+    await mirrorSignatoryToColumns(record.id, slot, entry, req.user.username);
 
     res.json({
       success: true,
@@ -910,4 +1053,4 @@ async function publishMissingTriDocuments({ limit = 50 } = {}) {
 // `publishDocumentForTri` is exported for the idempotency test: approving the same
 // record twice must update one Documents entry, and finalize() refuses the second
 // attempt before it can be observed over HTTP.
-module.exports = { list, getById, create, update, submit, review, returnForRevision, finalize, sign, signOfficialLine, referenceViolations, summary, residentHistory, offenseDeductions, monitor, publishDocumentForTri, publishMissingTriDocuments, OFFICIAL_SIGNATURE_LINES };
+module.exports = { list, getById, create, update, submit, review, returnForRevision, finalize, sign, updateSignatories, signOfficialLine, referenceViolations, summary, residentHistory, offenseDeductions, monitor, publishDocumentForTri, publishMissingTriDocuments, OFFICIAL_SIGNATURE_LINES };

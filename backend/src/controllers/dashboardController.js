@@ -23,10 +23,13 @@ const { ApiError } = require('../middleware/errorHandler');
 const { snapshotFor } = require('../middleware/rbac');
 const { hasModuleAccess } = require('../config/rbac');
 const { loadResidentScope } = require('../utils/residentScope');
-// The facility's today. Shared with every other endpoint that filters on a
-// calendar day — a second copy here would drift, and `manila-today-in-queries`
-// fails on a controller that uses it without importing it.
-const { manilaToday } = require('../utils/triPeriod');
+
+/** Today's date in Asia/Manila as `YYYY-MM-DD`, whatever the server's timezone. */
+function manilaToday(now = new Date()) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(now);
+}
 
 function parseJson(value) {
   if (Array.isArray(value)) return value;

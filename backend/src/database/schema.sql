@@ -330,6 +330,13 @@ CREATE TABLE violations (
   witnesses VARCHAR(255) NULL,
   reportedBy VARCHAR(100) NULL,
   reviewedBy VARCHAR(100) NULL,
+  -- Dual verification: both the Psychological Support Staff and the Social
+  -- Worker verify a logged incident before it proceeds.
+  psychVerifiedBy VARCHAR(100) NULL,
+  psychVerifiedAt DATETIME NULL,
+  psychVerification LONGTEXT NULL,
+  swVerifiedBy VARCHAR(100) NULL,
+  swVerifiedAt DATETIME NULL,
   actionTaken TEXT NULL,
   status ENUM('Pending Review', 'Under Investigation', 'Reviewed', 'Resolved', 'Escalated', 'Rejected') NOT NULL DEFAULT 'Pending Review',
   requiresAssessment BOOLEAN NOT NULL DEFAULT TRUE,
@@ -368,6 +375,7 @@ CREATE TABLE incidentReports (
   reportedBySignature LONGTEXT NULL,
   endorsedToSignature LONGTEXT NULL,
   checkedBySignature LONGTEXT NULL,
+  psychStaffSignature LONGTEXT NULL,
   notedBySignature LONGTEXT NULL,
   status ENUM('Submitted', 'Pending Review', 'Verified', 'Failed', 'Reassessment') NOT NULL DEFAULT 'Submitted',
   interventionType VARCHAR(100) NULL,
@@ -789,28 +797,10 @@ CREATE TABLE triRecords (
   houseparentSignature LONGTEXT NULL,
   houseparentSignedBy VARCHAR(100) NULL,
   houseparentSignedAt DATETIME NULL,
-  -- The designated personnel on the TRI's "Assessed by" block. Each signs their
-  -- own line, so each keeps its own triple — a single shared pair of columns
-  -- could not say which official a signature came from. Same PNG-data-URL
-  -- contract as above.
-  --
-  -- The column names name the LINE, not the office-holder, because the people on
-  -- them change: the printed names live in frontend/src/shared/triLayout.json.
-  -- `centerhead*` and `sectionchief*` keep the names they shipped with (they are
-  -- the SWO II/Center Head and SWO III/Section Chief lines) so the signatures
-  -- already stored on live records are not moved.
-  adminOfficerSignature LONGTEXT NULL,
-  adminOfficerSignedBy VARCHAR(100) NULL,
-  adminOfficerSignedAt DATETIME NULL,
-  swo1Signature LONGTEXT NULL,
-  swo1SignedBy VARCHAR(100) NULL,
-  swo1SignedAt DATETIME NULL,
-  centerheadSignature LONGTEXT NULL,
-  centerheadSignedBy VARCHAR(100) NULL,
-  centerheadSignedAt DATETIME NULL,
-  sectionchiefSignature LONGTEXT NULL,
-  sectionchiefSignedBy VARCHAR(100) NULL,
-  sectionchiefSignedAt DATETIME NULL,
+  -- JSON: the Houseparent's typed name, and the typed name + E-Signature of the
+  -- Administrative Officer and SWO I / Case Manager, plus the E-Signatures of
+  -- MARICOR C. NAVARRO and NICOLAS Q. REGALARIO on the page-8 block.
+  signatories LONGTEXT NULL,
   createdBy VARCHAR(100) NULL,
   updatedBy VARCHAR(100) NULL,
   createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,

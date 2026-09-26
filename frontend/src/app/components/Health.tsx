@@ -2,7 +2,7 @@
 const NURSE_FORMS_DATA = [
   { name: 'Health Record Form', description: 'Form 10-AB&C — Medical history, treatments & vitals', file: '/forms/health-record.pdf' },
 ];
-import { useEffect, useState, useMemo, type ReactNode } from 'react';
+import { useEffect, useRef, useState, useMemo, type ReactNode } from 'react';
 import { createResource, deleteResource, getStore, request } from '@/services/api';
 import { Card, CardContent, CardHeader, CardTitle } from '@/app/components/ui/card';
 import { Button } from '@/app/components/ui/button';
@@ -120,7 +120,24 @@ function emptyMedicalRow(date?: string) {
     doctorName: '',
     specialization: '',
     doctorSignature: '',
+    // The Laboratory Results file uploaded for this row. The file itself is a
+    // document (Documents → Medical Records, under the resident and their
+    // admission); the row keeps its id and name so the sheet shows it.
+    laboratoryResultDocumentId: '',
+    laboratoryResultFileName: '',
   };
+}
+
+/** The two medical files the Nurse uploads from this module. */
+type MedicalUploadKind = 'Laboratory Results' | 'Medical Certificate';
+
+function readFileAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(reader.error || new Error('The file could not be read.'));
+    reader.readAsDataURL(file);
+  });
 }
 
 /** The numeric part of a free-text measurement, or NaN. */
@@ -155,14 +172,39 @@ function bmiFor(height: unknown, weight: unknown) {
   return bmi.toFixed(1);
 }
 
-/** The band the computed BMI falls in, for the reference column. */
-function bmiBand(bmi: string) {
-  if (!bmi) return '';
-  const value = Number.parseFloat(bmi);
-  if (value < 18.5) return 'Below healthy range';
-  if (value < 25) return 'Healthy range';
-  if (value < 30) return 'Above healthy range';
-  return 'Well above healthy range';
+/**
+ * The facility's reference, in one place:
+ *   - BMI = weight (kg) / height (m)², as the sheet has always computed it;
+ *   - the healthy band is BMI 18.5–24.9 (the healthy weight range below is that
+ *     band expressed in kilograms for the recorded height);
+ *   - "Above Healthy Weight" is up to 6% over the top of the healthy weight
+ *     range; beyond that the standard BMI bands apply (Overweight below 30,
+ *     Obese from 30).
+ */
+const HEALTHY_BMI_MIN = 18.5;
+const HEALTHY_BMI_MAX = 24.9;
+const ABOVE_HEALTHY_MARGIN = 0.06;
+const OBESE_BMI = 30;
+
+type WeightClass = { label: string; className: string };
+
+/**
+ * The weight classification for one month's height and weight, or null when
+ * either is missing. Decided on the weight against the healthy weight range
+ * for that height, which is the same as deciding on the BMI.
+ */
+function weightClassification(height: unknown, weight: unknown): WeightClass | null {
+  const metres = heightInMetres(height);
+  const kilograms = measurement(weight);
+  if (Number.isNaN(metres) || Number.isNaN(kilograms)) return null;
+  const bmi = kilograms / (metres * metres);
+  if (!Number.isFinite(bmi) || bmi <= 0) return null;
+  const healthyMaxKg = HEALTHY_BMI_MAX * metres * metres;
+  if (bmi < HEALTHY_BMI_MIN) return { label: 'Underweight', className: 'bg-sky-100 text-sky-800' };
+  if (kilograms <= healthyMaxKg) return { label: 'Healthy / Normal', className: 'bg-green-100 text-green-800' };
+  if (kilograms <= healthyMaxKg * (1 + ABOVE_HEALTHY_MARGIN)) return { label: 'Above Healthy Weight', className: 'bg-yellow-100 text-yellow-800' };
+  if (bmi < OBESE_BMI) return { label: 'Overweight', className: 'bg-orange-100 text-orange-800' };
+  return { label: 'Obese', className: 'bg-red-100 text-red-800' };
 }
 
 /**
@@ -173,7 +215,25 @@ function bmiBand(bmi: string) {
 function healthyWeightRange(height: unknown) {
   const metres = heightInMetres(height);
   if (Number.isNaN(metres)) return '';
-  return `${(18.5 * metres * metres).toFixed(1)}–${(24.9 * metres * metres).toFixed(1)} kg`;
+  return `${(HEALTHY_BMI_MIN * metres * metres).toFixed(1)}–${(HEALTHY_BMI_MAX * metres * metres).toFixed(1)} kg`;
+}
+
+/** The 6% limit above the healthy weight range, for the reference row. */
+function sixPercentLimit(height: unknown) {
+  const metres = heightInMetres(height);
+  if (Number.isNaN(metres)) return '';
+  return `up to ${(HEALTHY_BMI_MAX * metres * metres * (1 + ABOVE_HEALTHY_MARGIN)).toFixed(1)} kg`;
+}
+
+/** The classification badge shown under a month's BMI. */
+function WeightClassBadge({ height, weight }: { height: unknown; weight: unknown }) {
+  const result = weightClassification(height, weight);
+  if (!result) return <>—</>;
+  return (
+    <span className={`inline-block rounded-full px-1.5 py-0.5 text-[10px] font-bold leading-tight ${result.className}`}>
+      {result.label}
+    </span>
+  );
 }
 
 // ── FORM LAYOUT PRIMITIVES ─────────────────────────────────────────────────
@@ -252,6 +312,12 @@ export function Health() {
 
   const [searchTerm, setSearchTerm] = useState('');
   const [filterResident, setFilterResident] = useState('all');
+  // Resident status — Active by default, so residents who have left do not
+  // crowd the working list. Their records are kept, not deleted.
+  const [residentStatusFilter, setResidentStatusFilter] = useState<'Active' | 'Discharged' | 'all'>('Active');
+  const [uploadingKey, setUploadingKey] = useState<string | null>(null);
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
+  const pendingUpload = useRef<{ kind: MedicalUploadKind; residentId: string; rowIndex?: number } | null>(null);
   const [activeTab, setActiveTab] = useState('all');
   const [showForms, setShowForms] = useState(false);
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -354,7 +420,7 @@ export function Health() {
   const validateForm = () => {
     if (!form.residentId) return 'Please select a resident.';
     if (!form.date) return 'Please select a date.';
-    if (form.recordType === 'Medical Record' && medicalRows.every(row => !row.findings.trim() && !row.laboratoryProcedure.trim() && !row.prescription.trim() && !row.careProvider.trim() && !row.doctorName.trim())) return 'Add at least one medical record row.';
+    if (form.recordType === 'Medical Record' && medicalRows.every(row => !row.findings.trim() && !row.laboratoryProcedure.trim() && !row.laboratoryResultDocumentId && !row.prescription.trim() && !row.careProvider.trim() && !row.doctorName.trim())) return 'Add at least one medical record row.';
     if (form.recordType === 'Dental Services' && (!form.chiefComplaints.trim() || !Object.values(dentalServices).some(value => value === true))) return 'Chief complaint and at least one dental service are required.';
     if (form.recordType === 'Height & Weight Monitoring' && !form.monitoringYear.trim()) return 'Monitoring year is required.';
     if (form.recordType === 'Health Assessment' && (!form.assessmentType.trim() || !form.findings.trim())) return 'Assessment type and findings are required.';
@@ -406,9 +472,43 @@ export function Health() {
         fourthQuarter: form.fourthQuarter,
       },
     };
+    // Height & Weight is one sheet per resident per year, filled in month by
+    // month. Logging a new month for a resident who already has that year's
+    // sheet adds the month to it instead of starting a second sheet, so each
+    // month's measurements are kept together and none is lost.
+    let targetId = editingId;
+    if (!targetId && form.recordType === 'Height & Weight Monitoring') {
+      const existingSheet = healthRecords.find(r =>
+        r.recordType === 'Height & Weight Monitoring'
+        && r.residentId === form.residentId
+        && String(r.details?.monitoringYear || '').trim() === form.monitoringYear.trim());
+      if (existingSheet) {
+        targetId = existingSheet.id;
+        const previous: any[] = existingSheet.details?.monthlyMeasurements || [];
+        const merged = monthlyMeasurements.map(month => {
+          const before = previous.find(row => Number(row?.month) === month.month) || {};
+          return {
+            month: month.month,
+            height: String(month.height || '').trim() ? month.height : (before.height || ''),
+            weight: String(month.weight || '').trim() ? month.weight : (before.weight || ''),
+          };
+        });
+        entry.id = existingSheet.id;
+        entry.details = {
+          ...existingSheet.details,
+          ...entry.details,
+          monthlyMeasurements: merged,
+          observations: form.observations || existingSheet.details?.observations || '',
+          firstQuarter: form.firstQuarter || existingSheet.details?.firstQuarter || '',
+          secondQuarter: form.secondQuarter || existingSheet.details?.secondQuarter || '',
+          thirdQuarter: form.thirdQuarter || existingSheet.details?.thirdQuarter || '',
+          fourthQuarter: form.fourthQuarter || existingSheet.details?.fourthQuarter || '',
+        };
+      }
+    }
     try {
-      if (editingId) {
-        await request(`/healthRecords/${editingId}`, { method: 'PUT', body: JSON.stringify(entry) });
+      if (targetId) {
+        await request(`/healthRecords/${targetId}`, { method: 'PUT', body: JSON.stringify(entry) });
       } else {
         await createResource('healthRecords', entry);
       }
@@ -421,7 +521,7 @@ export function Health() {
     // child's Medical tab too, and that view reads the same store.
     await refreshData();
     setIsSaving(false);
-    const successMessage = editingId ? 'Health record updated successfully.' : 'Health record saved successfully.';
+    const successMessage = editingId ? 'Health record updated successfully.' : targetId ? 'Measurements added to this year\'s Height & Weight sheet.' : 'Health record saved successfully.';
     resetForm();
     setSaveMessage(successMessage);
   };
@@ -433,20 +533,44 @@ export function Health() {
     setDeleteTarget(null);
   };
 
-  const filtered = useMemo(() => healthRecords.filter(r => {
+  /**
+   * Whether a resident passes the Active / Discharged / All filter. A resident
+   * is Discharged only when their record says so; everyone else is Active.
+   */
+  const matchesResidentStatus = (residentId?: string) => {
+    if (residentStatusFilter === 'all') return true;
+    const resident = children.find(c => c.id === residentId);
+    return (resident?.status === 'Discharged' ? 'Discharged' : 'Active') === residentStatusFilter;
+  };
+  const statusChildren = useMemo(
+    () => children.filter(c => matchesResidentStatus(c.id)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [children, residentStatusFilter],
+  );
+  // A resident picked under one status filter is dropped when the filter hides them.
+  useEffect(() => {
+    if (filterResident !== 'all' && !statusChildren.some(c => c.id === filterResident)) setFilterResident('all');
+  }, [statusChildren, filterResident]);
+  const statusRecords = useMemo(
+    () => healthRecords.filter(r => matchesResidentStatus(r.residentId)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [healthRecords, children, residentStatusFilter],
+  );
+
+  const filtered = useMemo(() => statusRecords.filter(r => {
     const matchSearch = (r.residentName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
       (r.id || '').toLowerCase().includes(searchTerm.toLowerCase());
     const matchResident = filterResident === 'all' || r.residentId === filterResident;
     const matchTab = activeTab === 'all' || r.recordType === activeTab;
     return matchSearch && matchResident && matchTab;
-  }), [healthRecords, searchTerm, filterResident, activeTab]);
+  }), [statusRecords, searchTerm, filterResident, activeTab]);
 
   const tabCounts = useMemo(() => ({
-    all: healthRecords.length,
-    'Health Assessment': healthRecords.filter(r => r.recordType === 'Health Assessment').length,
-    'Medication Log': healthRecords.filter(r => r.recordType === 'Medication Log').length,
-    'Medical Treatment': healthRecords.filter(r => r.recordType === 'Medical Treatment').length,
-  }), [healthRecords]);
+    all: statusRecords.length,
+    'Health Assessment': statusRecords.filter(r => r.recordType === 'Health Assessment').length,
+    'Medication Log': statusRecords.filter(r => r.recordType === 'Medication Log').length,
+    'Medical Treatment': statusRecords.filter(r => r.recordType === 'Medical Treatment').length,
+  }), [statusRecords]);
 
   // Per-resident summary for the selected resident filter
   const residentSummary = useMemo(() => {
@@ -472,10 +596,86 @@ export function Health() {
     () => documents
       .filter(d => String(d.category || '').trim().toLowerCase() === 'medical')
       .filter(d => filterResident === 'all' || d.residentId === filterResident)
+      .filter(d => matchesResidentStatus(d.residentId))
       .sort((a, b) => String(b.uploadedAt || b.approvedAt || '')
         .localeCompare(String(a.uploadedAt || a.approvedAt || ''))),
-    [documents, filterResident],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [documents, filterResident, children, residentStatusFilter],
   );
+
+  /**
+   * Upload a Laboratory Results file or a Medical Certificate for a resident.
+   *
+   * The file becomes a Documents row (category Medical → Medical Records). The
+   * server files it under the resident's open admission — the admission is
+   * derived from the resident on the server, never chosen here — so it lands
+   * under the correct resident and admission. When it is a row's laboratory
+   * result, the row keeps the document's id and file name.
+   */
+  const startUpload = (kind: MedicalUploadKind, residentId: string, rowIndex?: number) => {
+    if (!residentId) {
+      void dialog.failure('Select a resident first', `Choose the resident before uploading ${kind === 'Laboratory Results' ? 'laboratory results' : 'a medical certificate'}.`);
+      return;
+    }
+    pendingUpload.current = { kind, residentId, rowIndex };
+    if (uploadInputRef.current) {
+      uploadInputRef.current.value = '';
+      uploadInputRef.current.click();
+    }
+  };
+
+  const handleUploadFile = async (file: File | undefined) => {
+    const target = pendingUpload.current;
+    pendingUpload.current = null;
+    if (!file || !target) return;
+    const resident = children.find(c => c.id === target.residentId);
+    const key = `${target.kind}:${target.rowIndex ?? 'record'}`;
+    setUploadingKey(key);
+    try {
+      const fileData = await readFileAsDataUrl(file);
+      const now = new Date().toISOString();
+      const saved: any = await createResource('documents', {
+        residentId: target.residentId,
+        residentName: resident?.name || '',
+        category: 'Medical',
+        title: target.kind,
+        description: `${target.kind} — ${file.name}`,
+        phase: resident?.casePhase || '',
+        fileName: file.name,
+        fileSize: file.size,
+        fileType: file.type,
+        fileData,
+        status: 'Approved',
+        uploaderRole: user?.role || 'nurse',
+        uploadedBy: user?.username || 'Nurse',
+        uploadedAt: now,
+        approvedBy: 'Auto-Approved',
+        approvedAt: now,
+      });
+      const documentId = String(saved?.id || saved?.data?.id || '');
+      if (target.kind === 'Laboratory Results' && target.rowIndex !== undefined) {
+        setMedicalRows(rows => rows.map((row, index) => index === target.rowIndex
+          ? { ...row, laboratoryResultDocumentId: documentId, laboratoryResultFileName: file.name }
+          : row));
+      }
+      await refreshData();
+      setSaveMessage(`${target.kind} uploaded for ${resident?.name || 'the resident'}.`);
+    } catch (error) {
+      void dialog.failure(`Could not upload the ${target.kind === 'Laboratory Results' ? 'laboratory results' : 'medical certificate'}`, error instanceof Error ? error.message : 'Please try again.');
+    } finally {
+      setUploadingKey(null);
+    }
+  };
+
+  /** Open an uploaded medical file by its document id. */
+  const openUploadedDocument = (documentId: string) => {
+    const doc = documents.find(d => d.id === documentId);
+    if (!doc) {
+      void dialog.failure('File not found', 'The uploaded file is not in the Documents list yet. Refresh and try again.');
+      return;
+    }
+    downloadDocumentFile(doc, (message) => { void dialog.failure('Could not download the document', message); });
+  };
 
   return (
     <div className="space-y-5 p-2">
@@ -505,16 +705,40 @@ export function Health() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
           <Input className="pl-10" placeholder="Search by resident or record ID..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
         </div>
+        <Select
+          value={residentStatusFilter}
+          onValueChange={value => setResidentStatusFilter(value as 'Active' | 'Discharged' | 'all')}
+        >
+          <SelectTrigger className="w-full sm:w-44" aria-label="Resident status">
+            <SelectValue placeholder="Active" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All</SelectItem>
+            <SelectItem value="Active">Active</SelectItem>
+            <SelectItem value="Discharged">Discharged</SelectItem>
+          </SelectContent>
+        </Select>
         <Select value={filterResident} onValueChange={setFilterResident}>
           <SelectTrigger className="w-full sm:w-56">
             <SelectValue placeholder="Filter by resident" />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Residents</SelectItem>
-            {children.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+            {statusChildren.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
           </SelectContent>
         </Select>
       </div>
+
+      {/* One hidden picker serves every upload button on this page; the button
+          that opened it decides the kind (Laboratory Results / Medical
+          Certificate), the resident and, for a lab result, the sheet row. */}
+      <input
+        ref={uploadInputRef}
+        type="file"
+        className="hidden"
+        accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+        onChange={event => { void handleUploadFile(event.target.files?.[0]); }}
+      />
 
       {/* RESIDENT SUMMARY */}
       {residentSummary && (
@@ -558,7 +782,33 @@ export function Health() {
             <FileText className="w-4 h-4 text-[#2F3E46] shrink-0" /> Medical Documents
             <Badge className="bg-[#2F3E46]/10 text-[#2F3E46]">{medicalDocuments.length}</Badge>
           </CardTitle>
-          <p className="text-[11px] text-gray-400">Filed under Documents → Medical Records</p>
+          <div className="flex flex-wrap items-center gap-2">
+            {can('Health', 'create') && (
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 gap-1 px-2 text-xs"
+                  disabled={filterResident === 'all' || uploadingKey !== null}
+                  title={filterResident === 'all' ? 'Choose a resident in the filter first' : undefined}
+                  onClick={() => startUpload('Laboratory Results', filterResident)}
+                >
+                  <Plus className="w-3 h-3" /> Upload Laboratory Results
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 gap-1 px-2 text-xs"
+                  disabled={filterResident === 'all' || uploadingKey !== null}
+                  title={filterResident === 'all' ? 'Choose a resident in the filter first' : undefined}
+                  onClick={() => startUpload('Medical Certificate', filterResident)}
+                >
+                  <Plus className="w-3 h-3" /> Upload Medical Certificate
+                </Button>
+              </>
+            )}
+            <p className="text-[11px] text-gray-400">Filed under Documents → Medical Records</p>
+          </div>
         </CardHeader>
         <CardContent>
           {medicalDocuments.length === 0 ? (
@@ -829,12 +1079,13 @@ export function Health() {
                     resident&rsquo;s history is one sheet rather than one record per visit.
                   </SectionNote>
                   <div className="overflow-x-auto rounded-lg border border-gray-200">
-                    <table className="w-full min-w-[1040px] border-collapse text-xs">
+                    <table className="w-full min-w-[1220px] border-collapse text-xs">
                       <thead>
                         <tr className="bg-gray-50 text-[10px] uppercase tracking-wider text-[#2F3E46]">
                           <th className="border-b border-gray-200 p-2 text-left font-bold w-32">Date</th>
                           <th className="border-b border-gray-200 p-2 text-left font-bold">Medical Findings</th>
                           <th className="border-b border-gray-200 p-2 text-left font-bold">Laboratory Procedure</th>
+                          <th className="border-b border-gray-200 p-2 text-left font-bold w-44">Laboratory Results</th>
                           <th className="border-b border-gray-200 p-2 text-left font-bold">Prescription</th>
                           <th className="border-b border-gray-200 p-2 text-left font-bold">Care Provider</th>
                           <th className="border-b border-gray-200 p-2 text-left font-bold">Doctor&apos;s Name</th>
@@ -845,7 +1096,37 @@ export function Health() {
                       <tbody>
                         {medicalRows.map((row, index) => (
                           <tr key={index} className="align-top odd:bg-white even:bg-gray-50/60">
-                            {(['date', 'findings', 'laboratoryProcedure', 'prescription', 'careProvider', 'doctorName', 'specialization'] as const).map(field => (
+                            {(['date', 'findings', 'laboratoryProcedure', 'laboratoryResults', 'prescription', 'careProvider', 'doctorName', 'specialization'] as const).map(field => (
+                              field === 'laboratoryResults' ? (
+                                // Laboratory Results sits beside the procedure it
+                                // belongs to: the uploaded file for this row.
+                                <td key={field} className="border-b border-gray-100 p-1.5">
+                                  <div className="flex flex-col gap-1">
+                                    {row.laboratoryResultDocumentId && (
+                                      <button
+                                        type="button"
+                                        className="truncate text-left text-[11px] font-semibold text-[#2F3E46] underline"
+                                        title={row.laboratoryResultFileName}
+                                        onClick={() => openUploadedDocument(row.laboratoryResultDocumentId)}
+                                      >
+                                        {row.laboratoryResultFileName || 'View result'}
+                                      </button>
+                                    )}
+                                    <Button
+                                      type="button"
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-7 gap-1 px-2 text-[11px]"
+                                      disabled={uploadingKey !== null}
+                                      aria-label={`Upload laboratory results for medical row ${index + 1}`}
+                                      onClick={() => startUpload('Laboratory Results', form.residentId, index)}
+                                    >
+                                      <Plus className="h-3 w-3" />
+                                      {uploadingKey === `Laboratory Results:${index}` ? 'Uploading…' : row.laboratoryResultDocumentId ? 'Replace' : 'Upload'}
+                                    </Button>
+                                  </div>
+                                </td>
+                              ) : (
                               <td key={field} className="border-b border-gray-100 p-1.5">
                                 <Input
                                   type={field === 'date' ? 'date' : 'text'}
@@ -855,6 +1136,7 @@ export function Health() {
                                   aria-label={`${field} for medical row ${index + 1}`}
                                 />
                               </td>
+                              )
                             ))}
                             <td className="border-b border-gray-100 p-1.5 text-center">
                               <button
@@ -881,6 +1163,39 @@ export function Health() {
                   >
                     <Plus className="h-3.5 w-3.5" /> Add entry
                   </Button>
+                  {/* Medical Certificate — filed under this resident and their
+                      current admission in Documents → Medical Records. */}
+                  <div className="rounded-lg border border-gray-200 p-3 space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-[#2F3E46]">Medical Certificate</p>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-7 gap-1 px-2 text-xs"
+                        disabled={uploadingKey !== null}
+                        onClick={() => startUpload('Medical Certificate', form.residentId)}
+                      >
+                        <Plus className="h-3 w-3" /> {uploadingKey === 'Medical Certificate:record' ? 'Uploading…' : 'Upload Medical Certificate'}
+                      </Button>
+                    </div>
+                    {(() => {
+                      const certificates = documents.filter(d => d.residentId === form.residentId && d.title === 'Medical Certificate');
+                      if (!form.residentId) return <p className="text-xs text-gray-400">Select the resident to upload a medical certificate.</p>;
+                      if (certificates.length === 0) return <p className="text-xs italic text-gray-400">No medical certificate uploaded for this resident yet.</p>;
+                      return (
+                        <ul className="space-y-1">
+                          {certificates.map(doc => (
+                            <li key={doc.id} className="flex items-center justify-between gap-2 text-xs">
+                              <span className="truncate text-[#2F3E46]">{doc.fileName || doc.title}</span>
+                              <span className="shrink-0 text-gray-400">{doc.uploadedAt ? formatShortDate(String(doc.uploadedAt).slice(0, 10)) : ''}</span>
+                              <button type="button" className="shrink-0 font-semibold text-[#2F3E46] underline" onClick={() => openUploadedDocument(doc.id)}>Download</button>
+                            </li>
+                          ))}
+                        </ul>
+                      );
+                    })()}
+                  </div>
                 </FormSection>
               )}
 
@@ -1010,6 +1325,20 @@ export function Health() {
                             ))}
                           </tr>
                           <tr className="align-middle">
+                            <th className="border-b border-gray-100 p-2 text-left text-[10px] font-bold uppercase tracking-wider text-[#2F3E46]">
+                              Classification
+                            </th>
+                            {monthlyMeasurements.map((entry, index) => (
+                              <td
+                                key={entry.month}
+                                className="border-b border-gray-100 p-1 text-center"
+                                aria-label={`Weight classification for ${MONTHS[index]}`}
+                              >
+                                <WeightClassBadge height={entry.height} weight={entry.weight} />
+                              </td>
+                            ))}
+                          </tr>
+                          <tr className="align-middle">
                             <th className="border-b border-gray-100 p-2 text-left text-[10px] font-bold uppercase tracking-wider text-gray-500">
                               Healthy weight
                               <span className="block font-normal normal-case text-gray-400">for the height</span>
@@ -1021,6 +1350,9 @@ export function Health() {
                                 aria-label={`Healthy weight range for ${MONTHS[index]}`}
                               >
                                 {healthyWeightRange(entry.height) || '—'}
+                                {healthyWeightRange(entry.height) && (
+                                  <span className="block text-[9px] text-yellow-700">6%: {sixPercentLimit(entry.height)}</span>
+                                )}
                               </td>
                             ))}
                           </tr>
@@ -1030,7 +1362,10 @@ export function Health() {
                     <SectionNote>
                       BMI is computed from the height and weight in the same column, and the
                       healthy-weight reference is the 18.5&ndash;24.9 BMI band for that height.
-                      Both are shown for guidance and are not stored separately.
+                      Classification: below the range is Underweight; within it Healthy / Normal;
+                      up to 6% above it Above Healthy Weight; beyond that Overweight (BMI under 30)
+                      or Obese (BMI 30 and over). All are computed, never typed. Each month&rsquo;s
+                      entry is saved into this resident&rsquo;s sheet for the year.
                     </SectionNote>
                   </FormSection>
 
@@ -1177,8 +1512,8 @@ export function Health() {
             <div className="space-y-4 py-2 text-sm">
               <div className="text-center border-y-2 border-[#2F3E46] py-4 uppercase"><p className="text-xs">Republic of the Philippines</p><p className="text-xs">Province of Laguna</p><p className="font-black">City Government of Calamba</p><p className="text-xs">City Social Services Department</p><p className="font-black tracking-widest">Second Chance Home</p><h3 className="mt-2 font-black">{FORM_OPTIONS.find(option => option.value === viewRecord.recordType)?.title || viewRecord.recordType}</h3><p className="text-xs font-bold">{FORM_OPTIONS.find(option => option.value === viewRecord.recordType)?.code}</p></div>
               <div className="grid grid-cols-3 gap-3 border p-3"><span><b>Name:</b> {viewRecord.residentName}</span><span><b>Age:</b> {children.find(child => child.id === viewRecord.residentId)?.age || '—'}</span><span><b>Birthday:</b> {children.find(child => child.id === viewRecord.residentId)?.birthDate || '—'}</span></div>
-              {viewRecord.recordType === 'Medical Record' && <div className="overflow-x-auto"><table className="min-w-[1000px] w-full border-collapse text-xs"><thead><tr>{['Date', 'Medical Findings', 'Laboratory Procedure', 'Prescription', 'Care Provider', "Doctor's Name", 'Specialization'].map(label => <th key={label} className="border bg-gray-100 p-2 text-left">{label}</th>)}</tr></thead><tbody>{(viewRecord.details?.medicalRows || []).map((row: any, index: number) => <tr key={index}>{[row.date, row.findings, row.laboratoryProcedure, row.prescription, row.careProvider, row.doctorName, row.specialization].map((value: string, cellIndex: number) => <td key={cellIndex} className="border p-2 align-top">{value || '—'}</td>)}</tr>)}</tbody></table></div>}
-              {viewRecord.recordType === 'Height & Weight Monitoring' && <div className="overflow-x-auto"><table className="min-w-[900px] w-full border-collapse text-sm"><thead><tr><th className="border p-2 text-left">Month</th>{MONTHS.map(month => <th key={month} className="border p-2">{month}</th>)}</tr></thead><tbody><tr><th className="border p-2 text-left">Height</th>{(viewRecord.details?.monthlyMeasurements || []).map((row: any) => <td key={row.month} className="border p-2">{row.height || '—'}</td>)}</tr><tr><th className="border p-2 text-left">Weight</th>{(viewRecord.details?.monthlyMeasurements || []).map((row: any) => <td key={row.month} className="border p-2">{row.weight || '—'}</td>)}</tr><tr className="bg-gray-50"><th className="border p-2 text-left">BMI</th>{(viewRecord.details?.monthlyMeasurements || []).map((row: any) => <td key={row.month} className="border p-2 font-semibold">{bmiFor(row.height, row.weight) || '—'}</td>)}</tr><tr><th className="border p-2 text-left text-xs font-normal">Healthy weight for height</th>{(viewRecord.details?.monthlyMeasurements || []).map((row: any) => <td key={row.month} className="border p-2 text-xs text-gray-500">{healthyWeightRange(row.height) || '—'}</td>)}</tr></tbody></table></div>}
+              {viewRecord.recordType === 'Medical Record' && <div className="overflow-x-auto"><table className="min-w-[1000px] w-full border-collapse text-xs"><thead><tr>{['Date', 'Medical Findings', 'Laboratory Procedure', 'Laboratory Results', 'Prescription', 'Care Provider', "Doctor's Name", 'Specialization'].map(label => <th key={label} className="border bg-gray-100 p-2 text-left">{label}</th>)}</tr></thead><tbody>{(viewRecord.details?.medicalRows || []).map((row: any, index: number) => <tr key={index}>{[row.date, row.findings, row.laboratoryProcedure].map((value: string, cellIndex: number) => <td key={cellIndex} className="border p-2 align-top">{value || '—'}</td>)}<td className="border p-2 align-top">{row.laboratoryResultDocumentId ? <button type="button" className="text-left font-semibold text-[#2F3E46] underline" onClick={() => openUploadedDocument(row.laboratoryResultDocumentId)}>{row.laboratoryResultFileName || 'View result'}</button> : '—'}</td>{[row.prescription, row.careProvider, row.doctorName, row.specialization].map((value: string, cellIndex: number) => <td key={cellIndex} className="border p-2 align-top">{value || '—'}</td>)}</tr>)}</tbody></table></div>}
+              {viewRecord.recordType === 'Height & Weight Monitoring' && <div className="overflow-x-auto"><table className="min-w-[900px] w-full border-collapse text-sm"><thead><tr><th className="border p-2 text-left">Month</th>{MONTHS.map(month => <th key={month} className="border p-2">{month}</th>)}</tr></thead><tbody><tr><th className="border p-2 text-left">Height</th>{(viewRecord.details?.monthlyMeasurements || []).map((row: any) => <td key={row.month} className="border p-2">{row.height || '—'}</td>)}</tr><tr><th className="border p-2 text-left">Weight</th>{(viewRecord.details?.monthlyMeasurements || []).map((row: any) => <td key={row.month} className="border p-2">{row.weight || '—'}</td>)}</tr><tr className="bg-gray-50"><th className="border p-2 text-left">BMI</th>{(viewRecord.details?.monthlyMeasurements || []).map((row: any) => <td key={row.month} className="border p-2 font-semibold">{bmiFor(row.height, row.weight) || '—'}</td>)}</tr><tr><th className="border p-2 text-left text-xs">Classification</th>{(viewRecord.details?.monthlyMeasurements || []).map((row: any) => <td key={row.month} className="border p-2 text-center"><WeightClassBadge height={row.height} weight={row.weight} /></td>)}</tr><tr><th className="border p-2 text-left text-xs font-normal">Healthy weight for height</th>{(viewRecord.details?.monthlyMeasurements || []).map((row: any) => <td key={row.month} className="border p-2 text-xs text-gray-500">{healthyWeightRange(row.height) || '—'}{healthyWeightRange(row.height) && <span className="block text-[10px] text-yellow-700">6%: {sixPercentLimit(row.height)}</span>}</td>)}</tr></tbody></table></div>}
               <div className="grid grid-cols-3 gap-y-2 gap-x-3">
                 <span className="font-semibold text-gray-500">ID</span><span className="col-span-2 font-mono text-xs">{viewRecord.id}</span>
                 <span className="font-semibold text-gray-500">Resident</span><span className="col-span-2 font-medium">{viewRecord.residentName}</span>

@@ -1317,7 +1317,15 @@ async function seedDatabase() {
   // decision: an account is selectable because its role is Houseparent AND it
   // is Active, and both are set from Account Management.
 
-  await runSeedStep('resident assignments', seedResidentAssignments);
+  // Resident -> Houseparent assignments are deliberately NOT seeded on boot.
+  //
+  // `seedResidentAssignments()` used to run here on every server start and
+  // assign EVERY Active resident to EVERY Active Houseparent. A resident
+  // admitted since the last restart therefore landed on every Houseparent's
+  // caseload — including the HP on Duty chosen on the Admission Slip — the
+  // moment the server restarted, which is exactly what looked like "selecting
+  // an HP on Duty assigns the resident". A Case Load Manager is assigned only
+  // manually, in the Houseparent Module (Center Head / Social Worker).
   await runSeedStep('official violation guide', seedOfficialViolationGuide);
   console.log('Database seeding complete!');
 }
