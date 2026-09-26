@@ -27,6 +27,29 @@ function isSchedulingInterventionType(value) {
   return type === 'psychosocial activity' || type === 'dialogue / counseling' || type === 'dialogue/counseling';
 }
 
+/**
+ * Whether an intervention may be given a schedule.
+ *
+ * Reads the configured `metadata.schedulable` flag first and only falls back to
+ * the type name when it is absent, so this agrees with the verification path in
+ * `violationController`. Judging by the type name alone let a
+ * Dialogue/Counseling requirement be scheduled here while verification refused
+ * to accept it, and vice versa.
+ */
+function interventionNeedsSchedule(row) {
+  const source = row && typeof row === 'object' ? row : { interventionType: row };
+  let metadata = source.metadata;
+  if (typeof metadata === 'string') {
+    try {
+      metadata = JSON.parse(metadata);
+    } catch {
+      metadata = null;
+    }
+  }
+  if (metadata && typeof metadata.schedulable === 'boolean') return metadata.schedulable;
+  return isSchedulingInterventionType(source.interventionType);
+}
+
 async function getNextId(connection, table, prefix) {
   const allowed = new Set(['violation_guide', 'guide_interventions']);
   if (!allowed.has(table)) throw new Error('Unsupported guide table.');
@@ -735,9 +758,10 @@ async function updateInterventionStatus(req, res, next) {
       throw new ApiError(403, 'Houseparents cannot schedule interventions.');
     }
 
-    // Scheduling is available ONLY to the two configured schedulable types.
+    // Scheduling is available ONLY to the interventions the guide configures as
+    // schedulable.
     if (scheduledAt !== undefined) {
-      if (!isSchedulingInterventionType(rec.interventionType)) {
+      if (!interventionNeedsSchedule(rec)) {
         throw new ApiError(400, 'This intervention type does not require scheduling.');
       }
       if (scheduledAt && new Date(scheduledAt).getTime() <= Date.now()) {

@@ -129,8 +129,31 @@ const normalizeInterventionType = (row: any) =>
     .toLowerCase()
     .replace(/\s+/g, ' ');
 
-const interventionNeedsSchedule = (row: any) =>
-  SCHEDULING_INTERVENTION_TYPES.includes(normalizeInterventionType(row));
+/**
+ * Whether an intervention has to be scheduled before its incident can be
+ * verified.
+ *
+ * The configured answer is `metadata.schedulable`, which the guide's editor and
+ * the official seed write per intervention. Judging by the type name alone was
+ * wrong: `Dialogue/Counseling` is stored non-schedulable on "Kawalang respeto sa
+ * kapwa residente/staff/bisita", so the review screen asked for a schedule that
+ * had no control to enter it and the incident could not be verified at all.
+ *
+ * Falls back to the type name only when the flag is absent. Mirrors
+ * `interventionNeedsSchedule` in the backend's violationController.
+ */
+const interventionNeedsSchedule = (row: any) => {
+  let metadata = row?.metadata;
+  if (typeof metadata === 'string') {
+    try {
+      metadata = JSON.parse(metadata);
+    } catch {
+      metadata = null;
+    }
+  }
+  if (metadata && typeof metadata.schedulable === 'boolean') return metadata.schedulable;
+  return SCHEDULING_INTERVENTION_TYPES.includes(normalizeInterventionType(row));
+};
 
 const interventionIsPsychosocial = (row: any) =>
   normalizeInterventionType(row) === 'psychosocial activity';

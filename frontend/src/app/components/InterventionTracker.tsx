@@ -47,10 +47,22 @@ const localMonthKey = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 };
 
-// Scheduling is a property of the configured intervention TYPE, not of the
-// display text, metadata flags, duration, or any other guide field. Only the
-// two shelter intervention types below are schedulable.
+// Scheduling is a property of the *configured* intervention, and the guide
+// records it as `metadata.schedulable`. Judging by the type name alone was
+// wrong: `Dialogue/Counseling` is stored non-schedulable on some violations, so
+// this offered a schedule control for an intervention the API refuses to
+// schedule. Falls back to the type name only when the flag is absent. Mirrors
+// `interventionNeedsSchedule` in violationController / violationGuideController.
 const isSchedulingIntervention = (step: any) => {
+  let metadata = step?.metadata;
+  if (typeof metadata === 'string') {
+    try {
+      metadata = JSON.parse(metadata);
+    } catch {
+      metadata = null;
+    }
+  }
+  if (metadata && typeof metadata.schedulable === 'boolean') return metadata.schedulable;
   const type = String(step?.interventionType || '').trim().toLowerCase().replace(/\s+/g, ' ');
   return type === 'psychosocial activity' || type === 'dialogue / counseling' || type === 'dialogue/counseling';
 };

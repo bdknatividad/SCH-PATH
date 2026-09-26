@@ -152,6 +152,36 @@ function isSchedulingInterventionType(value) {
   return type === 'psychosocial activity' || type === 'dialogue / counseling' || type === 'dialogue/counseling';
 }
 
+/**
+ * Whether an intervention has to be scheduled before its incident can be
+ * verified.
+ *
+ * The configured answer is `metadata.schedulable`, which the guide's own editor
+ * and the official seed both write per intervention. It is deliberately a
+ * different question from the type name: `Dialogue/Counseling` is stored
+ * **non-schedulable** on "Kawalang respeto sa kapwa residente/staff/bisita" and
+ * "Pagsira ng anumang uri ng gamit sa shelter". Judging by the type name alone
+ * demanded a schedule for those, while the verification screen offered no way
+ * to set one — so the logged incident could never be verified.
+ *
+ * Falls back to the type name only when the flag is absent, so a row written
+ * before the flag existed keeps behaving as it did. Accepts a row or a bare
+ * type string.
+ */
+function interventionNeedsSchedule(row) {
+  const source = row && typeof row === 'object' ? row : { interventionType: row };
+  let metadata = source.metadata;
+  if (typeof metadata === 'string') {
+    try {
+      metadata = JSON.parse(metadata);
+    } catch {
+      metadata = null;
+    }
+  }
+  if (metadata && typeof metadata.schedulable === 'boolean') return metadata.schedulable;
+  return isSchedulingInterventionType(source.interventionType);
+}
+
 function interventionOfficialText(row) {
   if (!row) return '';
 
@@ -352,7 +382,7 @@ function buildInterventionPlan(violation, guide, offenseLevel, residentName) {
     psychosocialActivityRequired: psychosocialRequired,
     psychologicalReferralRequired: psychologicalRequired,
     caseConferenceRequired,
-    schedulingRequired: requirements.some((item) => isSchedulingInterventionType(item.interventionType)),
+    schedulingRequired: requirements.some(interventionNeedsSchedule),
   };
 }
 
@@ -809,7 +839,7 @@ async function review(req, res, next) {
         `No prescribed intervention is configured for "${guide.name}" at ${offenseLevel} offense. Configure it in Manage Violations & Interventions before verification.`
       );
     }
-    const needsSchedule = requirements.some((item) => isSchedulingInterventionType(item.interventionType));
+    const needsSchedule = requirements.some(interventionNeedsSchedule);
     const isPsychosocial = requirements.some((item) => String(item.interventionType || '').trim().toLowerCase().replace(/\s+/g, ' ') === 'psychosocial activity');
     // The clinical inputs are checked when the Psychological Staff submits
     // them. A Social Worker's verification that completes the pair re-uses the
@@ -893,8 +923,11 @@ async function review(req, res, next) {
             // requirement, and only the former should get scheduling/an
             // actual Assessment record.
             const reqIsPsychosocial = String(requirement.interventionType || '').trim().toLowerCase().replace(/\s+/g, ' ') === 'psychosocial activity';
-            const reqIsDialogue = isSchedulingInterventionType(requirement.interventionType) && !reqIsPsychosocial;
-            const reqNeedsSchedule = reqIsPsychosocial || reqIsDialogue;
+            // Read the configured flag rather than the type name — see
+            // `interventionNeedsSchedule`. A Dialogue/Counseling requirement the
+            // guide stores as non-schedulable must not collect a schedule it
+            // cannot be given.
+            const reqNeedsSchedule = interventionNeedsSchedule(requirement);
 
             // A configured duration never starts an intervention. Start/end dates are
             // written only by explicit staff actions through the tracker UI, so both
