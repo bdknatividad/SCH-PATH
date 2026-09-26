@@ -701,8 +701,123 @@ async function create(req, res, next) {
   }
 }
 
-async function getReviewPreview(req, res, next) {
-  const connection = await pool.getConnection();
+/**
+ * POST /api/violations/:id/resubmit — the reporter corrects a rejected report.
+ *
+ * A verification rejection used to be terminal. The violation sat at `Rejected`,
+ * the reporter got a red banner on the Violation List with no action on it, and
+ * the only way forward was to log the whole incident again. This is the missing
+ * half, and it mirrors what the Incident Report already has:
+ * `POST /incident-reports/:id/resubmit` and the Intervention Tracker's
+ * "Fill Out Again".
+ *
+ * The correction is re-resolved the same way `create` resolves a new incident —
+ * guide, severity, points and offense number — so a reclassified offense cannot
+ * end up half-updated. Nothing downstream needs preserving: the intervention plan
+ * is only assigned *after* verification, which by definition never happened for a
+ * rejected report.
+ *
+ * The record returns to `Pending Review`, which is the For Verification queue, and
+ * the three reviewing roles are told — the same alert a freshly logged incident
+ * sends, so a resubmission cannot land in that queue quietly.
+ *
+ * @returns the updated violation, so the caller can drop the banner without a reload.
+ */
+async function resubmit(req, res, next) {
+  try {
+    const [rows] = await pool.query('SELECT * FROM violations WHERE id = ?', [req.params.id]);
+    if (!rows.length) throw new ApiError(404, 'Violation not found');
+    const violation = rows[0];
+
+    if (violation.status !== 'Rejected') {
+      throw new ApiError(409, 'Only a rejected violation report can be corrected and resubmitted.');
+    }
+
+    // The reporter owns the correction; a verifier may act for them (the Center
+    // Head usually does, since they are the one who rejected it).
+    const username = String(req.user?.username || '').toLowerCase();
+    const isReporter = String(violation.reportedBy || '').toLowerCase() === username;
+    if (!isReporter && !canVerify(req)) {
+      throw new ApiError(403, 'Only the staff member who reported this incident can correct and resubmit it.');
+    }
+
+    await assertResidentNotAbsconded(violation.residentId, 'corrected');
+
+    const violationType = String(req.body?.type || violation.type || '').trim();
+    const guide = await getGuideWithInterventionsByName(violationType);
+    if (!guide) {
+      throw new ApiError(400, 'Violation type must exist as an Active entry in Manage Violations & Interventions.');
+    }
+    if (!VALID_SEVERITIES.includes(guide.category)) {
+      throw new ApiError(400, 'Configured violation must be Minor or Major.');
+    }
+
+    const date = String(req.body?.date || violation.date || '').slice(0, 10) || null;
+    const offenseNumber = normalizeOffenseLabel(
+      await determineOffenseLevel(violation.residentId, guide.name, null, date)
+    );
+
+    await pool.query(
+      `UPDATE violations
+          SET type = ?, guideId = ?, severity = ?, points = ?, offenseNumber = ?,
+              date = ?, description = ?, location = ?, witnesses = ?,
+              status = 'Pending Review',
+              reviewedBy = NULL, actionTaken = NULL, modifiedBy = ?
+        WHERE id = ?`,
+      [
+        guide.name,
+        guide.id,
+        guide.category,
+        pointsForSeverity(guide.category),
+        offenseNumber,
+        date,
+        req.body?.description ?? violation.description ?? null,
+        req.body?.location ?? violation.location ?? null,
+        req.body?.witnesses ?? violation.witnesses ?? null,
+        req.user?.username || null,
+        req.params.id,
+      ],
+    );
+
+    const [updated] = await pool.query('SELECT * FROM violations WHERE id = ?', [req.params.id]);
+    const residentName = await getResidentName(violation.residentId);
+
+    // The same alert a freshly logged incident sends. A resubmission that arrived
+    // in the For Verification queue silently would be the bug this replaces.
+    try {
+      const reviewers = await notifications.usersWithAnyRole(['centerhead', 'psychologist', 'socialworker']);
+      if (reviewers.length) {
+        await notifications.notifyUsers(
+          reviewers.map((reviewer) => reviewer.id),
+          {
+            type: 'Violation For Verification',
+            residentId: violation.residentId,
+            title: `Incident resubmitted for verification — ${residentName}`,
+            message: `${req.user?.username || 'The reporter'} corrected and resubmitted the ${guide.category} violation report for ${residentName}: ${guide.name}. It needs verification again.`,
+            priority: 'High',
+            actionRequired: 'Review and verify the resubmitted incident.',
+            relatedRecordType: 'violation',
+            relatedRecordId: req.params.id,
+            actorUsername: req.user?.username || null,
+            dedupeKey: `violation:${req.params.id}:resubmitted:${Date.now()}`,
+          },
+        );
+      }
+    } catch (notifyErr) {
+      console.error('[ViolationController] Resubmit notification failed (non-fatal):', notifyErr.message);
+    }
+
+    res.json({
+      success: true,
+      data: mapRow('violations', updated[0]),
+      message: 'Violation report corrected and resubmitted for verification.',
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+async function getReviewPreview(req, res, next) {  const connection = await pool.getConnection();
   try {
     const { id } = req.params;
     const [rows] = await connection.query(
@@ -1326,6 +1441,7 @@ module.exports = {
   update,
   delete: baseController.delete,
   review,
+  resubmit,
   getReviewPreview,
   markDone,
   getStats,

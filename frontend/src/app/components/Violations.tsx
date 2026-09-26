@@ -13,7 +13,7 @@ import { Textarea } from '@/app/components/ui/textarea';
 import { Checkbox } from '@/app/components/ui/checkbox';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/app/components/ui/dialog';
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogAction, AlertDialogCancel } from '@/app/components/ui/alert-dialog';
-import { Search, Plus, Eye, ShieldAlert, AlertTriangle, AlertCircle, User, Check } from 'lucide-react';
+import { Search, Plus, Eye, ShieldAlert, AlertTriangle, AlertCircle, User, Check, RotateCcw, X, Loader2 } from 'lucide-react';
 import { useData, Violation, type Child } from '../state/DataContext';
 import { useAuth } from '../state/AuthContext';
 import { usePermissions } from '@/app/hooks/usePermissions';
@@ -28,6 +28,15 @@ const SEVERITY_OPTIONS = [
   { value: 'Minor', label: 'Minor' },
   { value: 'Major', label: 'Major' },
 ];
+
+/**
+ * Where a reporter's acknowledged rejections are remembered.
+ *
+ * Per device on purpose — see `dismissedRejections`. The report itself is not
+ * touched: it stays `Rejected` on the server until it is corrected and
+ * resubmitted, which is the only thing that actually closes it.
+ */
+const DISMISSED_REJECTIONS_KEY = 'sch-path:dismissed-rejected-violations';
 
 interface ViolationItem {
   id: string;
@@ -197,6 +206,28 @@ export function Violations() {
   const [verificationSearchTerm, setVerificationSearchTerm] = useState('');
   const [verificationSeverity, setVerificationSeverity] = useState('all');
   const [incidentTypeSearch, setIncidentTypeSearch] = useState('');
+
+  // ── Correcting a rejected report ─────────────────────────────────────────
+  // A rejection used to be terminal: the banner had no action and the only way
+  // forward was to log the incident again. This is the reporter's way back.
+  const [rejectedTarget, setRejectedTarget] = useState<any | null>(null);
+  const [resubmitForm, setResubmitForm] = useState({ type: '', date: '', description: '', location: '', witnesses: '' });
+  const [resubmitBusy, setResubmitBusy] = useState(false);
+  const [resubmitError, setResubmitError] = useState('');
+  const [resubmitNotice, setResubmitNotice] = useState('');
+  /**
+   * Rejections this reporter has acknowledged.
+   *
+   * Deliberately per device: clearing the banner without correcting the report is
+   * a local acknowledgement, not a workflow state, and the record must stay
+   * `Rejected` until it is actually resubmitted. Nothing on the server changes.
+   */
+  const [dismissedRejections, setDismissedRejections] = useState<string[]>(() => {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(DISMISSED_REJECTIONS_KEY) || '[]');
+      return Array.isArray(parsed) ? parsed.filter((id) => typeof id === 'string') : [];
+    } catch { return []; }
+  });
   const [residentSearch, setResidentSearch] = useState('');
   const [selectedResidentIds, setSelectedResidentIds] = useState<string[]>([]);
 
@@ -377,6 +408,56 @@ export function Violations() {
     v.status === 'Rejected' &&
     String(v.reportedBy || '').trim().toLowerCase() === String(user?.username || '').trim().toLowerCase()
   );
+  /** What the banner shows: rejected, reported by me, not yet acknowledged. */
+  const visibleRejections = rejectedForReporter.filter((v) => !dismissedRejections.includes(v.id));
+
+  /**
+   * Open the correction form for a rejected report.
+   *
+   * Every field is prefilled from the record, because the usual correction is
+   * one wrong value — not a rewrite. The offense type is included: a
+   * misclassification is the most common reason a report comes back, and the
+   * server re-resolves the guide, severity, points and offense number from
+   * whatever is chosen here, so the record cannot end up half-updated.
+   */
+  const openResubmit = (violation: any) => {
+    setRejectedTarget(violation);
+    setResubmitForm({
+      type: String(violation.type || ''),
+      date: String(violation.date || '').slice(0, 10),
+      description: String(violation.description || ''),
+      location: String(violation.location || ''),
+      witnesses: String(violation.witnesses || ''),
+    });
+    setResubmitError('');
+    setResubmitNotice('');
+  };
+
+  const handleResubmit = async () => {
+    if (!rejectedTarget) return;
+    if (!resubmitForm.type.trim()) { setResubmitError('Violation type is required.'); return; }
+    setResubmitBusy(true);
+    setResubmitError('');
+    try {
+      await request(`/violations/${rejectedTarget.id}/resubmit`, {
+        method: 'POST',
+        body: JSON.stringify(resubmitForm),
+      });
+      setRejectedTarget(null);
+      setResubmitNotice('Report corrected and resubmitted for verification. It is back in the For Verification queue.');
+      await refreshData();
+    } catch (err: any) {
+      setResubmitError(err?.message || 'Unable to resubmit this report.');
+    } finally {
+      setResubmitBusy(false);
+    }
+  };
+
+  const dismissRejection = (id: string) => {
+    const next = Array.from(new Set([...dismissedRejections, id]));
+    setDismissedRejections(next);
+    try { localStorage.setItem(DISMISSED_REJECTIONS_KEY, JSON.stringify(next)); } catch { /* storage full or blocked */ }
+  };
 
   // Newly logged violations are the records awaiting Psychological Staff verification.
   // Form 08 is deliberately excluded from this queue because it is a post-intervention
@@ -911,18 +992,49 @@ export function Violations() {
       {/* Violation List Tab — Table Format */}
       {activeTab === 'list' && (
         <>
-          {rejectedForReporter.length > 0 && (
+          {resubmitNotice && (
+            <div className="mb-4 flex items-start gap-3 rounded-xl border border-green-200 bg-green-50 p-3 text-sm text-green-800">
+              <Check className="mt-0.5 h-4 w-4 shrink-0" />
+              <span className="min-w-0 flex-1">{resubmitNotice}</span>
+              <button type="button" onClick={() => setResubmitNotice('')} className="shrink-0 text-green-700 hover:text-green-900" aria-label="Dismiss">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          )}
+          {visibleRejections.length > 0 && (
             <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4">
               <div className="flex items-start gap-3">
                 <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-bold text-red-800">Violation report(s) rejected</p>
+                  {/*
+                    These are deliberately absent from the table below — the list
+                    filters `Rejected` out — so this panel is the only place they
+                    appear, and it is where the reporter has to act. It used to be
+                    a dead end: no action, no way to clear it, and the only route
+                    forward was to log the whole incident again.
+                  */}
+                  <p className="mt-0.5 text-xs text-red-700">
+                    A rejected report is not in the list below. Correct it and send it back for verification, or dismiss it.
+                  </p>
                   <div className="mt-2 space-y-2">
-                    {rejectedForReporter.map((violation) => (
+                    {visibleRejections.map((violation) => (
                       <div key={violation.id} className="rounded-lg border border-red-100 bg-white px-3 py-2">
-                        <p className="text-sm font-semibold text-[#2F3E46]">{violation.type}</p>
-                        <p className="mt-0.5 text-xs text-red-700">Reason: {violation.actionTaken || 'No rejection reason was recorded.'}</p>
-                        {violation.reviewedBy && <p className="mt-0.5 text-[11px] text-gray-500">Reviewed by {violation.reviewedBy}</p>}
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-[#2F3E46]">{violation.type}</p>
+                            <p className="mt-0.5 text-xs text-red-700">Reason: {violation.actionTaken || 'No rejection reason was recorded.'}</p>
+                            {violation.reviewedBy && <p className="mt-0.5 text-[11px] text-gray-500">Reviewed by {violation.reviewedBy}</p>}
+                          </div>
+                          <div className="flex shrink-0 flex-wrap gap-2">
+                            <Button size="sm" className="gap-1.5 bg-[#2F3E46] text-white" onClick={() => openResubmit(violation)}>
+                              <RotateCcw className="h-3.5 w-3.5" /> Correct &amp; resubmit
+                            </Button>
+                            <Button size="sm" variant="outline" className="gap-1.5" onClick={() => dismissRejection(violation.id)}>
+                              Dismiss
+                            </Button>
+                          </div>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -1751,6 +1863,71 @@ export function Violations() {
             <Button variant="outline" disabled={isReviewSubmitting} onClick={() => setIsReviewDialogOpen(false)}>Cancel</Button>
             <Button disabled={isReviewSubmitting || !!reviewSuccess} onClick={() => handleReview('reject')} className="bg-red-600 hover:bg-red-700 text-white">{reviewPending === 'reject' ? 'Saving…' : 'Reject'}</Button>
             <Button disabled={isReviewSubmitting || !!reviewSuccess || Boolean(selectedViolation && (verificationSide === 'psych' ? (selectedViolation as any).psychVerifiedBy : (selectedViolation as any).swVerifiedBy))} onClick={() => handleReview('verify')} className="bg-green-600 hover:bg-green-700 text-white"><Check className="w-4 h-4 mr-1" /> {reviewPending === 'verify' ? 'Saving…' : 'Verify'}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/*
+        Correcting a rejected report.
+        Prefilled from the record: the usual correction is one wrong value, not a
+        rewrite. The offense type is editable because a misclassification is the
+        commonest reason a report comes back, and the server re-resolves the
+        guide, severity, points and offense number from whatever is chosen, so
+        the record cannot end up half-updated.
+      */}
+      <Dialog open={Boolean(rejectedTarget)} onOpenChange={(open) => { if (!open) setRejectedTarget(null); }}>
+        <DialogContent className="max-w-lg rounded-2xl bg-white">
+          <DialogHeader>
+            <DialogTitle className="font-bold text-[#2F3E46]">Correct and resubmit</DialogTitle>
+            <p className="text-sm text-gray-500">
+              Fix what the reviewer rejected, then send it back. It returns to the For Verification queue and the reviewer is notified.
+            </p>
+          </DialogHeader>
+          <div className="space-y-3">
+            {rejectedTarget?.actionTaken && (
+              <p className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-700">
+                Rejected because: {rejectedTarget.actionTaken}
+              </p>
+            )}
+            {resubmitError && (
+              <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{resubmitError}</p>
+            )}
+            <div className="space-y-1.5">
+              <Label className="font-bold text-[#2F3E46]">Violation type *</Label>
+              <Select value={resubmitForm.type} onValueChange={(value) => setResubmitForm((p) => ({ ...p, type: value }))}>
+                <SelectTrigger className="rounded-xl"><SelectValue placeholder="Select the violation type" /></SelectTrigger>
+                <SelectContent>
+                  {activeMatrix.map((item) => (
+                    <SelectItem key={item.id} value={item.label}>{item.category} — {item.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="font-bold text-[#2F3E46]">Date</Label>
+              <Input type="date" value={resubmitForm.date} onChange={(e) => setResubmitForm((p) => ({ ...p, date: e.target.value }))} className="rounded-xl" />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="font-bold text-[#2F3E46]">What happened</Label>
+              <Textarea value={resubmitForm.description} onChange={(e) => setResubmitForm((p) => ({ ...p, description: e.target.value }))} className="min-h-[80px] rounded-xl" placeholder="Describe the incident." />
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label className="font-bold text-[#2F3E46]">Location</Label>
+                <Input value={resubmitForm.location} onChange={(e) => setResubmitForm((p) => ({ ...p, location: e.target.value }))} className="rounded-xl" />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="font-bold text-[#2F3E46]">Witnesses</Label>
+                <Input value={resubmitForm.witnesses} onChange={(e) => setResubmitForm((p) => ({ ...p, witnesses: e.target.value }))} className="rounded-xl" />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" disabled={resubmitBusy} onClick={() => setRejectedTarget(null)}>Cancel</Button>
+            <Button disabled={resubmitBusy} onClick={() => void handleResubmit()} className="gap-2 bg-[#2F3E46] text-white">
+              {resubmitBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+              {resubmitBusy ? 'Resubmitting…' : 'Resubmit for verification'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

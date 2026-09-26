@@ -77,6 +77,17 @@ router.post('/', authorize('socialworker', 'centerhead', 'houseparent'), asyncHa
 router.post('/:id/review', authorize('psychologist', 'socialworker', 'centerhead'), asyncHandler(violationController.review));
 
 /**
+ * POST /api/violations/:id/resubmit
+ * The reporter corrects a rejected report and sends it back for verification.
+ *
+ * The reporter's own route, so the roles that can log an incident are the ones
+ * that can correct one. The controller additionally requires the caller to be
+ * the reporter or a verifier, so a Houseparent cannot resubmit another
+ * Houseparent's incident.
+ */
+router.post('/:id/resubmit', authorize('socialworker', 'centerhead', 'houseparent'), asyncHandler(violationController.resubmit));
+
+/**
  * POST /api/violations/:id/mark-done
  * Mark an intervention as Done from the Intervention Tracker.
  *
