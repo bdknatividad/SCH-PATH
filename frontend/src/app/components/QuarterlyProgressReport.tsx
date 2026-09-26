@@ -17,7 +17,7 @@ import {
 import { Document as PdfDocument, Page as PdfPage, pdfjs } from 'react-pdf';
 import { SignaturePadModal } from '@/app/components/SignaturePad';
 import { downloadAnecdotalPdf } from '@/app/components/AnecdotalReports';
-import { downloadReportZip, periodZipName } from '@/app/utils/downloadReportZip';
+import { downloadReportZip, downloadReportPdf, periodZipName } from '@/app/utils/downloadReportZip';
 import { useData } from '../state/DataContext';
 import { useAuth } from '../state/AuthContext';
 import { request, fetchBinary } from '@/services/api';
@@ -1208,6 +1208,8 @@ export function QuarterlyProgressReportsCard({ onOpenReport }: { onOpenReport: (
   const [bulkPeriod, setBulkPeriod] = useState('');
   const [zipProgress, setZipProgress] = useState<{ done: number; total: number } | null>(null);
   const [zipError, setZipError] = useState<string | null>(null);
+  /** The single report currently downloading, so its own row shows the spinner. */
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   const activeChildren = children.filter((c) => c.status === 'Active' || !c.status);
 
@@ -1244,6 +1246,30 @@ export function QuarterlyProgressReportsCard({ onOpenReport }: { onOpenReport: (
     () => existing.filter((report) => String(report.periodStart || '').slice(0, 10) === bulkPeriod),
     [existing, bulkPeriod],
   );
+
+  /**
+   * One resident's report, beside the ZIP that takes the whole quarter.
+   *
+   * The same two actions the Monthly section offers, in the same order, so the
+   * page behaves the same way whichever period you are working in.
+   */
+  const handleDownloadOne = async (report: QprReport) => {
+    setZipError(null);
+    setDownloadingId(report.id);
+    try {
+      const child = children.find((c) => c.id === report.residentId);
+      const who = String(child?.name || report.residentId).replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '');
+      const period = String(report.periodLabel || report.periodStart).replace(/\s+/g, '-');
+      await downloadReportPdf(
+        `/quarterly-progress-reports/${report.id}/pdf`,
+        `Quarterly-Progress-Report-${who}-${period}.pdf`,
+      );
+    } catch (err: any) {
+      setZipError(err?.message || 'Unable to download that report.');
+    } finally {
+      setDownloadingId(null);
+    }
+  };
 
   /**
    * One ZIP holding each resident's report for the chosen quarter, one PDF per
@@ -1376,46 +1402,19 @@ export function QuarterlyProgressReportsCard({ onOpenReport }: { onOpenReport: (
         </Dialog>
         )}
 
-        {existing.length > 0 && (
-          <div className="mt-4 space-y-2">
-            <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400">Recent reports</p>
-            <div className="max-h-52 space-y-1.5 overflow-y-auto">
-              {existing.slice(0, 12).map((row) => {
-                const child = children.find((c) => c.id === row.residentId);
-                return (
-                  <button
-                    key={row.id}
-                    type="button"
-                    onClick={() => onOpenReport(row.id)}
-                    className="flex w-full items-center justify-between gap-2 rounded-lg border border-gray-100 px-3 py-2 text-left hover:bg-gray-50"
-                  >
-                    <span className="min-w-0">
-                      <span className="block truncate text-xs font-semibold text-[#2F3E46]">{child?.name || row.residentId}</span>
-                      <span className="block text-[10px] text-gray-400">{row.periodLabel}</span>
-                    </span>
-                    <span className="flex shrink-0 items-center gap-2">
-                      <span className="text-[10px] text-gray-400">{row.sectionsComplete ?? 0}/{row.sectionsTotal ?? 0}</span>
-                      <StatusBadge status={row.status} />
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
         {/*
-          Bulk download. The quarter is chosen here rather than inside the
-          "Open a Progress Report" dialog, because this is a different job: that
-          dialog creates one report for one resident, this collects the ones
-          already filed for a quarter. Gated by `canOpenReport`, the same
-          capability the server ships for opening a report, so the control is
-          not offered to a role the API would refuse.
+          The quarter is chosen first, and everything below it follows: the list
+          of that quarter's reports, a PDF for each, and one ZIP for the lot. It
+          is here rather than inside "Open a Progress Report" because that dialog
+          creates one report for one resident, while this collects the ones
+          already filed. Gated by `canOpenReport`, the same capability the server
+          ships for opening a report, so the control is not offered to a role the
+          API would refuse.
         */}
         {canOpenReport && (
           <div className="mt-5 border-t border-gray-100 pt-4">
-            <p className="text-xs font-bold uppercase tracking-wide text-gray-400">Bulk download</p>
-            <p className="mt-1 text-xs text-gray-500">One ZIP holding every resident&rsquo;s report for the quarter you pick — each report a separate PDF inside the archive.</p>
+            <p className="text-xs font-bold uppercase tracking-wide text-gray-400">Reports by quarter</p>
+            <p className="mt-1 text-xs text-gray-500">Pick a quarter, then open one report or download them all.</p>
             {zipError && <p className="mt-2 rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-700">{zipError}</p>}
             <div className="mt-3 flex flex-wrap items-end gap-3">
               <div className="space-y-1">
@@ -1432,15 +1431,58 @@ export function QuarterlyProgressReportsCard({ onOpenReport }: { onOpenReport: (
                 </Select>
               </div>
               <Button
-                variant="outline"
                 onClick={() => void handleDownloadQuarterZip()}
                 disabled={zipProgress !== null || !bulkPeriod}
-                className="gap-2"
+                className="gap-2 bg-[#2F3E46] text-white"
               >
                 {zipProgress ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                {zipProgress ? `Zipping ${zipProgress.done}/${zipProgress.total}…` : `Download ${reportsForQuarter.length} report(s) as ZIP`}
+                {zipProgress ? `Zipping ${zipProgress.done}/${zipProgress.total}…` : 'Download all as ZIP'}
               </Button>
             </div>
+          </div>
+        )}
+
+        {/* The selected quarter's reports: open one, or take that one as a PDF. */}
+        {bulkPeriod && (
+          <div className="mt-4 space-y-2">
+            <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400">
+              {periods.find((period) => period.periodStart === bulkPeriod)?.label || 'Selected quarter'} — {reportsForQuarter.length} report{reportsForQuarter.length === 1 ? '' : 's'}
+            </p>
+            {reportsForQuarter.length === 0 ? (
+              <p className="text-xs italic text-gray-400">No Quarterly Progress Reports were filed for this quarter.</p>
+            ) : (
+              <div className="max-h-52 space-y-1.5 overflow-y-auto">
+                {reportsForQuarter.map((row) => {
+                  const child = children.find((c) => c.id === row.residentId);
+                  return (
+                    <div
+                      key={row.id}
+                      className="flex w-full items-center justify-between gap-2 rounded-lg border border-gray-100 px-3 py-2 hover:bg-gray-50"
+                    >
+                      {/* A button, not the row itself: the PDF action below cannot
+                          live inside another button. */}
+                      <button type="button" onClick={() => onOpenReport(row.id)} className="min-w-0 flex-1 text-left">
+                        <span className="block truncate text-xs font-semibold text-[#2F3E46]">{child?.name || row.residentId}</span>
+                        <span className="block text-[10px] text-gray-400">{row.periodLabel}</span>
+                      </button>
+                      <span className="flex shrink-0 items-center gap-2">
+                        <span className="text-[10px] text-gray-400">{row.sectionsComplete ?? 0}/{row.sectionsTotal ?? 0}</span>
+                        <StatusBadge status={row.status} />
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 gap-1.5 px-2 text-[11px]"
+                          disabled={downloadingId !== null}
+                          onClick={() => void handleDownloadOne(row)}
+                        >
+                          {downloadingId === row.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />} PDF
+                        </Button>
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         )}
       </CardContent>

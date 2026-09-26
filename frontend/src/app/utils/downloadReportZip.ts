@@ -115,3 +115,23 @@ export async function downloadReportZip(
 export function periodZipName(prefix: string, year: string | number, month: string | number): string {
   return `${prefix}-${year}-${String(month).padStart(2, '0')}.zip`;
 }
+
+/**
+ * Save one report's PDF.
+ *
+ * The counterpart to the ZIP: same endpoints, same `fetchBinary`, one file. Used
+ * by the per-resident rows in the Reports module so "give me this one" and "give
+ * me all of them" sit next to each other instead of the single file living only
+ * inside an editor.
+ */
+export async function downloadReportPdf(path: string, fallbackName: string): Promise<void> {
+  const { blob, fileName } = await fetchBinary(path);
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = fileName || fallbackName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}

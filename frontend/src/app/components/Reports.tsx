@@ -1,17 +1,20 @@
 import { useEffect, useState } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/app/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/app/components/ui/card';
 import { Button } from '@/app/components/ui/button';
 import { Badge } from '@/app/components/ui/badge';
 import {
   FileText, Download, Briefcase,
   AlertTriangle, ChevronDown, ChevronUp,
-  ClipboardList, Activity, Printer, CheckCircle2, RotateCcw, Loader2, AlertCircle, Eye,
+  ClipboardList, Activity, Printer, CheckCircle2, RotateCcw, Loader2, AlertCircle, Eye, Calendar,
 } from 'lucide-react';
 import {
   Dialog, DialogContent, DialogDescription,
   DialogFooter, DialogHeader, DialogTitle, DialogTrigger,
 } from '@/app/components/ui/dialog';
 import { Label } from '@/app/components/ui/label';
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from '@/app/components/ui/select';
 import { Checkbox } from '@/app/components/ui/checkbox';
 import { Textarea } from '@/app/components/ui/textarea';
 import { SignaturePadModal } from '@/app/components/SignaturePad';
@@ -20,7 +23,7 @@ import { useData } from '../state/DataContext';
 import { describeError, request } from '@/services/api';
 import { useNavigate } from 'react-router-dom';
 import { AnecdotalReports, downloadAnecdotalPdf } from './AnecdotalReports';
-import { downloadReportZip, periodZipName } from '@/app/utils/downloadReportZip';
+import { downloadReportZip, downloadReportPdf, periodZipName } from '@/app/utils/downloadReportZip';
 import {
   QuarterlyProgressReportsCard,
   QuarterlyProgressReportEditor,
@@ -1071,8 +1074,24 @@ function HouseparentTRIReviewQueue({ onOpenTRI }: { onOpenTRI: (recordId: string
 }
 
 
-// ── SCHEDULED REPORT PACKAGE CHECKER ────────────────────────────────────────
-function ScheduledReportsPackage() {
+/**
+ * A section heading.
+ *
+ * One component so every group on the page is labelled identically — the page
+ * previously mixed a green collapsible button, a plain card title and an
+ * unlabelled grid, which made it hard to tell what belonged with what.
+ */
+function ReportsSectionHeading({ title, description }: { title: string; description: string }) {
+  return (
+    <div className="border-l-4 border-[#FFD100] pl-3">
+      <h3 className="text-sm font-bold uppercase tracking-wide text-[#2F3E46]">{title}</h3>
+      <p className="mt-0.5 text-xs text-gray-500">{description}</p>
+    </div>
+  );
+}
+
+// ── MONTHLY REPORTS ─────────────────────────────────────────────────────────
+function MonthlyReportsSection() {
   const { children } = useData();
   const dialog = useSystemDialog();
   const activeResidentSnapshot = children.filter(c => c.status === 'Active' || !c.status);
@@ -1081,6 +1100,17 @@ function ScheduledReportsPackage() {
   const [checking, setChecking] = useState(false);
   const [zipProgress, setZipProgress] = useState<{ kind: 'tri' | 'anecdotal'; done: number; total: number } | null>(null);
   const [zipError, setZipError] = useState<string | null>(null);
+  /**
+   * The month's records, loaded whenever the filter changes.
+   *
+   * They used to be fetched only when an action was clicked, so the section could
+   * not say how many reports the selected month actually holds — the count is
+   * what tells a Social Worker whether the month is complete.
+   */
+  const [records, setRecords] = useState<{ tri: any[]; anecd: any[] }>({ tri: [], anecd: [] });
+  const [loading, setLoading] = useState(true);
+  /** The single report currently downloading, so its own row shows the spinner. */
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   const getMonthName = (m: string) => MONTHS[Number(m) - 1] || '';
 
@@ -1091,6 +1121,55 @@ function ScheduledReportsPackage() {
       request<{ success: boolean; data?: any[] }>(`/anecdotal-reports?year=${year}&month=${month}`),
     ]);
     return { tri: triRes?.data || [], anecd: anecdRes?.data || [] };
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setZipError(null);
+    (async () => {
+      try {
+        const loaded = await loadMonth();
+        if (!cancelled) setRecords(loaded);
+      } catch {
+        if (!cancelled) {
+          setRecords({ tri: [], anecd: [] });
+          setZipError('Unable to load this month\u2019s reports.');
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [year, month]);
+
+  const residentLabel = (residentId: string) =>
+    activeResidentSnapshot.find((c) => c.id === residentId)?.name || residentId;
+
+  /** `TRI-Juan-Dela-Cruz-2026-09.pdf`, from the same period the row was matched on. */
+  const fileNameFor = (kind: 'tri' | 'anecdotal', record: any) => {
+    const who = residentLabel(record.residentId).replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '');
+    const period = kind === 'tri'
+      ? `${record.reportingYear}-${String(record.reportingMonth).padStart(2, '0')}`
+      : `${record.reportYear}-${String(record.reportMonth).padStart(2, '0')}`;
+    return `${kind === 'tri' ? 'TRI' : 'Anecdotal-Report'}-${who}-${period}.pdf`;
+  };
+
+  const pdfPathFor = (kind: 'tri' | 'anecdotal', record: any) =>
+    kind === 'tri' ? `/tri/${record.id}/pdf` : `/anecdotal-reports/${record.id}/pdf`;
+
+  /** One resident's report. The ZIP button beside it does the same for the month. */
+  const handleDownloadOne = async (kind: 'tri' | 'anecdotal', record: any) => {
+    setZipError(null);
+    setDownloadingId(record.id);
+    try {
+      await downloadReportPdf(pdfPathFor(kind, record), fileNameFor(kind, record));
+    } catch (err: any) {
+      setZipError(err?.message || 'Unable to download that report.');
+    } finally {
+      setDownloadingId(null);
+    }
   };
 
   /**
@@ -1109,7 +1188,19 @@ function ScheduledReportsPackage() {
         : Number(r.reportYear) === Number(year) && Number(r.reportMonth) === Number(month);
     });
 
-  const handleViewMonthlyPackage = async () => {
+  // The two lists the section renders and the ZIPs are built from, so what the
+  // screen shows and what the archive holds cannot diverge.
+  const triRecords = recordsForMonth(records.tri, 'tri');
+  const anecdotalRecords = recordsForMonth(records.anecd, 'anecdotal');
+
+  /**
+   * The completeness checklist, kept from the previous version.
+   *
+   * It answers a different question from the downloads — "which residents have
+   * not filed yet?" — so it stays a separate action rather than being folded
+   * into the ZIP buttons.
+   */
+  const handleCheckMissing = async () => {
     setChecking(true);
     try {
       const { tri, anecd } = await loadMonth();
@@ -1156,29 +1247,20 @@ function ScheduledReportsPackage() {
   const handleDownloadZip = async (kind: 'tri' | 'anecdotal') => {
     setZipError(null);
     const isTri = kind === 'tri';
-    const label = isTri ? 'TRI reports' : 'Anecdotal Reports';
+    const label = isTri ? 'TRI Reports' : 'Anecdotal Reports';
     try {
-      const { tri, anecd } = await loadMonth();
-      const monthRecords = recordsForMonth(isTri ? tri : anecd, kind);
+      // Straight from the rendered lists, so the archive matches the rows on
+      // screen rather than a second fetch that could disagree with them.
+      const monthRecords = isTri ? triRecords : anecdotalRecords;
       if (!monthRecords.length) {
-        await dialog.failure(
-          `No ${label} for ${getMonthName(month)} ${year}`,
-          `No ${label} belong to that month, so there is nothing to put in a ZIP.`,
-        );
+        setZipError(`No ${label} belong to ${getMonthName(month)} ${year}, so there is nothing to put in a ZIP.`);
         return;
       }
 
-      const items = monthRecords.map((record) => {
-        const child = activeResidentSnapshot.find((c) => c.id === record.residentId);
-        const who = String(child?.name || record.residentId).replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '');
-        const period = isTri
-          ? `${record.reportingYear}-${String(record.reportingMonth).padStart(2, '0')}`
-          : `${record.reportYear}-${String(record.reportMonth).padStart(2, '0')}`;
-        return {
-          path: isTri ? `/tri/${record.id}/pdf` : `/anecdotal-reports/${record.id}/pdf`,
-          name: `${isTri ? 'TRI' : 'Anecdotal-Report'}-${who}-${period}.pdf`,
-        };
-      });
+      const items = monthRecords.map((record) => ({
+        path: pdfPathFor(kind, record),
+        name: fileNameFor(kind, record),
+      }));
 
       setZipProgress({ kind, done: 0, total: items.length });
       const result = await downloadReportZip(
@@ -1187,10 +1269,7 @@ function ScheduledReportsPackage() {
         (done, total) => setZipProgress({ kind, done, total }),
       );
       if (result.skipped.length) {
-        await dialog.failure(
-          'Some reports could not be included',
-          `${result.included} of ${items.length} ${label} were added to the ZIP. These could not be downloaded: ${result.skipped.join(', ')}.`,
-        );
+        setZipError(`${result.included} of ${items.length} ${label} were added to the ZIP. These could not be downloaded: ${result.skipped.join(', ')}.`);
       }
     } catch (err: any) {
       setZipError(err?.message || 'Unable to build the ZIP.');
@@ -1199,24 +1278,86 @@ function ScheduledReportsPackage() {
     }
   };
 
-  return <Card className="shadow-sm border-none border-l-4 border-l-[#2F3E46]"><CardHeader className="border-b border-gray-100 bg-gray-50/50"><CardTitle className="flex items-center gap-2 text-[#2F3E46]"><Activity className="w-5 h-5 text-[#FFD100]" /> Scheduled Reports</CardTitle></CardHeader><CardContent className="pt-4"><p className="text-sm text-gray-500 mb-4">Reports are viewed or downloaded manually by the Social Worker. The monthly package currently checks TRI and Anecdotal Reports while the remaining required-document list is being finalized.</p><div className="flex flex-col gap-3 sm:flex-row sm:items-end"><div><Label className="text-xs">Month</Label><select value={month} onChange={e=>setMonth(e.target.value)} className="mt-1 h-10 rounded-md border px-3 text-sm">{MONTHS.map((m,i)=><option key={m} value={i+1}>{m}</option>)}</select></div><div><Label className="text-xs">Year</Label><select value={year} onChange={e=>setYear(e.target.value)} className="mt-1 h-10 rounded-md border px-3 text-sm">{[Number(year)-1,Number(year),Number(year)+1].map(y=><option key={y}>{y}</option>)}</select></div><Button onClick={handleViewMonthlyPackage} disabled={checking} className="gap-2 bg-[#2F3E46] text-white">{checking ? <Loader2 className="w-4 h-4 animate-spin"/> : <FileText className="w-4 h-4"/>}{checking ? 'Checking…' : 'View Monthly Package'}</Button></div>
-        {/* Bulk download. Two buttons rather than one because the facility files
-            TRI and Anecdotal Reports separately, and the checklist above is a
-            different question ("is anything missing?") from "give me the
-            reports". Each button produces one ZIP holding one PDF per resident. */}
-        <div className="mt-4 border-t border-gray-100 pt-4">
-          <p className="text-xs font-bold uppercase tracking-wide text-gray-400">Bulk download</p>
-          <p className="mt-1 text-xs text-gray-500">One ZIP per report type, holding every resident&rsquo;s report for {getMonthName(month)} {year} — each report a separate PDF inside the archive.</p>
-          {zipError && <p className="mt-2 rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-700">{zipError}</p>}
-          <div className="mt-3 flex flex-wrap gap-2">
-            {(['tri', 'anecdotal'] as const).map((kind) => {
-              const running = zipProgress && zipProgress.kind === kind ? zipProgress : null;
-              const label = kind === 'tri' ? 'TRI Reports' : 'Anecdotal Reports';
-              return <Button key={kind} variant="outline" onClick={() => void handleDownloadZip(kind)} disabled={zipProgress !== null} className="gap-2">{running ? <Loader2 className="w-4 h-4 animate-spin"/> : <Download className="w-4 h-4"/>}{running ? `Zipping ${running.done}/${running.total}…` : `Download ${label} (ZIP)`}</Button>;
-            })}
+  return (
+    <Card className="border-none shadow-sm">
+      <CardHeader className="border-b border-gray-100">
+        <CardTitle className="flex items-center gap-2 text-[#2F3E46]">
+          <Calendar className="w-5 h-5 text-[#FFD100]" /> Monthly Reports
+        </CardTitle>
+        <CardDescription>
+          TRI and Anecdotal Reports are both filed per calendar month. Choose the month once — both lists below follow it.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="pt-4">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="space-y-1">
+            <Label className="text-xs font-semibold text-gray-500">Month</Label>
+            <Select value={month} onValueChange={setMonth}>
+              <SelectTrigger className="h-10 w-40"><SelectValue /></SelectTrigger>
+              <SelectContent>{MONTHS.map((name, index) => <SelectItem key={name} value={String(index + 1)}>{name}</SelectItem>)}</SelectContent>
+            </Select>
           </div>
+          <div className="space-y-1">
+            <Label className="text-xs font-semibold text-gray-500">Year</Label>
+            <Select value={year} onValueChange={setYear}>
+              <SelectTrigger className="h-10 w-28"><SelectValue /></SelectTrigger>
+              <SelectContent>{[Number(year) - 1, Number(year), Number(year) + 1].map((y) => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          <Button variant="outline" onClick={() => void handleCheckMissing()} disabled={checking} className="gap-2">
+            {checking ? <Loader2 className="w-4 h-4 animate-spin" /> : <ClipboardList className="w-4 h-4" />}
+            {checking ? 'Checking…' : 'Check for missing documents'}
+          </Button>
         </div>
-        </CardContent></Card>;
+
+        {zipError && <p className="mt-3 rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-700">{zipError}</p>}
+
+        {/* One block per report type, each with the same two actions in the same
+            order: a PDF per resident, and one ZIP for the month. */}
+        <div className="mt-5 space-y-4">
+          {([
+            { kind: 'tri' as const, title: 'TRI Reports', rows: triRecords },
+            { kind: 'anecdotal' as const, title: 'Anecdotal Reports', rows: anecdotalRecords },
+          ]).map((section) => {
+            const zipping = zipProgress && zipProgress.kind === section.kind ? zipProgress : null;
+            return (
+              <div key={section.kind} className="overflow-hidden rounded-xl border border-gray-200">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 bg-gray-50/60 px-4 py-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-[#2F3E46]">{section.title} — {section.rows.length} for {getMonthName(month)} {year}</p>
+                    <p className="text-xs text-gray-500">Each resident&rsquo;s report is a separate PDF; the ZIP holds all of them.</p>
+                  </div>
+                  <Button onClick={() => void handleDownloadZip(section.kind)} disabled={zipProgress !== null || loading} className="gap-2 bg-[#2F3E46] text-white">
+                    {zipping ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                    {zipping ? `Zipping ${zipping.done}/${zipping.total}…` : 'Download all as ZIP'}
+                  </Button>
+                </div>
+                {loading ? (
+                  <p className="px-4 py-4 text-sm text-gray-400">Loading…</p>
+                ) : section.rows.length === 0 ? (
+                  <p className="px-4 py-4 text-sm italic text-gray-400">No {section.title} for {getMonthName(month)} {year}.</p>
+                ) : (
+                  <ul className="divide-y divide-gray-100">
+                    {section.rows.map((record) => (
+                      <li key={record.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5">
+                        <span className="min-w-0">
+                          <span className="block truncate text-sm font-semibold text-[#2F3E46]">{residentLabel(record.residentId)}</span>
+                          <span className="block text-[11px] text-gray-400">{record.id}{record.status ? ` · ${record.status}` : ''}</span>
+                        </span>
+                        <Button size="sm" variant="outline" className="gap-1.5" disabled={downloadingId !== null} onClick={() => void handleDownloadOne(section.kind, record)}>
+                          {downloadingId === record.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />} Download PDF
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </CardContent>
+    </Card>
+  );
 }
 
 /**
@@ -1372,7 +1513,59 @@ export function Reports() {
           )}
         </div>
       ) : (
-        <>
+        <div className="space-y-8">
+          {/* Each group is its own labelled section, in the order the work
+              happens: the month, then the quarter, then the one-off documents,
+              with the blank forms last because they are reference material. */}
+          <section className="space-y-3">
+            <ReportsSectionHeading
+              title="Monthly Reports"
+              description="TRI and Anecdotal Reports, one per resident per calendar month. Pick the month inside the card."
+            />
+          <MonthlyReportsSection />
+          </section>
+
+          <section className="space-y-3">
+            <ReportsSectionHeading
+              title="Quarterly Reports"
+              description="One progress report per resident per quarter, consolidated from Education, Health and the other programs."
+            />
+            {/* Quarterly Progress Reports — lives here rather than in a module of
+                its own, so the six aspects sit alongside the other facility
+                reports the same staff already come here to produce. */}
+            <QuarterlyProgressReportsCard onOpenReport={setOpenQuarterlyId} />
+          </section>
+
+          <section className="space-y-3">
+            <ReportsSectionHeading
+              title="Resident Reports"
+              description="Comprehensive per-resident documents, produced on demand."
+            />
+            {/* Discharge Reports */}
+            <Card className="shadow-sm border-none">
+              <CardHeader className="border-b border-gray-100"><CardTitle className="flex items-center gap-2 text-[#2F3E46]"><FileText className="w-5 h-5 text-[#FFD100]" /> Resident Discharge Reports</CardTitle></CardHeader>
+              <CardContent className="pt-4">
+                <p className="mb-4 text-sm text-gray-500">Generate comprehensive discharge reports for residents.</p>
+                <Dialog>
+                  <DialogTrigger asChild><Button className="w-full bg-[#2F3E46] text-white gap-2 hover:bg-[#263440]"><FileText className="w-4 h-4" /> Generate Resident Report</Button></DialogTrigger>
+                  <DialogContent className="max-w-md rounded-2xl bg-white">
+                    <DialogHeader><DialogTitle className="font-bold text-[#2F3E46]">Select Residents</DialogTitle><DialogDescription>Choose which residents to include in the comprehensive report.</DialogDescription></DialogHeader>
+                    <div className="mt-2 space-y-4">
+                      <div className="flex items-center space-x-2 rounded-xl border bg-gray-50 p-3"><Checkbox id="select-all" checked={selectAll} onCheckedChange={handleSelectAll} /><Label htmlFor="select-all" className="cursor-pointer font-medium">Select All Residents</Label></div>
+                      {activeChildren.length === 0 ? <p className="py-4 text-center text-sm italic text-gray-400">No active residents found.</p> : <div className="max-h-64 space-y-2 overflow-y-auto">{activeChildren.map(child => <div key={child.id} className="flex items-center space-x-2 rounded-xl border p-3 hover:bg-gray-50"><Checkbox id={child.id} checked={selectedResidents.includes(child.id)} onCheckedChange={() => handleSelectResident(child.id)} /><Label htmlFor={child.id} className="flex-1 cursor-pointer"><span className="font-medium">{child.name}</span><span className="ml-2 text-xs text-gray-400">({child.id})</span></Label></div>)}</div>}
+                      <div className="space-y-2 border-t pt-3"><p className="text-sm text-gray-500">Selected: {selectedResidents.length} resident(s)</p><Button className="w-full bg-[#2F3E46] text-white" disabled={!selectedResidents.length || generating} onClick={() => { void handleGenerateReport(); }}>{generating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Printer className="mr-2 h-4 w-4" />} {generating ? 'Preparing…' : `Generate & Print Report${selectedResidents.length > 1 ? 's' : ''}`}</Button></div>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              </CardContent>
+            </Card>
+          </section>
+
+          <section className="space-y-3">
+            <ReportsSectionHeading
+              title="Reference Forms"
+              description="The blank official forms, for reference and printing."
+            />
           <div>
             <button
               type="button"
@@ -1397,34 +1590,7 @@ export function Reports() {
               </div>
             )}
           </div>
-
-          <ScheduledReportsPackage />
-
-          <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-            {/* Discharge Reports */}
-            <Card className="shadow-sm border-none">
-              <CardHeader className="border-b border-gray-100"><CardTitle className="flex items-center gap-2 text-[#2F3E46]"><FileText className="w-5 h-5 text-[#FFD100]" /> Resident Discharge Reports</CardTitle></CardHeader>
-              <CardContent className="pt-4">
-                <p className="mb-4 text-sm text-gray-500">Generate comprehensive discharge reports for residents.</p>
-                <Dialog>
-                  <DialogTrigger asChild><Button className="w-full bg-[#2F3E46] text-white gap-2 hover:bg-[#263440]"><FileText className="w-4 h-4" /> Generate Resident Report</Button></DialogTrigger>
-                  <DialogContent className="max-w-md rounded-2xl bg-white">
-                    <DialogHeader><DialogTitle className="font-bold text-[#2F3E46]">Select Residents</DialogTitle><DialogDescription>Choose which residents to include in the comprehensive report.</DialogDescription></DialogHeader>
-                    <div className="mt-2 space-y-4">
-                      <div className="flex items-center space-x-2 rounded-xl border bg-gray-50 p-3"><Checkbox id="select-all" checked={selectAll} onCheckedChange={handleSelectAll} /><Label htmlFor="select-all" className="cursor-pointer font-medium">Select All Residents</Label></div>
-                      {activeChildren.length === 0 ? <p className="py-4 text-center text-sm italic text-gray-400">No active residents found.</p> : <div className="max-h-64 space-y-2 overflow-y-auto">{activeChildren.map(child => <div key={child.id} className="flex items-center space-x-2 rounded-xl border p-3 hover:bg-gray-50"><Checkbox id={child.id} checked={selectedResidents.includes(child.id)} onCheckedChange={() => handleSelectResident(child.id)} /><Label htmlFor={child.id} className="flex-1 cursor-pointer"><span className="font-medium">{child.name}</span><span className="ml-2 text-xs text-gray-400">({child.id})</span></Label></div>)}</div>}
-                      <div className="space-y-2 border-t pt-3"><p className="text-sm text-gray-500">Selected: {selectedResidents.length} resident(s)</p><Button className="w-full bg-[#2F3E46] text-white" disabled={!selectedResidents.length || generating} onClick={() => { void handleGenerateReport(); }}>{generating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Printer className="mr-2 h-4 w-4" />} {generating ? 'Preparing…' : `Generate & Print Report${selectedResidents.length > 1 ? 's' : ''}`}</Button></div>
-                    </div>
-                  </DialogContent>
-                </Dialog>
-              </CardContent>
-            </Card>
-
-            {/* Quarterly Progress Reports — lives here rather than in a module of
-                its own, so the six aspects sit alongside the other facility
-                reports the same staff already come here to produce. */}
-            <QuarterlyProgressReportsCard onOpenReport={setOpenQuarterlyId} />
-          </div>
+          </section>
 
           {/*
             The editor opens as a full-screen form of its own — it renders the
@@ -1437,8 +1603,7 @@ export function Reports() {
               onClose={() => setOpenQuarterlyId(null)}
             />
           )}
-
-        </>
+        </div>
       )}
 
       {viewerForm && <ReportFormViewer form={viewerForm} onClose={() => setViewerForm(null)} />}
