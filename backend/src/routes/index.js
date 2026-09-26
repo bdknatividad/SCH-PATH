@@ -13,6 +13,9 @@ const { authenticate, authorize } = require('../middleware/auth');
 const { snapshotFor, requireModule, requirePermission } = require('../middleware/rbac');
 const { requireEducationPlacement } = require('../middleware/validation');
 const { hasModuleAccess } = require('../config/rbac');
+// `sortRows` is shared so `/store` orders wide-row resources the same way
+// `baseController.getAll` does instead of asking MySQL to filesort them.
+const { sortRows } = require('../controllers/baseController');
 
 const userRoutes = require('./userRoutes');
 const childRoutes = require('./childRoutes');
@@ -273,7 +276,22 @@ router.get('/store', authenticate, async (req, res, next) => {
           // other user's notifications straight out of the store payload.
           rows = await notifications.listFor(req.user, { limit: 200 });
         } else {
-          [rows] = await pool.query(`SELECT * FROM \`${tableName}\` ORDER BY ${RESOURCES[tableName]?.orderBy || 'createdAt DESC'}`);
+          // A resource whose rows are too wide to filesort has to be ordered in
+          // the application — that is what `sortInApplication` in constants.js
+          // means, and `baseController.getAll` honours it. This loop did not, so
+          // it kept handing the ORDER BY to MySQL: `education_records` carries a
+          // 277 KB `files` blob per row, the filesort exhausted
+          // `sort_buffer_size`, and the per-table catch below turned the error
+          // into `[]`. The table therefore read as empty here while
+          // `GET /api/education-records` returned its rows.
+          const config = RESOURCES[tableName] || {};
+          const orderBy = config.orderBy || 'createdAt DESC';
+          [rows] = await pool.query(
+            config.sortInApplication
+              ? `SELECT * FROM \`${tableName}\``
+              : `SELECT * FROM \`${tableName}\` ORDER BY ${orderBy}`
+          );
+          if (config.sortInApplication) rows = sortRows(rows, orderBy);
         }
 
         // Houseparents have a strict resident caseload boundary. The store

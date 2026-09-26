@@ -378,4 +378,5 @@ function createController(resource) {
 module.exports = {
   createController,
   bindValue,
+  sortRows,
 };
