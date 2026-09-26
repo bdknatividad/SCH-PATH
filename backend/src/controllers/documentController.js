@@ -777,6 +777,49 @@ async function create(req, res, next) {
       }
     }
 
+    // Tell the resident's Houseparents that a medical record has been filed.
+    //
+    // Nothing did this before: `healthController` sends no notifications at all,
+    // and the only upload alert here goes to the *reviewers* of a Psychological
+    // Assessment. So a Nurse filing a medical record for a resident on a
+    // Houseparent's case load was invisible to that Houseparent until they
+    // happened to open the folder.
+    //
+    // Addressed one row per user through `houseparentsOf`, which resolves the
+    // case load by account id — the same rule the medical-notes alert uses, so
+    // the two cannot drift. The uploader is skipped: a Houseparent who filed
+    // their own resident's record is not told about their own action.
+    if (documentFolder === 'Medical Records' && data.residentId) {
+      try {
+        const houseparents = await notifications.houseparentsOf(data.residentId);
+        const uploaderUsername = String(req.user?.username || '').toLowerCase();
+        const recipients = houseparents.filter(
+          (hp) => String(hp.username || '').toLowerCase() !== uploaderUsername,
+        );
+        if (recipients.length) {
+          const childName = await notifications.residentName(data.residentId);
+          await notifications.notifyUsers(
+            recipients.map((hp) => hp.id),
+            {
+              type: 'medical-record-filed',
+              residentId: data.residentId,
+              title: `Medical record filed — ${childName}`,
+              message: `${req.user?.fullName || req.user?.username || 'Staff'} filed "${rows[0].title || 'a medical record'}" for ${childName}. Open it to review.`,
+              priority: 'Medium',
+              actionRequired: 'Open the medical record.',
+              relatedRecordType: 'documents',
+              relatedRecordId: newId,
+              actorUsername: req.user?.username || null,
+              dedupeKey: `document:${newId}:medical-record-filed`,
+            },
+          );
+        }
+      } catch (alertErr) {
+        // The record is already saved; a failed alert must not undo it.
+        console.error('[DocumentController] Medical record alert failed (non-fatal):', alertErr.message);
+      }
+    }
+
     res.status(201).json({ success: true, data: mapRow('documents', rows[0]) });
   } catch (error) {
     next(error);

@@ -1153,6 +1153,32 @@ export function DocumentUpload() {
     }
   };
 
+  /**
+   * Open the exact file a notification named.
+   *
+   * `/documents?docId=…` is how a "medical record filed" alert lands on the file
+   * itself instead of the folder list it lives in. The id is read once on mount;
+   * the open is retried as `documents` changes, because the store may still be
+   * loading when the page first renders and the record will not be there yet.
+   * A `ref` rather than state so the retry cannot reopen the preview after the
+   * reader has closed it.
+   */
+  const deepLinkDocId = useMemo(
+    () => new URLSearchParams(window.location.search).get('docId'),
+    [],
+  );
+  const deepLinkOpenedRef = useRef(false);
+  useEffect(() => {
+    if (!deepLinkDocId || deepLinkOpenedRef.current) return;
+    const match = documents.find((doc) => String(doc.id) === String(deepLinkDocId));
+    if (!match) return;
+    deepLinkOpenedRef.current = true;
+    void handleView(match as DocumentWithApproval);
+    // `handleView` is stable enough for this one-shot open; re-running on its
+    // identity would reopen the preview on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deepLinkDocId, documents]);
+
   const handlePrint = async (doc: DocumentWithApproval) => {
     try {
       const { blob } = await fetchBinary(`/documents/${doc.id}/file`);

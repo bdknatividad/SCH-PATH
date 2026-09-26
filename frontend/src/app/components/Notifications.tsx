@@ -192,7 +192,12 @@ export function Notifications() {
         target = resident ? `/health?residentId=${encodeURIComponent(resident)}` : '/health';
         break;
       case 'documents':
-        target = '/documents';
+        // A document alert names the exact file, so open it rather than the
+        // folder list. `DocumentUpload` reads `docId` and opens that record's
+        // preview; without one it simply stays on the list.
+        target = relatedRecordId
+          ? `/documents?tab=folders&docId=${encodeURIComponent(relatedRecordId)}`
+          : '/documents';
         break;
       // Form 08 and the intervention it belongs to both live in the Violations
       // module, which every role that can act on them holds.
