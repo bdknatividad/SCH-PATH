@@ -31,13 +31,17 @@
  * handing the role a whole table.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
-  Users, ClipboardList, FileText, Calendar, ArrowRight, AlertCircle,
+  Users, ClipboardList, FileText, Calendar, ClipboardCheck, AlertCircle, ChevronRight,
 } from 'lucide-react';
 import { request } from '@/services/api';
 import type { Child } from '../state/DataContext';
 import { formatShortDate } from '@/utils/dateFormatter';
+import { Badge } from '@/app/components/ui/badge';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+} from '@/app/components/ui/dialog';
 import {
   DashboardHeader, StatTile, StatTileRow, SectionCard, ListRow,
 } from './DashboardKit';
@@ -110,6 +114,9 @@ export function HouseparentDashboard({
   const [triRecords, setTriRecords] = useState<TriRecordRow[]>([]);
   const [anecdotalReports, setAnecdotalReports] = useState<AnecdotalReportRow[]>([]);
   const [loading, setLoading] = useState(true);
+
+  /** The Schedule tile opens the day's activities and assessments in a dialog. */
+  const [showSchedule, setShowSchedule] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -189,7 +196,7 @@ export function HouseparentDashboard({
           value={loading ? '…' : triToDo.length}
           caption={loading ? 'Reading records' : 'Draft or returned to you'}
           icon={ClipboardList}
-          onClick={() => onOpen('/tri')}
+          onClick={() => onOpen('/tri?tab=records')}
         />
         <StatTile
           title="Anecdotal To Finish"
@@ -199,11 +206,11 @@ export function HouseparentDashboard({
           onClick={() => onOpen('/tri?tab=anecdotal')}
         />
         <StatTile
-          title="Today's Schedule"
+          title="Schedule"
           value={scheduleCount}
           caption={scheduleCount ? 'Activities and assessments' : 'Nothing scheduled'}
           icon={Calendar}
-          onClick={() => onOpen('/activities')}
+          onClick={() => setShowSchedule(true)}
         />
       </StatTileRow>
 
@@ -246,7 +253,7 @@ export function HouseparentDashboard({
             triToDo.length > 0 ? (
               <button
                 type="button"
-                onClick={() => onOpen('/tri')}
+                onClick={() => onOpen('/tri?tab=records')}
                 className="text-[10px] border border-gray-200 px-2 py-1 rounded hover:bg-[#FFD100] transition-all shrink-0"
               >
                 Open
@@ -267,7 +274,7 @@ export function HouseparentDashboard({
                     {record.status || 'Draft'}
                   </span>
                 }
-                onClick={() => onOpen('/tri')}
+                onClick={() => onOpen('/tri?tab=records')}
               />
             ))}
           </div>
@@ -309,44 +316,6 @@ export function HouseparentDashboard({
           </div>
         </SectionCard>
 
-        {/* Today's schedule, from the database summary the page already read. */}
-        <SectionCard
-          title="Today's Schedule"
-          icon={<Calendar className="w-4 h-4 text-[#FFD100]" />}
-          badge={scheduleCount}
-          isEmpty={scheduleCount === 0}
-          empty="Nothing is scheduled for today."
-          action={
-            <button
-              type="button"
-              onClick={() => onOpen('/activities')}
-              className="text-[10px] border border-gray-200 px-2 py-1 rounded hover:bg-[#FFD100] transition-all shrink-0"
-            >
-              Open calendar
-            </button>
-          }
-        >
-          <div className="space-y-2">
-            {todayActivities.map((activity) => (
-              <ListRow
-                key={`activity-${activity.id}`}
-                title={activity.title || 'Untitled activity'}
-                meta={`${activity.time || 'All day'} · ${activity.location || 'Shelter'}`}
-                trailing={<ArrowRight className="w-4 h-4 text-gray-300" />}
-                onClick={() => onOpen('/activities')}
-              />
-            ))}
-            {todayAssessments.map((assessment) => (
-              <ListRow
-                key={`assessment-${assessment.id}`}
-                title={assessment.title || 'Untitled assessment'}
-                meta={`${formatShortDate(assessment.date)} · ${assessment.time || 'TBA'}`}
-                trailing={<ArrowRight className="w-4 h-4 text-gray-300" />}
-                onClick={() => onOpen('/assessments')}
-              />
-            ))}
-          </div>
-        </SectionCard>
       </div>
 
       <p className="text-[10px] text-gray-400 flex items-start gap-1.5">
@@ -354,6 +323,100 @@ export function HouseparentDashboard({
         Everything on this page is limited to the residents assigned to you. TRI and Anecdotal
         counts follow the statuses each module treats as your turn to act on.
       </p>
+
+      {/* ── The day's schedule ──
+          The tile used to jump straight to Activities, which answered only half
+          the question: the count it shows is activities *and* assessments. The
+          dialog lists both, so the number and what it opens finally agree. */}
+      <Dialog open={showSchedule} onOpenChange={setShowSchedule}>
+        <DialogContent className="max-h-[85vh] max-w-2xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-[#2F3E46]">
+              <Calendar className="h-4 w-4 text-[#FFD100]" /> Schedule
+              <Badge className="bg-[#FFD100] px-1.5 py-0 text-[10px] text-[#2F3E46]">
+                {scheduleCount}
+              </Badge>
+            </DialogTitle>
+          </DialogHeader>
+
+          {scheduleCount === 0 ? (
+            <p className="py-6 text-center text-xs italic text-gray-400">
+              Nothing is scheduled for today.
+            </p>
+          ) : (
+            <div className="space-y-5">
+              <ScheduleGroup
+                title="Activities"
+                icon={<ClipboardCheck className="h-4 w-4 text-[#FFD100]" />}
+                empty="No activities scheduled today."
+                items={todayActivities.map((activity) => ({
+                  id: `activity-${activity.id}`,
+                  title: activity.title || 'Untitled activity',
+                  meta: `${activity.time || 'All day'} · ${activity.location || 'Shelter'}`,
+                  onOpen: () => { setShowSchedule(false); onOpen('/activities'); },
+                }))}
+              />
+              <ScheduleGroup
+                title="Assessments"
+                icon={<ClipboardList className="h-4 w-4 text-[#FFD100]" />}
+                empty="No assessments scheduled today."
+                items={todayAssessments.map((assessment) => ({
+                  id: `assessment-${assessment.id}`,
+                  title: assessment.title || 'Untitled assessment',
+                  meta: `${formatShortDate(assessment.date)} · ${assessment.time || 'TBA'}`,
+                  onOpen: () => { setShowSchedule(false); onOpen('/assessments'); },
+                }))}
+              />
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+/**
+ * One section of the Schedule dialog.
+ *
+ * Takes a plain `items` array rather than the two collections, so the dialog
+ * decides what a row says while this decides only how a group looks — and an
+ * empty group prints its own sentence instead of vanishing, which is what tells
+ * the reader the difference between "no activities today" and a failed load.
+ */
+function ScheduleGroup({
+  title, icon, empty, items,
+}: {
+  title: string;
+  icon: ReactNode;
+  empty: string;
+  items: Array<{ id: string; title: string; meta: string; onOpen: () => void }>;
+}) {
+  return (
+    <div>
+      <p className="mb-2 flex items-center gap-2 border-b border-gray-100 pb-1.5 text-[11px] font-bold uppercase tracking-wide text-gray-500">
+        {icon}
+        {title}
+      </p>
+      {items.length === 0 ? (
+        <p className="py-2 text-[11px] italic text-gray-400">{empty}</p>
+      ) : (
+        <div className="space-y-1.5">
+          {items.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              onClick={item.onOpen}
+              className="flex w-full items-center justify-between gap-3 rounded-lg border border-gray-100 p-2.5 text-left transition-colors hover:border-[#FFD100] hover:bg-[#FFD100]/10"
+            >
+              <span className="min-w-0">
+                <span className="block truncate text-xs font-semibold text-[#2F3E46]">{item.title}</span>
+                <span className="block text-[10px] text-gray-400">{item.meta}</span>
+              </span>
+              <ChevronRight className="h-4 w-4 shrink-0 text-gray-300" />
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
