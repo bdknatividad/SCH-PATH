@@ -286,6 +286,24 @@ function tallyBy(rows, key) {
 }
 
 /**
+ * `{ label: [{ id, name }] }` from rows of `(id, name, label)`.
+ *
+ * The breakdown counterpart of `tallyBy`. A bar that prints only a number invites
+ * the question "which residents?", so the query that produces the count also
+ * produces the names and this groups them — counting and listing from the same
+ * rows is what stops a bar and the list behind it from disagreeing.
+ */
+function groupResidentsByLabel(rows) {
+  const out = {};
+  for (const row of rows || []) {
+    const label = String(row.label ?? '');
+    if (!out[label]) out[label] = [];
+    out[label].push({ id: String(row.id), name: row.name ?? '' });
+  }
+  return out;
+}
+
+/**
  * How "active" is decided, once, for the whole page.
  *
  * The Child Records module's **Active** filter is `status NOT IN ('Discharged',
@@ -470,9 +488,14 @@ async function centerHeadOverview(req, res, next) {
         await Promise.all([
           pool.query('SELECT status, COUNT(*) AS n FROM children GROUP BY status'),
           pool.query(`SELECT COUNT(*) AS n FROM children c WHERE ${presentInPeriodWhere}`, periodBounds),
+          // Rows, not a GROUP BY. The residents behind each bar are the point of
+          // the bar, so the query that counts them also names them, and the
+          // grouping happens in JS — one query rather than a count and a list
+          // that can drift apart.
           pool.query(
-            `SELECT COALESCE(c.casePhase, '') AS label, COUNT(*) AS n
-               FROM children c WHERE ${presentInPeriodWhere} GROUP BY label`,
+            `SELECT c.id, c.name, COALESCE(c.casePhase, '') AS label
+               FROM children c WHERE ${presentInPeriodWhere}
+              ORDER BY c.name ASC`,
             periodBounds
           ),
           pool.query(
@@ -494,9 +517,14 @@ async function centerHeadOverview(req, res, next) {
           ),
         ]);
       const byStatus = tallyBy(statusRows, 'status');
-      const byPhase = Object.entries(tallyBy(phaseRows, 'label'))
-        .map(([phase, count]) => ({ phase, short: PHASE_SHORT[phase] || phase || 'Unassigned', count }))
-        .filter((row) => row.count > 0)
+      const phaseGroups = groupResidentsByLabel(phaseRows);
+      const byPhase = Object.entries(phaseGroups)
+        .map(([phase, group]) => ({
+          phase,
+          short: PHASE_SHORT[phase] || phase || 'Unassigned',
+          count: group.length,
+          residents: group,
+        }))
         .sort((a, b) => b.count - a.count);
       const byCaseType = Object.entries(tallyBy(caseTypeRows, 'label'))
         .map(([label, count]) => ({ label: label || 'Unspecified', count }))
@@ -521,10 +549,11 @@ async function centerHeadOverview(req, res, next) {
       // behavioural split is not worth a blank KPI row.
       let behavioral = [];
       try {
+        // One row per resident, so the same query answers "how many" and "who".
         const [rows] = await pool.query(
-          `SELECT CASE WHEN t.id IS NULL THEN 'Unscored'
-                       ELSE COALESCE(NULLIF(t.rating, ''), 'Unscored') END AS label,
-                  COUNT(*) AS n
+          `SELECT c.id, c.name,
+                  CASE WHEN t.id IS NULL THEN 'Unscored'
+                       ELSE COALESCE(NULLIF(t.rating, ''), 'Unscored') END AS label
              FROM children c
              LEFT JOIN triRecords t
                ON t.id = (
@@ -535,14 +564,19 @@ async function centerHeadOverview(req, res, next) {
                      ORDER BY t2.finalizedAt DESC, t2.id DESC
                      LIMIT 1)
             WHERE ${presentInPeriodWhere}
-            GROUP BY label`,
+            ORDER BY c.name ASC`,
           [periodYear, periodMonth, ...periodBounds]
         );
-        const tally = tallyBy(rows, 'label');
-        behavioral = BEHAVIORAL_BANDS.map((label) => ({ label, count: tally[label] || 0 }));
+        const groups = groupResidentsByLabel(rows);
+        behavioral = BEHAVIORAL_BANDS.map((label) => {
+          const group = groups[label] || [];
+          return { label, count: group.length, residents: group };
+        });
         // A band the list does not name is still a real rating — count it.
-        for (const [label, count] of Object.entries(tally)) {
-          if (!BEHAVIORAL_BANDS.includes(label) && count > 0) behavioral.push({ label, count });
+        for (const [label, group] of Object.entries(groups)) {
+          if (!BEHAVIORAL_BANDS.includes(label) && group.length > 0) {
+            behavioral.push({ label, count: group.length, residents: group });
+          }
         }
       } catch (error) {
         console.error('Center Head dashboard — behavioral status failed:', error.message);

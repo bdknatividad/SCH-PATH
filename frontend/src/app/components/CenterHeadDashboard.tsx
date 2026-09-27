@@ -59,6 +59,9 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from '@/app/components/ui/card';
 import { Badge } from '@/app/components/ui/badge';
 import {
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+} from '@/app/components/ui/dialog';
+import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/app/components/ui/select';
 import { request } from '@/services/api';
@@ -66,15 +69,24 @@ import { formatShortDate } from '@/utils/dateFormatter';
 
 // ── PAYLOAD ─────────────────────────────────────────────────────────────────
 
+/** A resident as the breakdown lists name them. */
+interface ResidentRef {
+  id: string;
+  name: string;
+}
+
 interface PhaseRow {
   phase: string;
   short: string;
   count: number;
+  /** Who the bar is made of — the same rows the count was taken from. */
+  residents: ResidentRef[];
 }
 
 interface BehavioralRow {
   label: string;
   count: number;
+  residents: ResidentRef[];
 }
 
 interface ScheduleItem {
@@ -172,6 +184,18 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
   const [data, setData] = useState<Overview | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  /**
+   * The resident breakdown behind one bar.
+   *
+   * Held as the residents the server returned with that bar, not recomputed
+   * here: the bar's count and this list come from the same query, so they cannot
+   * disagree — which is the whole reason the server sends the names rather than
+   * the client matching a phase against the store it happens to hold.
+   */
+  const [breakdown, setBreakdown] = useState<
+    { title: string; note: string; residents: ResidentRef[] } | null
+  >(null);
   const requestId = useRef(0);
 
   const load = useCallback(async () => {
@@ -392,23 +416,21 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
                 No residents were present in this period.
               </p>
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-2">
                 {data!.residents.byPhase.map((row) => (
-                  <div key={row.phase || row.short} className="flex items-center gap-3">
-                    <span
-                      className="w-32 shrink-0 truncate text-xs text-gray-600"
-                      title={row.phase}
-                    >
-                      {row.short}
-                    </span>
-                    <div className="h-5 flex-1 overflow-hidden rounded-full bg-gray-100">
-                      <div
-                        className="h-full rounded-full bg-[#2F3E46] transition-all"
-                        style={{ width: share(row.count, phaseTotal) }}
-                      />
-                    </div>
-                    <span className="w-8 text-right text-xs font-bold text-[#2F3E46]">{row.count}</span>
-                  </div>
+                  <BarRow
+                    key={row.phase || row.short}
+                    label={row.short}
+                    fullLabel={row.phase}
+                    count={row.count}
+                    percent={share(row.count, phaseTotal)}
+                    barClass="bg-[#2F3E46]"
+                    onOpen={() => setBreakdown({
+                      title: row.short,
+                      note: `In ${row.phase || 'no phase'} during ${periodLabel(period)}`,
+                      residents: row.residents,
+                    })}
+                  />
                 ))}
               </div>
             )}
@@ -432,18 +454,20 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
                 No residents were present in this period.
               </p>
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-2">
                 {(data?.residents.behavioral || []).map((row) => (
-                  <div key={row.label} className="flex items-center gap-3">
-                    <span className="w-32 shrink-0 text-xs text-gray-600">{row.label}</span>
-                    <div className="h-5 flex-1 overflow-hidden rounded-full bg-gray-100">
-                      <div
-                        className={`h-full rounded-full transition-all ${BEHAVIORAL_STYLE[row.label] || 'bg-gray-400'}`}
-                        style={{ width: share(row.count, behavioralTotal) }}
-                      />
-                    </div>
-                    <span className="w-8 text-right text-xs font-bold text-[#2F3E46]">{row.count}</span>
-                  </div>
+                  <BarRow
+                    key={row.label}
+                    label={row.label}
+                    count={row.count}
+                    percent={share(row.count, behavioralTotal)}
+                    barClass={BEHAVIORAL_STYLE[row.label] || 'bg-gray-400'}
+                    onOpen={() => setBreakdown({
+                      title: row.label,
+                      note: `Behavioural status for ${periodLabel(period)}, from finalized TRI results`,
+                      residents: row.residents,
+                    })}
+                  />
                 ))}
               </div>
             )}
@@ -520,8 +544,53 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
       <p className="text-[10px] text-gray-400">
         Read from the live database{data?.generatedAt ? ` at ${new Date(data.generatedAt).toLocaleTimeString()}` : ''}.
         The two review queues are counted as they stand now — they are what the Pending Review and Needs
-        Review screens will show you.
+        Review screens will show you. Click any bar to see the residents behind it.
       </p>
+
+      {/* ── The residents behind a bar ── */}
+      <Dialog open={breakdown !== null} onOpenChange={(next) => { if (!next) setBreakdown(null); }}>
+        <DialogContent className="max-h-[80vh] max-w-md overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-[#2F3E46]">
+              <Users className="h-4 w-4 text-[#FFD100]" />
+              {breakdown?.title}
+              {breakdown && (
+                <Badge className="bg-[#FFD100] text-[#2F3E46] px-1.5 py-0 text-[10px]">
+                  {breakdown.residents.length}
+                </Badge>
+              )}
+            </DialogTitle>
+          </DialogHeader>
+
+          {breakdown && (
+            <>
+              <p className="text-[11px] text-gray-500">{breakdown.note}</p>
+              {breakdown.residents.length === 0 ? (
+                <p className="py-4 text-center text-xs italic text-gray-400">
+                  No residents in this group for the selected period.
+                </p>
+              ) : (
+                <div className="space-y-1.5">
+                  {breakdown.residents.map((resident) => (
+                    <button
+                      key={resident.id}
+                      type="button"
+                      onClick={() => {
+                        setBreakdown(null);
+                        open(`/children/${resident.id}`);
+                      }}
+                      className="flex w-full items-center justify-between gap-3 rounded-lg border border-gray-100 p-2.5 text-left transition-colors hover:border-[#FFD100] hover:bg-[#FFD100]/10"
+                    >
+                      <span className="truncate text-xs font-semibold text-[#2F3E46]">{resident.name}</span>
+                      <ChevronRight className="h-4 w-4 shrink-0 text-gray-300" />
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -562,6 +631,51 @@ function StatCard({
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+/**
+ * One bar in a distribution.
+ *
+ * A **button** rather than a div whenever there is a breakdown to show, because
+ * hover alone would leave the residents unreachable on every phone and tablet —
+ * and the row is a far larger tap target than the bar itself. An empty band stays
+ * a plain div: there is nothing behind it, and a control that opens an empty
+ * dialog is worse than one that does not respond.
+ */
+function BarRow({
+  label, fullLabel, count, percent, barClass, onOpen,
+}: {
+  label: string;
+  fullLabel?: string;
+  count: number;
+  percent: string;
+  barClass: string;
+  onOpen: () => void;
+}) {
+  const interactive = count > 0;
+  const Wrapper = interactive ? 'button' : 'div';
+
+  return (
+    <Wrapper
+      type={interactive ? 'button' : undefined}
+      onClick={interactive ? onOpen : undefined}
+      aria-label={interactive ? `${label}: ${count} residents. Show the list.` : undefined}
+      className={`flex w-full items-center gap-3 rounded-lg px-1.5 py-1 text-left ${
+        interactive ? 'transition-colors hover:bg-[#FFD100]/15' : ''
+      }`}
+    >
+      <span
+        className={`w-28 shrink-0 truncate text-xs sm:w-32 ${interactive ? 'font-medium text-[#2F3E46]' : 'text-gray-600'}`}
+        title={fullLabel || label}
+      >
+        {label}
+      </span>
+      <div className="h-5 flex-1 overflow-hidden rounded-full bg-gray-100">
+        <div className={`h-full rounded-full transition-all ${barClass}`} style={{ width: percent }} />
+      </div>
+      <span className="w-8 text-right text-xs font-bold text-[#2F3E46]">{count}</span>
+    </Wrapper>
   );
 }
 
