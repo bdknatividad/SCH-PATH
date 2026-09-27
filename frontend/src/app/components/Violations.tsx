@@ -805,12 +805,35 @@ export function Violations() {
       });
       // Confirm the outcome in the dialog before it closes — previously it
       // vanished silently, so a success was indistinguishable from a no-op.
+      //
+      // A full-access account holds *both* verification sides, so the first one
+      // does not end the review: the dialog switches to the side still missing
+      // and stays open, and the pair is completed in one sitting instead of
+      // closing and making the reviewer find the record again. The API accepts
+      // this now (it used to refuse the second side with a 409, so the "Verify
+      // as:" control promised something it would not honour).
+      const canSignBothSides = fixedVerificationSide === null;
+      const stillPending = Boolean(result?.pendingSecondVerification);
+      // The response carries the record as it now stands, so the dual-verification
+      // block and the Verify button reflect what was just recorded without waiting
+      // for the list to reload.
+      if (result?.data) setSelectedViolation(result.data as Violation);
       setReviewSuccess(decision === 'reject'
         ? 'Violation rejected. Your review notes were saved.'
-        : result?.pendingSecondVerification
-          ? (result?.message || 'Verification recorded. The incident proceeds once the other verifier also verifies it.')
+        : stillPending
+          ? (canSignBothSides
+              ? 'Verification recorded. Switched to the other side — verify it to complete the pair.'
+              : (result?.message || 'Verification recorded. The incident proceeds once the other verifier also verifies it.'))
           : 'Both verifications are complete. Interventions were assigned and your review notes were saved.');
       await refreshData();
+      if (stillPending && canSignBothSides) {
+        setChosenVerificationSide(verificationSide === 'psych' ? 'sw' : 'psych');
+        // The banner clears shortly so the Verify button becomes usable again —
+        // it is disabled while a success message is showing, which is what stops
+        // a double submit.
+        window.setTimeout(() => setReviewSuccess(''), 1600);
+        return;
+      }
       setTimeout(() => { setIsReviewDialogOpen(false); setSelectedViolation(null); }, 1200);
     } catch (error) {
       setReviewError(error instanceof Error ? error.message : 'Unable to complete review.');

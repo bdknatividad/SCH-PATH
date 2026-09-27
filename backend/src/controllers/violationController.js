@@ -869,15 +869,32 @@ async function getReviewPreview(req, res, next) {  const connection = await pool
 }
 
 /**
- * Which verification a reviewer is giving: 'psych' (Psychological Support
- * Staff) or 'sw' (Social Worker). A full-access account (Center Head / Admin)
- * holds both roles, so it must say which side it signs — otherwise one account
- * could complete the pair alone.
+ * The verification side a role is *bound* to, or `null` for an account that may
+ * sign as either.
+ *
+ * The Psychological Support Staff and the Social Worker each hold exactly one
+ * side. Every other account that can reach this endpoint is a full-access one
+ * (the Center Head), which holds both roles and therefore has to say which side
+ * it is signing.
  */
-function resolveViolationVerificationSide(user, requested) {
+function boundVerificationSide(user) {
   const role = String(user?.role || '').toLowerCase().replace(/[\s_-]+/g, '');
   if (role === 'psychologist') return 'psych';
   if (role === 'socialworker') return 'sw';
+  return null;
+}
+
+/**
+ * Which verification a reviewer is giving: 'psych' (Psychological Support
+ * Staff) or 'sw' (Social Worker). A full-access account (Center Head / Admin)
+ * holds both roles, so it must say which side it signs.
+ *
+ * Note this deliberately does *not* stop that account from signing the other
+ * side afterwards — see the dual-verification block in `review`.
+ */
+function resolveViolationVerificationSide(user, requested) {
+  const bound = boundVerificationSide(user);
+  if (bound) return bound;
   const side = String(requested || '').toLowerCase();
   if (side === 'psych' || side === 'sw') return side;
   throw new ApiError(400, 'verificationSide must be "psych" or "sw" for this account.');
@@ -952,8 +969,20 @@ async function review(req, res, next) {
       if (ownBy) {
         throw new ApiError(409, `This incident is already verified by the ${verificationSide === 'psych' ? 'Psychological Support Staff' : 'Social Worker'} (${ownBy}).`);
       }
-      // One person cannot supply both verifications.
-      if (otherBy && String(otherBy) === String(req.user?.username || '')) {
+      /**
+       * One person cannot supply both verifications — that rule is the whole
+       * point of the pair, which exists so two people look at an incident.
+       *
+       * The exception is an account not bound to a single side by its role. The
+       * Center Head holds both, signs as either (see
+       * `resolveViolationVerificationSide`), and is offered that choice by the
+       * review dialog's "Verify as:" control. Without this exemption the control
+       * promised a second verification the API always refused with a 409 — the
+       * Center Head could sign one side and never the other, which is the report
+       * this fixes.
+       */
+      const maySignBothSides = boundVerificationSide(req.user) === null;
+      if (otherBy && String(otherBy) === String(req.user?.username || '') && !maySignBothSides) {
         throw new ApiError(409, 'The second verification must come from a different person.');
       }
       completesDualVerification = Boolean(otherBy);
