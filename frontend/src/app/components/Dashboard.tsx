@@ -16,7 +16,7 @@ import { useAuth } from '../state/AuthContext';
 import { request } from '@/services/api';
 import { countTriStatistics } from '@/app/components/TriStatistics';
 import { lazyComponent, RouteFallback } from '@/app/utils/lazyComponent';
-import { canOpenModule } from '@/app/config/moduleAccess';
+import { canOpenModule, userCan } from '@/app/config/moduleAccess';
 import { formatShortDate } from '@/utils/dateFormatter';
 import { pendingReviewQueue } from '@/utils/pendingDocuments';
 
@@ -1518,11 +1518,13 @@ export function Dashboard() {
   const [triMonitorLoading, setTriMonitorLoading] = useState(false);
   useEffect(() => {
     if (!user) return;
-    // TRI monitoring is the Houseparent module's data, and the endpoint is gated
-    // on that module. Asking on behalf of a role that cannot open it — the
-    // Educator's dashboard now returns before it renders these counters — would
-    // only produce a 403 in the console.
-    if (!canOpenModule(user?.role, user?.accessibleModules, 'Houseparent')) {
+    // TRI monitoring is *management reporting*: `GET /tri/monitor` is gated to
+    // the reviewer roles (socialworker / centerhead / admin), which the role
+    // matrix expresses as `Houseparent: verify`. Gating this on the Houseparent
+    // *module* alone asked on behalf of a role the server refuses — a Houseparent
+    // holds the module but not `verify`, so every Houseparent dashboard load
+    // fired the request and ate a 403. The Educator never reaches this effect.
+    if (!userCan(user, 'Houseparent', 'verify')) {
       setTriMonitor([]);
       return;
     }
