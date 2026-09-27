@@ -261,12 +261,21 @@ function relativeTone(days: number): Tone {
   return 'muted';
 }
 
-/** `2026-09-27` → `Sep 27`. The list is dense; the year is in the tooltip. */
+/**
+ * `2026-09-27` → `Sep 27`, and `2027-09-27` → `Sep 27, 2027`.
+ *
+ * The year is appended only when it is not the current one. A dense list wants
+ * the short form, but an expected discharge date a year out printed as "Sep 27"
+ * beside "in 365 days" reads as a contradiction rather than a date — the one
+ * place on this page where the year is load-bearing.
+ */
 function shortDay(value?: string | null): string {
   const match = String(value ?? '').match(/^(\d{4})-(\d{2})-(\d{2})/);
   if (!match) return '—';
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  return `${months[Number(match[2]) - 1]} ${Number(match[3])}`;
+  const year = Number(match[1]);
+  const label = `${months[Number(match[2]) - 1]} ${Number(match[3])}`;
+  return year === new Date().getFullYear() ? label : `${label}, ${year}`;
 }
 
 /**
@@ -603,8 +612,10 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
       items.push({
         key: `tri-${row.id}`, source: 'TRI', icon: ClipboardList, bg: 'bg-amber-50', fg: 'text-amber-600',
         title: `${row.residentName || row.residentId}`,
+        // No leading "TRI ·" here: the row already prints its `source`, so
+        // repeating it produced "TRI · TRI · Sep 2026".
         meta: [
-          `TRI · ${monthName(row.reportingMonth)} ${row.reportingYear}`,
+          `${monthName(row.reportingMonth)} ${row.reportingYear}`,
           row.finalPoints != null ? `${row.finalPoints} pts` : null,
           row.rating,
         ].filter(Boolean).join(' · '),
@@ -659,6 +670,18 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
     ? data.documents.count + data.reports.total + data.accessRequests.count
     : 0;
 
+  /**
+   * Is the "Past due" column genuinely empty?
+   *
+   * Three stacked grey "nothing here" boxes is a lot of furniture to say one
+   * thing, and it made the column read as broken rather than clear. When there
+   * is nothing late, one calm line says it.
+   */
+  const pastDueEmpty = !data
+    || (data.admissions.expectedOverdue.length === 0
+      && data.discharges.pendingRecommendations.length === 0
+      && data.admissions.expectedUpcoming.length === 0);
+
   const phaseTotal = data?.residents.byPhase.reduce((sum, row) => sum + row.count, 0) || 0;
   const caseTypeTotal = data?.residents.byCaseType.reduce((sum, row) => sum + row.count, 0) || 0;
   const behavioralTotal = data?.residents.behavioral.reduce((sum, row) => sum + row.count, 0) || 0;
@@ -675,6 +698,21 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
   // group is only the part after today, so today's items are subtracted rather
   // than shown twice.
   const aheadCount = data ? Math.max(0, data.schedules.upcomingCounts.total - data.schedules.today.total) : 0;
+
+  /**
+   * "1 assessment · 1 intervention" — built from whichever kinds are actually on
+   * today. Naming only activities and assessments understated the tile: a day of
+   * two intervention sessions read as "0 activities · 0 assessments".
+   */
+  const todaySummary = data
+    ? SUMMARY_KINDS
+      .filter((kind) => data.schedules.today[kind] > 0)
+      .map((kind) => {
+        const count = data.schedules.today[kind];
+        return `${count} ${KIND[kind].label.toLowerCase()}${count === 1 ? '' : 's'}`;
+      })
+      .join(' · ')
+    : '';
 
   /** One schedule row, shared by the three timeline groups. */
   const scheduleRow = (item: ScheduleItem) => {
@@ -893,6 +931,9 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
               count={(data?.admissions.expectedOverdue.length || 0) + (data?.discharges.pendingRecommendations.length || 0)}
             />
 
+            {pastDueEmpty ? (
+              <Clear>Nothing is past due, and no discharge decision is waiting.</Clear>
+            ) : (
             <div className="space-y-4">
               {/* Expected discharge dates that have passed */}
               <div>
@@ -968,6 +1009,7 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
                 )}
               </div>
             </div>
+            )}
           </div>
         </div>
       </Section>
@@ -1016,9 +1058,9 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
           <Metric
             label="Scheduled Today" icon={Calendar} loading={loading}
             value={data?.schedules.today.total ?? 0}
-            sub={data ? `${data.schedules.today.activity} activities · ${data.schedules.today.assessment} assessments` : ''}
+            sub={todaySummary || 'nothing on the calendar today'}
             onClick={() => open('/activities')}
-            hint="Everything dated today across activities, assessments, hearings, sessions and visits."
+            hint="Everything dated today across activities, assessments, hearings, interventions, school visits and TRI deadlines."
           />
         </div>
       </div>
