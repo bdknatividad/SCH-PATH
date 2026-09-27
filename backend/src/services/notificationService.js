@@ -41,6 +41,9 @@
 const { pool } = require('../config/database');
 const { insertWithGeneratedId } = require('../utils/helpers');
 const { normalizeRole } = require('../utils/authorization');
+// `config/rbac` reads only the definition, so this cannot cycle back into the
+// service layer the way a controller import would.
+const { ROLE_KEYS, can } = require('../config/rbac');
 const { loadResidentScope, residentInScope } = require('../utils/residentScope');
 const alertStream = require('./alertStream');
 
@@ -289,6 +292,43 @@ async function houseparentsOf(residentId, executor = pool) {
   return rows;
 }
 
+/**
+ * Every role whose matrix lets it read `subModule` of a resident's record.
+ * Pass `null` for the whole module.
+ *
+ * Derived from the definition rather than written out, because a hand-written
+ * audience is a second copy of the matrix and drifts from it. Deriving it also
+ * keeps a notification inside the same boundary as the data it describes: the
+ * Educator holds Child Records but not the Medical tab, so an Educator is never
+ * told about a medical note.
+ */
+function rolesAllowedResidentSubModule(subModule = null) {
+  return ROLE_KEYS.filter((role) => can({ role }, 'Child Records', null, subModule || undefined));
+}
+
+/**
+ * Tell everyone the matrix lets read this part of a resident's record, plus the
+ * Houseparents assigned to that resident.
+ *
+ * The Houseparents are added **by id**, not by role: `houseparent` as a role means
+ * every Houseparent in the facility, and only `houseparentsOf` knows which one is
+ * responsible for this child. They hold no Child Records module at all, so the
+ * derived audience never includes them on its own — yet the resident page gives
+ * them five tabs, and they are the people who act on most of this.
+ *
+ * One row per recipient, so read state and deletion stay per person.
+ */
+async function notifyResidentEvent(event, { subModule = null } = {}) {
+  const recipients = new Set();
+  for (const account of await usersWithAnyRole(rolesAllowedResidentSubModule(subModule))) {
+    recipients.add(account.id);
+  }
+  for (const houseparent of await houseparentsOf(event.residentId)) {
+    recipients.add(houseparent.id);
+  }
+  return notifyUsers([...recipients], event);
+}
+
 /** A resident's display name, for message text. */
 async function residentName(residentId, executor = pool) {
   if (!residentId) return null;
@@ -494,6 +534,8 @@ module.exports = {
   usersWithAnyRole,
   userIdForUsername,
   houseparentsOf,
+  rolesAllowedResidentSubModule,
+  notifyResidentEvent,
   residentName,
   residentExists,
   visibilityClause,

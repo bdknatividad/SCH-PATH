@@ -301,15 +301,25 @@ test('updating the Medical Notes notifies the assigned Houseparents, by id', () 
     'an unchanged note still notifies',
   );
 
-  // Addressed through the caseload helper, which resolves assignments by user id.
+  // Scoped to the resident's assigned Houseparents, resolved by user id inside the
+  // shared `notifyResidentEvent`, which also derives the rest of the audience from
+  // the RBAC matrix. The guarantee moved out of this controller when the audience
+  // became derived, so this follows it there rather than pinning a shape the
+  // controller no longer has.
   assert.match(
     update,
-    /notifications\.houseparentsOf\(req\.params\.id\)/,
-    'the notification is not scoped to the resident’s assigned Houseparents',
+    /notifications\.notifyResidentEvent\([\s\S]{0,900}?subModule: 'Medical'/,
+    'the medical-notes alert is not scoped to the Medical audience',
   );
-  assert.match(update, /notifications\.notifyUsers\(/, 'the Houseparents are not addressed individually');
+
+  const NOTIFICATION_SERVICE = read('backend/src/services/notificationService.js');
+  assert.match(
+    NOTIFICATION_SERVICE,
+    /houseparentsOf\(event\.residentId\)/,
+    'the resident’s assigned Houseparents are no longer resolved by id',
+  );
   assert.doesNotMatch(
-    update,
+    NOTIFICATION_SERVICE,
     /targetRole:\s*'houseparent'/,
     'the alert is addressed to the whole role, so every Houseparent sees another resident’s notes',
   );

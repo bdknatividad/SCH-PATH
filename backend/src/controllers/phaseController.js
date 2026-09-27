@@ -433,30 +433,19 @@ async function complete(req, res, next) {
         actorUsername: completedByUser,
       };
 
-      // The case owner, addressed by role: any Social Worker may pick this up.
-      await notifications.notify({
-        ...base,
-        targetRole: 'socialworker',
-        dedupeKey: `phase-progress:${id}:completed`,
-      });
-
-      // A resident becoming discharge-ready is a supervisory event, so the
-      // Center Head is included for that transition only — not for every phase.
-      if (readyForDischarge) {
-        await notifications.notify({
-          ...base,
-          targetRole: 'centerhead',
-          dedupeKey: `phase-progress:${id}:discharge-ready`,
-        });
-      }
-
-      // The Houseparents who run this resident's daily program need to know
-      // their task list changed. Addressed by id, so the caseload rule applies
-      // and a Houseparent assigned to another child never sees it.
-      const houseparents = await notifications.houseparentsOf(phase.residentId);
-      await notifications.notifyUsers(
-        houseparents.map((hp) => hp.id),
-        { ...base, dedupeKey: `phase-progress:${id}:completed-houseparent` }
+      // Everyone the matrix lets read this resident's **Phase Timeline**, plus the
+      // Houseparents assigned to them: the case owner, the Center Head, the
+      // clinical roles, and the people who actually run the daily program.
+      //
+      // One call where there were three. The role-addressed copies could only ever
+      // reach a whole role — "socialworker" means every Social Worker, and
+      // "houseparent" would have meant every Houseparent in the facility, which is
+      // why the assigned ones needed a separate call of their own. Deriving the
+      // audience also means the Educator, who holds no Phase Timeline, is not told
+      // about a phase it cannot see.
+      await notifications.notifyResidentEvent(
+        { ...base, dedupeKey: `phase-progress:${id}:completed` },
+        { subModule: 'Phase Timeline' },
       );
     } catch (alertErr) {
       console.error('[PhaseController] Phase completion alert failed (non-fatal):', alertErr.message);
@@ -572,17 +561,10 @@ async function demote(req, res, next) {
         dedupeKey: `phase-progress:${newId}:demoted`,
       };
 
-      await notifications.notify({ ...demotionEvent, targetRole: 'socialworker' });
-
-      // A demotion rewrites the Houseparents' task list for this resident, so they
-      // are told alongside the Case Worker rather than left to notice. Addressed
-      // by id, so the caseload rule applies and a Houseparent assigned to another
-      // child never sees it — the same shape as the phase-completion notice above.
-      const houseparents = await notifications.houseparentsOf(phase.residentId);
-      await notifications.notifyUsers(
-        houseparents.map((hp) => hp.id),
-        { ...demotionEvent, dedupeKey: `phase-progress:${newId}:demoted-houseparent` },
-      );
+      // The same audience as a phase completion: everyone the matrix lets read
+      // this resident's Phase Timeline, plus the Houseparents assigned to them,
+      // whose task list a demotion rewrites.
+      await notifications.notifyResidentEvent(demotionEvent, { subModule: 'Phase Timeline' });
     } catch (alertErr) {
       console.error('[PhaseController] Demotion alert failed (non-fatal):', alertErr.message);
     }

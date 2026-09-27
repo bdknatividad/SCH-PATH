@@ -578,28 +578,25 @@ async function update(req, res, next) {
 
     if (medicalNotes !== null && (previousMedicalNotes ?? '') !== medicalNotes) {
       try {
-        // Addressed by user id, not by name: the caseload rule is what decides
-        // who is told, so a Houseparent assigned to another resident never sees
-        // this, and the actor is not on the list because the list holds
-        // Houseparents only.
-        const houseparents = await notifications.houseparentsOf(req.params.id);
-        if (houseparents.length > 0) {
-          const name = await notifications.residentName(req.params.id);
-          await notifications.notifyUsers(
-            houseparents.map((hp) => hp.id),
-            {
-              type: 'medical-notes-updated',
-              title: 'Medical notes updated',
-              message: `The medical notes for ${name} were updated by ${req.user?.fullName || req.user?.username || 'staff'}. Please review them.`,
-              priority: 'Medium',
-              residentId: req.params.id,
-              relatedRecordType: 'children',
-              relatedRecordId: req.params.id,
-              actorUsername: req.user?.username || null,
-              dedupeKey: `medical-notes:${req.params.id}:${Date.now()}`,
-            }
-          );
-        }
+        // Everyone the matrix lets read this resident's **Medical** tab, plus the
+        // Houseparents assigned to them. Derived rather than listed: the Educator
+        // holds Child Records but not Medical, so an Educator is never told about a
+        // medical note — which is exactly the boundary their own record view has.
+        const name = await notifications.residentName(req.params.id);
+        await notifications.notifyResidentEvent(
+          {
+            type: 'medical-notes-updated',
+            title: 'Medical notes updated',
+            message: `The medical notes for ${name} were updated by ${req.user?.fullName || req.user?.username || 'staff'}. Please review them.`,
+            priority: 'Medium',
+            residentId: req.params.id,
+            relatedRecordType: 'children',
+            relatedRecordId: req.params.id,
+            actorUsername: req.user?.username || null,
+            dedupeKey: `medical-notes:${req.params.id}:${Date.now()}`,
+          },
+          { subModule: 'Medical' },
+        );
       } catch (alertError) {
         // A failed alert must not fail the save the caller already has.
         console.error('[ChildController] Medical notes alert failed (non-fatal):', alertError.message);
@@ -1117,7 +1114,11 @@ async function abscond(req, res, next) {
     await connection.commit();
 
     try {
-      const abscondEvent = {
+      // Absconding freezes the whole record, so this goes to everyone the matrix
+      // lets read the resident at all, plus the Houseparents assigned to them —
+      // the people who actually have to look for the child, and who were the only
+      // party not told before.
+      await notifications.notifyResidentEvent({
         type: 'Resident Absconded',
         title: `Resident absconded — ${child.name}`,
         message: `${req.user?.username || 'Staff'} marked ${child.name} as absconded. The record is now view-only and the Phase Timeline is frozen.`,
@@ -1126,21 +1127,7 @@ async function abscond(req, res, next) {
         relatedRecordType: 'children',
         relatedRecordId: child.id,
         actorUsername: req.user?.username || null,
-      };
-
-      const managers = await notifications.usersWithAnyRole(['centerhead', 'socialworker']);
-      if (managers.length) {
-        await notifications.notifyUsers(managers.map((u) => u.id), abscondEvent);
-      }
-
-      // The Houseparent who runs this child's daily program is the one who has to
-      // act on it, and was the only party not told — this reached the Center Head
-      // and the Social Worker alone. Addressed by id, so the caseload rule applies
-      // and a Houseparent assigned to another child never sees it.
-      const houseparents = await notifications.houseparentsOf(child.id);
-      if (houseparents.length) {
-        await notifications.notifyUsers(houseparents.map((hp) => hp.id), abscondEvent);
-      }
+      });
     } catch (notifyErr) {
       console.error('[ChildController] Abscond notification failed (non-fatal):', notifyErr.message);
     }

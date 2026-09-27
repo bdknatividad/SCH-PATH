@@ -843,18 +843,10 @@ async function create(req, res, next) {
         dedupeKey: `admission:${admissionId}:created`,
       };
 
-      const managers = await notifications.usersWithAnyRole(['centerhead', 'admin']);
-      await notifications.notifyUsers(managers.map((m) => m.id), admissionEvent);
-
-      // The Houseparent assigned to this resident runs their daily program from
-      // the day they arrive, so they are told too. Usually empty on a first
-      // admission — the Center Head creates the assignment afterwards — and
-      // populated on a re-admission, where one already exists.
-      const houseparents = await notifications.houseparentsOf(residentId);
-      await notifications.notifyUsers(
-        houseparents.map((hp) => hp.id),
-        { ...admissionEvent, dedupeKey: `admission:${admissionId}:created-houseparent` },
-      );
+      // Everyone the matrix lets read a resident's record, plus the Houseparents
+      // already assigned to them — populated on a re-admission, and usually empty
+      // on a first one, where the Center Head creates the assignment afterwards.
+      await notifications.notifyResidentEvent(admissionEvent);
     } catch (notifyErr) {
       console.error('[AdmissionController] Admission notification failed (non-fatal):', notifyErr.message);
     }
