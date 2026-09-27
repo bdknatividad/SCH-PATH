@@ -109,6 +109,8 @@ interface Overview {
   period: string;
   periodStart: string;
   periodEnd: string;
+  /** The period has not happened yet — the statistics are empty by design. */
+  periodIsFuture: boolean;
   generatedAt: string;
   residents: {
     active: number;
@@ -253,6 +255,17 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
   );
   const isCurrent = period === currentPeriod();
 
+  /**
+   * A month that has not happened yet has nothing to report.
+   *
+   * The server empties the statistics and flags it, because it owns the facility's
+   * calendar — a browser re-deriving "which month is it" from its own clock can be
+   * a day out. This only explains the empty figures; without the sentence, three
+   * zeros and two empty charts read as a broken page rather than an answer.
+   */
+  const periodIsFuture = Boolean(data?.periodIsFuture);
+  const futureNote = 'This month hasn’t happened yet — there is nothing to report for it.';
+
   /** The three schedule columns the template names, in its own order. */
   const scheduleColumns = useMemo(() => {
     const upcoming = data?.schedules?.upcoming || [];
@@ -378,25 +391,45 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
         <StatCard
           title="Total Active Residents"
           value={figure(data?.residents.active)}
-          caption={isCurrent ? 'In the facility now' : `Still in the facility at the end of ${periodLabel(period)}`}
+          caption={
+            periodIsFuture
+              ? 'Nothing to report yet'
+              : isCurrent
+                ? 'In the facility now'
+                : `Still in the facility at the end of ${periodLabel(period)}`
+          }
           icon={Users}
           onClick={() => open('/children?filter=Active')}
         />
         <StatCard
           title="Active Violations"
           value={figure(data?.violations.active)}
-          caption="Reviewed, from the Violation List"
+          caption={periodIsFuture ? 'Nothing to report yet' : 'Reviewed, from the Violation List'}
           icon={ShieldAlert}
           onClick={() => open('/violations?tab=list&status=Reviewed')}
         />
         <StatCard
           title="Discharged Residents"
           value={figure(data?.residents.discharged)}
-          caption={isCurrent ? 'Cases closed this month' : `Cases closed in ${periodLabel(period)}`}
+          caption={
+            periodIsFuture
+              ? 'Nothing to report yet'
+              : isCurrent
+                ? 'Cases closed this month'
+                : `Cases closed in ${periodLabel(period)}`
+          }
           icon={UserMinus}
           onClick={() => open('/children?filter=Discharged')}
         />
       </div>
+
+      {/* Why the three tiles and both charts are empty. A future month has no
+          facts, and without this sentence the zeros read as a broken page. */}
+      {periodIsFuture && !loading && (
+        <div className="rounded-xl border border-amber-100 bg-amber-50 px-4 py-3 text-xs text-amber-800">
+          {futureNote} Pick this month once it arrives, or choose an earlier one.
+        </div>
+      )}
 
       {/* ── Two distributions ── */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -406,7 +439,11 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
               <Calendar className="h-4 w-4 text-[#FFD100]" /> Residents by Rehabilitation Phase
             </CardTitle>
             <p className="mt-1 text-[11px] text-gray-500">
-              {isCurrent ? 'Residents in the facility now' : `Residents still in the facility at the end of ${periodLabel(period)}`}.
+              {periodIsFuture
+                ? 'Nothing to report yet.'
+                : isCurrent
+                  ? 'Residents in the facility now.'
+                  : `Residents still in the facility at the end of ${periodLabel(period)}.`}
             </p>
           </CardHeader>
           <CardContent className="pt-4">
@@ -414,7 +451,7 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
               <p className="py-4 text-center text-xs text-gray-400">Loading…</p>
             ) : (data?.residents.byPhase || []).length === 0 ? (
               <p className="py-4 text-center text-xs italic text-gray-400">
-                No residents were present in this period.
+                {periodIsFuture ? futureNote : 'No residents were present in this period.'}
               </p>
             ) : (
               <div className="space-y-2">
@@ -444,7 +481,9 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
               <ClipboardCheck className="h-4 w-4 text-[#FFD100]" /> Behavioral Status
             </CardTitle>
             <p className="mt-1 text-[11px] text-gray-500">
-              Based on finalized TRI results for {periodLabel(period)}.
+              {periodIsFuture
+                ? 'Nothing to report yet.'
+                : `Based on finalized TRI results for ${periodLabel(period)}.`}
             </p>
           </CardHeader>
           <CardContent className="pt-4">
@@ -452,7 +491,7 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
               <p className="py-4 text-center text-xs text-gray-400">Loading…</p>
             ) : behavioralTotal === 0 ? (
               <p className="py-4 text-center text-xs italic text-gray-400">
-                No residents were present in this period.
+                {periodIsFuture ? futureNote : 'No residents were present in this period.'}
               </p>
             ) : (
               <div className="space-y-2">

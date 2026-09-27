@@ -453,6 +453,25 @@ async function centerHeadOverview(req, res, next) {
     const periodMonth = Number(period.slice(5, 7));
 
     /**
+     * Is the selected period still in the future?
+     *
+     * A month that has not happened yet has no statistics, and the period
+     * predicate cannot tell: it asks whether a placement was open at the period's
+     * end, and **every currently-open placement is open at any future date**. So
+     * December reported today's population as though it were December's — a
+     * projection presented as a fact, and one discharge in October makes it wrong.
+     *
+     * Decided here rather than in the browser because "which month is it" is a
+     * fact about the facility's own calendar (`today` is already Manila), and a
+     * client re-deriving it from its own clock can be a day out.
+     *
+     * The schedule feed and the two review queues are deliberately **not** part of
+     * this: they answer "what is coming up" and "what is waiting now", which are
+     * questions about the present and stay correct whatever period is selected.
+     */
+    const periodIsFuture = period > today.slice(0, 7);
+
+    /**
      * "Was this resident still in the facility at the end of the period?"
      *
      * Presence is recorded as admission *periods* — `admissions.admissionDate`
@@ -618,6 +637,17 @@ async function centerHeadOverview(req, res, next) {
     }, {
       active: 0, discharged: 0, absconded: 0, total: 0, byPhase: [], byCaseType: [], behavioral: [],
     });
+
+    // A future period reports nothing rather than a projection. `total` and
+    // `absconded` are all-time figures the page does not draw, so they are left
+    // as they are; everything the dashboard does draw from this section is
+    // emptied, and the client explains why with `periodIsFuture`.
+    if (periodIsFuture) {
+      residents.active = 0;
+      residents.discharged = 0;
+      residents.byPhase = [];
+      residents.behavioral = BEHAVIORAL_BANDS.map((label) => ({ label, count: 0, residents: [] }));
+    }
 
     // ── Admissions ─────────────────────────────────────────────────────────
     // `admissions.status` is per admission period, not per resident: a returning
@@ -1157,6 +1187,9 @@ async function centerHeadOverview(req, res, next) {
         period,
         periodStart,
         periodEnd,
+        // True when the period has not happened yet, so the client can explain
+        // why the statistics are empty instead of showing zeros unexplained.
+        periodIsFuture,
         generatedAt: new Date().toISOString(),
         residents,
         admissions,
