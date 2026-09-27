@@ -115,7 +115,14 @@ export interface ProgressReport {
   areasForImprovement: string;
   overallDevelopment: string;
   schoolVisits: number;
-  createdAt: string;
+  /**
+   * Set when the row is created in the browser, but **not returned by the API**:
+   * `education_progress_reports` orders by `createdAt` in SQL while omitting it
+   * from its declared columns, so `mapRow` never emits it. Optional for that
+   * reason — a required field the server does not send is how a sort on it came
+   * to take the whole module down.
+   */
+  createdAt?: string;
 }
 
 // Monthly report
@@ -135,7 +142,8 @@ export interface SchoolVisitReport {
   status?: 'Scheduled' | 'Completed';
   fileName?: string;
   fileData?: string;
-  createdAt: string;
+  /** See the note on `ProgressReport.createdAt` — client-side only. */
+  createdAt?: string;
 }
 
 const STORAGE_KEY = 'educationStudents';
@@ -1400,8 +1408,14 @@ export function Education() {
             </div>
           ) : (
             <div className="space-y-2">
-              {/* Copy before sorting: .sort() mutates in place, and this array is state. */}
-              {[...visitReports].sort((a,b) => b.createdAt.localeCompare(a.createdAt)).map(r => {
+              {/* Copy before sorting: .sort() mutates in place, and this array is state.
+                  Sorted by `visitDate`, which is what this resource actually returns —
+                  `education_school_visits` does not declare `createdAt`, so it never
+                  arrives, and sorting on it threw "Cannot read properties of undefined
+                  (reading 'localeCompare')" and took the whole module down with it the
+                  moment the first visit existed. `String(... || '')` because a visit with
+                  no date must sort last rather than crash the page. */}
+              {[...visitReports].sort((a,b) => String(b.visitDate || '').localeCompare(String(a.visitDate || ''))).map(r => {
                 const student = students.find(s => s.id === r.studentId);
                 const isScheduled = (r.status ?? 'Completed') === 'Scheduled';
                 return (
