@@ -25,7 +25,6 @@ import {
   User, FileText, BookOpen, Award, X, Download, AlertCircle,
   ChevronDown, ChevronUp, Paperclip, CalendarDays, CheckCircle2,
 } from 'lucide-react';
-import { ProgramQuarterlyReports } from './QuarterlyProgressReport';
 
 // ── TYPES ────────────────────────────────────────────────────────────────────
 
@@ -1165,10 +1164,6 @@ export function Education() {
   // ── RENDER ─────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-6">
-
-      {/* Quarterly reporting starts here as well as in Reports: Education is one
-          of the programs the consolidated quarterly report reads. */}
-      <ProgramQuarterlyReports />
 
       {/* Header */}
       <div className="bg-[#2F3E46] p-6 rounded-xl shadow-md border-b-4 border-[#FFD100]">

@@ -21,7 +21,6 @@ import { usePermissions } from '@/app/hooks/usePermissions';
 import { useSystemDialog } from './SystemDialog';
 import { downloadDocumentFile } from '@/utils/documentFile';
 import { formatShortDate } from '@/utils/dateFormatter';
-import { ProgramQuarterlyReports } from './QuarterlyProgressReport';
 import { PrescriptionList } from './PrescriptionList';
 
 // ── CONSTANTS ──────────────────────────────────────────────────────────────
@@ -718,9 +717,6 @@ export function Health() {
 
   return (
     <div className="space-y-5 p-2">
-      {/* Quarterly reporting starts here as well as in Reports: Health is one of
-          the programs the consolidated quarterly report reads. */}
-      <ProgramQuarterlyReports />
       {/* HEADER */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
