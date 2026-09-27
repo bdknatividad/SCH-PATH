@@ -2063,7 +2063,7 @@ export function Tri() {
 
       {/* ── DIGITAL FORM DIALOG */}
       <Dialog open={showForm} onOpenChange={open => { if (!open) closeForm(); }}>
-        <DialogContent className="!top-0 !left-0 !h-screen !w-screen !max-h-none !max-w-none !translate-x-0 !translate-y-0 flex flex-col rounded-none bg-white p-0 overflow-hidden">
+        <DialogContent className="!top-0 !left-0 !h-[100dvh] !w-screen !max-h-none !max-w-none !translate-x-0 !translate-y-0 flex flex-col rounded-none bg-white p-0 overflow-hidden">
           {/* Official SCH Header */}
           <DialogHeader className="hidden">
             <div className="text-center space-y-1">

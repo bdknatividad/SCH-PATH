@@ -771,9 +771,15 @@ test('the record form uses the same shell as the QPR form', () => {
   const form = recordFormSource();
 
   // The QPR's full-screen dialog classes, verbatim — one layout, not two.
+  //
+  // `!h-[100dvh]`, not `!h-screen`. `100vh` is the height the viewport would
+  // have with the browser's address bar retracted, so on a phone the shell was
+  // taller than the screen and its footer — Save, Submit — sat below the fold.
+  // `dvh` tracks the visible height. The class is pinned rather than described
+  // so the two forms cannot drift apart again.
   assert.match(
     form,
-    /!top-0 !left-0 !flex !h-screen !w-screen !max-h-none !max-w-none !translate-x-0 !translate-y-0 flex-col gap-0 overflow-hidden rounded-none bg-white p-0/,
+    /!top-0 !left-0 !flex !h-\[100dvh\] !w-screen !max-h-none !max-w-none !translate-x-0 !translate-y-0 flex-col gap-0 overflow-hidden rounded-none bg-white p-0/,
     'the record form no longer uses the full-screen shell the QPR form uses'
   );
   // A toolbar naming the resident and the record, a scrollable body, one footer.

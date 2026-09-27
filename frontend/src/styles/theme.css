@@ -269,3 +269,113 @@
     scroll-padding-top: 5rem;
   }
 }
+
+/*
+ * Viewport-height units.
+ *
+ * `min-h-screen` compiles to `min-height: 100vh`, and on a phone `100vh` is the
+ * height the viewport *would* have if the browser's address bar were retracted.
+ * So every full-height page — the login screen above all — is a little taller
+ * than the screen actually is, which pushes a vertically-centred card off
+ * centre and gives the page a scroll it does not need. `dvh` tracks the real
+ * visible height as the bar collapses and expands.
+ *
+ * Declared outside `@layer base` on purpose: this has to beat the `.min-h-screen`
+ * utility, and unlayered rules win over `@layer utilities`. Wrapped in
+ * `@supports` so a browser without `dvh` keeps the `100vh` it already has.
+ */
+@supports (min-height: 100dvh) {
+  .min-h-screen {
+    min-height: 100dvh;
+  }
+}
+
+/*
+ * Touch baseline.
+ *
+ * Everything here is gated on `pointer: coarse`, so a mouse-driven desktop
+ * keeps its current density exactly — a 36px row-action button is right under a
+ * cursor and cramped under a thumb. This is the one place the whole system's
+ * tap-target floor is set, rather than a `min-h-*` added to several hundred
+ * buttons.
+ *
+ * `pointer: coarse` rather than a width breakpoint because the two are not the
+ * same question: a 1366px tablet is coarse, a 900px desktop window is fine, and
+ * it is the input device that decides how big a target needs to be.
+ *
+ * Every size below is in `px`, deliberately. This app sets
+ * `html { font-size: var(--font-size) }` with `--font-size: 14px`, so `1rem` is
+ * 14px here, not 16px — a `2.5rem` floor lands at 35px, not the 40px it reads
+ * as. A tap-target floor has to be an absolute length; expressing it in a unit
+ * whose value this file changes elsewhere is how it silently under-delivers.
+ */
+@media (pointer: coarse) {
+  /*
+    Removes the ~300ms wait for a possible double-tap-zoom before a tap is
+    delivered as a click. `manipulation` keeps pinch-zoom and scrolling, so this
+    does not disable zoom — it only stops the browser from holding the first tap
+    to see whether a second one is coming.
+  */
+  button,
+  [role='button'],
+  [role='tab'],
+  [role='menuitem'],
+  [role='option'],
+  a[href],
+  summary,
+  label[for] {
+    touch-action: manipulation;
+  }
+
+  /*
+    44px, the size both Apple's and Google's guidance converge on.
+
+    `select` and `textarea` included because the system has raw ones as well as
+    the `ui/` wrappers. `hidden` and `range` are excluded: a hidden input has no
+    box to size, and a range slider is dragged rather than tapped.
+  */
+  input:not([type='checkbox']):not([type='radio']):not([type='hidden']):not([type='file']):not([type='range']),
+  select,
+  textarea {
+    min-height: 44px;
+  }
+
+  /*
+    40px rather than 44px for buttons: several rows in this system pack three or
+    four actions side by side in a table cell, and at 44px those wrap and the
+    row height doubles. 40px is still a comfortable thumb target and keeps a
+    dense action row on one line.
+
+    Tabs are excluded deliberately. A `TabsTrigger` is `h-[calc(100%-1px)]`
+    inside a fixed-height `TabsList`, so forcing it taller would push it out of
+    its own strip.
+  */
+  button:not([data-slot='tabs-trigger']),
+  [role='button']:not([data-slot='tabs-trigger']) {
+    min-height: 40px;
+  }
+
+  /*
+    Menu items are `py-1.5 text-sm` — about 32px — and a mis-tap in a menu
+    picks the wrong action rather than doing nothing, which is the expensive
+    kind of miss.
+  */
+  [role='menuitem'],
+  [role='option'] {
+    min-height: 40px;
+  }
+
+  /*
+    Checkboxes and radios render at 16px. A thumb cannot reliably hit a 16px
+    square, and these sit in the middle of dense forms where the neighbouring
+    control is a few pixels away. 24px is the conventional mobile size and is
+    still small enough not to disturb a form's rhythm.
+  */
+  input[type='checkbox'],
+  input[type='radio'],
+  [role='checkbox'],
+  [role='radio'] {
+    min-width: 24px;
+    min-height: 24px;
+  }
+}

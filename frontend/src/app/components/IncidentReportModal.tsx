@@ -628,7 +628,7 @@ export default function IncidentReportModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent showCloseButton={false} className="!top-0 !left-0 !h-screen !w-screen !max-h-none !max-w-none !translate-x-0 !translate-y-0 rounded-none p-0 overflow-hidden flex flex-col">
+      <DialogContent showCloseButton={false} className="!top-0 !left-0 !h-[100dvh] !w-screen !max-h-none !max-w-none !translate-x-0 !translate-y-0 rounded-none p-0 overflow-hidden flex flex-col">
         <DialogHeader className="shrink-0 border-b bg-white px-4 py-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>

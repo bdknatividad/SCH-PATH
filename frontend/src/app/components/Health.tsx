@@ -1106,7 +1106,7 @@ export function Health() {
         which is what the form is for.
       */}
       <Dialog open={isFormOpen} onOpenChange={open => { if (!open) resetForm(); }}>
-        <DialogContent className="!top-0 !left-0 !flex !h-screen !w-screen !max-h-none !max-w-none !translate-x-0 !translate-y-0 flex-col gap-0 overflow-hidden rounded-none bg-white p-0">
+        <DialogContent className="!top-0 !left-0 !flex !h-[100dvh] !w-screen !max-h-none !max-w-none !translate-x-0 !translate-y-0 flex-col gap-0 overflow-hidden rounded-none bg-white p-0">
           <DialogHeader className="hidden">
             <DialogTitle>{formOption?.title || form.recordType}</DialogTitle>
             <DialogDescription>Record the findings for this resident, then save.</DialogDescription>

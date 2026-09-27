@@ -918,7 +918,7 @@ export function QuarterlyProgressReportEditor({
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose?.(); }}>
-      <DialogContent className="!top-0 !left-0 !flex !h-screen !w-screen !max-h-none !max-w-none !translate-x-0 !translate-y-0 flex-col gap-0 overflow-hidden rounded-none bg-white p-0">
+      <DialogContent className="!top-0 !left-0 !flex !h-[100dvh] !w-screen !max-h-none !max-w-none !translate-x-0 !translate-y-0 flex-col gap-0 overflow-hidden rounded-none bg-white p-0">
         <DialogHeader className="hidden">
           <DialogTitle>Quarterly Progress Report</DialogTitle>
           <DialogDescription>Fill in the six Developmental Aspects and sign.</DialogDescription>
@@ -1384,7 +1384,7 @@ export function QuarterlyProgressReportsCard({ onOpenReport }: { onOpenReport: (
                   </SelectContent>
                 </Select>
               </div>
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div className="space-y-1">
                   <Label className="text-xs font-semibold text-gray-500">Year</Label>
                   <Input value={year} onChange={(event) => setYear(event.target.value)} inputMode="numeric" className="h-10" />

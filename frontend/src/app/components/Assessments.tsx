@@ -536,7 +536,7 @@ export function Assessments() {
               </div>
               </>)}
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label className="font-bold text-[#2F3E46]">Date *</Label>
                   <Input type="date" value={formState.date} onChange={(e) => setFormState({ ...formState, date: e.target.value })} className="rounded-xl" />

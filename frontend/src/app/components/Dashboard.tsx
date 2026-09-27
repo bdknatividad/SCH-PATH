@@ -2556,7 +2556,7 @@ export function Dashboard() {
                 </div>
               ))}
 
-              <div className="grid grid-cols-2 gap-4 pt-2">
+              <div className="grid grid-cols-1 gap-4 pt-2 sm:grid-cols-2">
                 <div className="space-y-1.5">
                   <label className="text-xs font-bold text-[#2F3E46] uppercase tracking-wide">Pangalan at Lagda ng Bata</label>
                   <input type="text" placeholder="Ilagay ang pangalan" className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#FFD100]" />

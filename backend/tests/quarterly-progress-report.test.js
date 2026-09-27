@@ -1112,7 +1112,7 @@ test('the form is the report: the template PDF is rendered with inputs over it',
   );
   // Full-screen, like the TRI's form dialog — a "proper pop up form".
   assert.match(EDITOR_CODE, /<Dialog open/, 'the form must open as a dialog');
-  assert.match(EDITOR_CODE, /!h-screen !w-screen/, 'the dialog must be full-screen');
+  assert.match(EDITOR_CODE, /!h-\[100dvh\] !w-screen/, 'the dialog must be full-screen');
 });
 
 test('the overlaid inputs are positioned from the shared layout', () => {

@@ -1852,7 +1852,7 @@ export function Education() {
               <div className="bg-red-50 border border-red-200 text-red-700 text-xs px-3 py-2 rounded-lg">{quarterlyError}</div>
             )}
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="space-y-1">
                 <Label className="text-sm font-bold">Quarter *</Label>
                 <Select value={quarterlyForm.quarter} onValueChange={v => setQuarterlyForm({ ...quarterlyForm, quarter: v as any })}>
@@ -1930,7 +1930,7 @@ export function Education() {
               <Textarea value={quarterlyForm.recommendations} onChange={e => setQuarterlyForm({ ...quarterlyForm, recommendations: e.target.value })} rows={3} />
             </div>
 
-            <div className="grid grid-cols-2 gap-3 pt-2 border-t">
+            <div className="grid grid-cols-1 gap-3 border-t pt-2 sm:grid-cols-2">
               <div className="space-y-1">
                 <Label className="text-sm font-bold">Prepared By *</Label>
                 <Input value={quarterlyForm.preparedByName} onChange={e => setQuarterlyForm({ ...quarterlyForm, preparedByName: e.target.value })} placeholder="e.g. Mary Peth Lingo, LPT" />
@@ -1986,7 +1986,7 @@ export function Education() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="space-y-1">
                 <Label className="text-sm font-bold">Visit Date *</Label>
                 <Input type="date" value={visitForm.visitDate} onChange={e => setVisitForm(p => ({...p, visitDate: e.target.value}))} />

@@ -6,7 +6,7 @@
  * "Houseparent Module UI — cramped, overlapping layout."
  *
  * The Houseparent module is `/tri`, and its editor is a **full-screen** dialog
- * (`!top-0 !left-0 !h-screen !w-screen`). Inside it the form is a `flex-1`
+ * (`!top-0 !left-0 !h-[100dvh] !w-screen`). Inside it the form is a `flex-1`
  * scroll area, so the scroll area's bottom edge is exactly the footer's top
  * edge — the footer holds Save Draft and Save & Submit.
  *
@@ -66,7 +66,7 @@ test('the full-screen TRI editor is a column whose form area is the flexible row
   // below has to be revisited rather than trusted.
   assert.match(
     TRI,
-    /!h-screen[^"]*flex flex-col/,
+    /!h-\[100dvh\][^"]*flex flex-col/,
     'the TRI editor is no longer a full-screen flex column, so the footer no longer sits under the form',
   );
   assert.match(

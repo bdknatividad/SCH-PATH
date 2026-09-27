@@ -595,7 +595,7 @@ export default function ViolationGuide() {
                                 </div>
 
                                 {selectedType?.requiresDuration && (
-                                  <div className="mt-2 grid grid-cols-2 gap-2">
+                                  <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
                                     <div className="space-y-1">
                                       <Label className="text-xs">Duration *</Label>
                                       <Input inputMode="numeric" value={row.duration} onChange={(e) => updateLevel(key, index, { duration: e.target.value.replace(/\D/g, '') })} placeholder="e.g. 2" className="h-9 text-xs" />

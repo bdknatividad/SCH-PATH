@@ -44,7 +44,7 @@ export default function ActivityDetail() {
   // 4. Loading State UI
   if (loading) {
     return (
-      <div className="flex h-screen items-center justify-center bg-gray-50">
+      <div className="flex min-h-[100dvh] items-center justify-center bg-gray-50">
         <div className="text-center space-y-4">
           <div className="w-12 h-12 border-4 border-[#2F3E46] border-t-transparent rounded-full animate-spin mx-auto"></div>
           <p className="font-bold text-[#2F3E46] animate-pulse">Loading Activity Details...</p>
@@ -56,7 +56,7 @@ export default function ActivityDetail() {
   // 5. Error State UI: Kapag talagang walang nahanap na record
   if (!activity) {
     return (
-      <div className="h-screen flex flex-col items-center justify-center p-6 text-center">
+      <div className="flex min-h-[100dvh] flex-col items-center justify-center p-6 text-center">
         <AlertCircle size={48} className="text-red-500 mb-4" />
         <h2 className="text-2xl font-bold text-[#2F3E46]">Activity Not Found</h2>
         <p className="text-gray-500 mb-6">Maaaring nabura na ang record na ito o mali ang URL.</p>

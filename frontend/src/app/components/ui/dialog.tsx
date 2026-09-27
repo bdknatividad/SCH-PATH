@@ -60,7 +60,28 @@ function DialogContent({
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(
-          "bg-background data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-lg border p-6 shadow-lg duration-200 sm:max-w-lg",
+          "bg-background data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 overflow-y-auto overscroll-contain rounded-lg border p-4 shadow-lg duration-200 sm:max-w-lg sm:p-6",
+          /*
+            `max-h` + `overflow-y-auto` are what keep a tall dialog usable.
+
+            The box is centred with `top-[50%] translate-y-[-50%]`, so a dialog
+            whose content is taller than the screen overflows BOTH edges at
+            once: the title and the action row leave the viewport together, and
+            nothing scrolls, because the box itself is not a scroll container.
+            Only ~25 of the dialogs in this app set a `max-h` of their own, so
+            without a default the long ones — every multi-field form, the
+            document previews, the report editors — put their Save button
+            somewhere the user cannot reach.
+
+            `100dvh`, not `100vh`: on a phone `100vh` is the height the viewport
+            would have if the address bar were hidden, so a `100vh` cap is still
+            taller than what the user can see.
+
+            Both are defaults, not overrides. `cn()` merges through
+            tailwind-merge, so a dialog that passes its own `max-h-[90vh]` or
+            its own `overflow-*` keeps it.
+          */
+          "max-h-[calc(100dvh-2rem)]",
           className,
         )}
         // Keeps this dialog clickable when another modal is open behind it —
