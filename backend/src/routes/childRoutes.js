@@ -8,7 +8,7 @@ const express = require('express');
 const router = express.Router();
 const childController = require('../controllers/childController');
 const { asyncHandler } = require('../middleware/errorHandler');
-const { requirePermission, requireSubModule } = require('../middleware/rbac');
+const { requirePermission } = require('../middleware/rbac');
 
 /**
  * GET /api/children
@@ -47,16 +47,13 @@ router.post(
  * GET /api/children/:id/education
  * The Education module's record for one resident — the Child Records Education tab.
  *
- * Gated on the Child Records **Education** submodule, which is that tab's own
- * gate, rather than on the Education module: the Social Worker may open the tab
- * and holds no Education module, and gating on the module would render the tab
- * empty for a role the matrix says may read it.
+ * Deliberately ungated here: who may read it depends on *which* resident is being
+ * asked about, so the check lives in the handler — the Child Records Education
+ * submodule, or a caseload-scoped caller asking about their own resident. A
+ * route-level module gate refuses a Houseparent, who holds no Child Records
+ * module yet is given an Education tab on the resident page.
  */
-router.get(
-  '/:id/education',
-  requireSubModule('Child Records', 'Education'),
-  asyncHandler(childController.educationForResident),
-);
+router.get('/:id/education', asyncHandler(childController.educationForResident));
 
 /**
  * POST /api/children/:id/toggle-psych-assessment

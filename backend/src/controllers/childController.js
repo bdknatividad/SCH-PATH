@@ -16,7 +16,7 @@ const {
 const { ApiError } = require('../middleware/errorHandler');
 const { PHASE_REQUIREMENTS, RESOURCES } = require('../utils/constants');
 const { canAccessResident } = require('./assignmentController');
-const { assignedResidentIds } = require('../utils/residentScope');
+const { assignedResidentIds, loadResidentScope } = require('../utils/residentScope');
 const { loadDocumentScope, documentVisibleTo } = require('./documentController');
 const { isManager, normalizeRole } = require('../utils/authorization');
 const notifications = require('../services/notificationService');
@@ -1158,10 +1158,20 @@ async function abscond(req, res, next) {
  * could match the wrong resident when two shared a name. This answers from the
  * database, so the tab shows the same thing to everyone who may read it.
  *
- * Gated on the Child Records **Education** submodule rather than on the Education
- * module, because that submodule is the tab's own gate: the Social Worker may
- * open the tab and holds no Education module, and the alternative is a tab that
- * renders nothing for a role the matrix says may read it.
+ * Gated in the handler rather than at the route, because the answer depends on
+ * *which* resident is being asked about:
+ *
+ *   - anyone holding the Child Records **Education** submodule — the Educator, the
+ *     Social Worker and the full-access roles. That submodule is the tab's own
+ *     gate, so gating on the Education module instead would render the tab empty
+ *     for the Social Worker, who may read it and holds no Education module;
+ *   - a caseload-scoped caller (a Houseparent) for a resident on their own case
+ *     load. A Houseparent holds no Child Records module at all, yet the resident
+ *     page deliberately gives them an Education tab — gating on the submodule
+ *     alone left that tab permanently unable to load.
+ *
+ * A role with neither is refused. The route carries no module gate, so this check
+ * is the only boundary and has to stay.
  *
  * Each table is read defensively. The two secondary ones are created lazily by
  * the Education module, and a missing table must degrade that section rather than
@@ -1171,6 +1181,15 @@ async function educationForResident(req, res, next) {
   try {
     const residentId = String(req.params.id || '').trim();
     if (!residentId) throw new ApiError(400, 'A resident id is required.');
+
+    const snapshot = buildAccessSnapshot(req.user);
+    const holdsEducationTab = hasSubModuleAccess(snapshot, 'Child Records', 'Education');
+    // `null` means the role has no caseload concept — not "no restriction".
+    const caseload = await loadResidentScope(req.user);
+    const inCaseload = caseload !== null && caseload.includes(residentId);
+    if (!holdsEducationTab && !inCaseload) {
+      throw new ApiError(403, 'You do not have access to this resident’s education record.');
+    }
 
     const rowsFor = async (label, sql) => {
       try {

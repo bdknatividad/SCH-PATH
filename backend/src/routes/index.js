@@ -501,12 +501,34 @@ async function requireResidentInCare(req, res, next) {
  * Fire-and-forget, and it never fails the request: a notification that cannot be
  * written is not a reason to lose the learner.
  */
-function notifyEducationWrite(label, { alsoHouseparent = false } = {}) {
+/**
+ * What the caller actually did, where the route alone cannot say.
+ *
+ * The Education module's "Passed / Failed" buttons file a row into
+ * `education-progress-reports` with the subject "General Evaluation". Labelling
+ * that "filed a progress report" named the table rather than the action, so the
+ * Center Head was told about paperwork when what had happened was an evaluation.
+ *
+ * Keyed on the subject the module writes, which is the only marker the payload
+ * carries. If that string ever changes, this returns `null` and the notification
+ * falls back to the route's own label rather than saying something wrong.
+ */
+function educationActionLabel(req) {
+  const body = req.body || {};
+  if (String(body.subject || '').trim().toLowerCase() !== 'general evaluation') return null;
+  const result = String(body.result || '').trim();
+  return result === 'Passed' || result === 'Failed'
+    ? `evaluated a learner as ${result}`
+    : 'recorded an education evaluation';
+}
+
+function notifyEducationWrite(fallbackLabel, { alsoHouseparent = false } = {}) {
   return (req, res, next) => {
     res.on('finish', () => {
       if (res.statusCode >= 400) return;
       const actor = req.user?.username || null;
       const residentId = req.body?.residentId || null;
+      const label = educationActionLabel(req) || fallbackLabel;
       void (async () => {
         try {
           const name = residentId ? await notifications.residentName(residentId) : null;
