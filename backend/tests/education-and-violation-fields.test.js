@@ -161,8 +161,14 @@ test('the quarterly report is scoped to an educator own learners, and fails open
     /\? students\.filter\(s => !s\.createdBy \|\| s\.createdBy === user\?\.username\)/,
     'a learner with no recorded creator must stay visible'
   );
-  // The dropdown the report is filed from uses the pool, not the whole roll.
-  assert.match(EDUCATION_UI, /\{quarterlyLearnerPool\.filter\(s => s\.status === 'Active'\)\.map\(s => \(/);
+  // The dropdown the report is filed from uses the pool, not the whole roll —
+  // and, since 2026-09-27, not the learners whose resident has left either: the
+  // Educator stops filing progress for a discharged child, who stays on the roll
+  // as history and is reachable through the master list's Past learners view.
+  assert.match(
+    EDUCATION_UI,
+    /\{quarterlyLearnerPool\.filter\(s => s\.status === 'Active' && !isPastLearner\(s\)\)\.map\(s => \(/
+  );
   // An empty pool explains itself rather than showing a blank list.
   assert.match(EDUCATION_UI, /No active learners are assigned to you\./);
 });

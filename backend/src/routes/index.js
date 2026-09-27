@@ -12,6 +12,7 @@ const { mapRow, generateId } = require('../utils/helpers');
 const { authenticate, authorize } = require('../middleware/auth');
 const { snapshotFor, requireModule, requirePermission } = require('../middleware/rbac');
 const { requireEducationPlacement } = require('../middleware/validation');
+const { ApiError } = require('../middleware/errorHandler');
 const { hasModuleAccess } = require('../config/rbac');
 // `sortRows` is shared so `/store` orders wide-row resources the same way
 // `baseController.getAll` does instead of asking MySQL to filesort them.
@@ -451,33 +452,68 @@ const educationResources = {
  * read/create/edit but not delete (the Educator's specification: "view, create
  * and edit Education Records") cannot delete a record through the API.
  */
+/**
+ * Education progress may only be filed for a resident who is still in care.
+ *
+ * The Educator's specification is explicit that the role stops handling a
+ * child's educational progress once the child is out: at discharge the learner is
+ * endorsed back to their school, and the record becomes history the module no
+ * longer works. The Education page's pickers already hide a discharged resident —
+ * this is the same rule where it can actually be enforced, because hiding a
+ * control is not a boundary.
+ *
+ * Keyed on the resident the write names, so it follows the record rather than the
+ * screen. A write that names no resident passes: there is nothing to check, and
+ * refusing it would break a caller that files a record before linking it.
+ *
+ * Create only. Correcting a value on an existing record is maintenance of
+ * history rather than new progress, and the role keeps its Education:edit for it.
+ */
+async function requireResidentInCare(req, res, next) {
+  try {
+    const residentId = req.body?.residentId;
+    if (!residentId) return next();
+    const [rows] = await pool.query('SELECT status FROM children WHERE id = ?', [residentId]);
+    const status = rows?.[0]?.status;
+    if (status === 'Discharged' || status === 'Absconded') {
+      throw new ApiError(
+        409,
+        `This resident is ${String(status).toLowerCase()}, so they are no longer on the Education roll. Their record is kept for history.`,
+      );
+    }
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+}
+
 const educationModule = requireModule('Education');
 
 router.use('/education-records', authenticate, educationModule);
 router.get('/education-records', educationResources.educationRecords.getAll);
 router.get('/education-records/:id', educationResources.educationRecords.getById);
-router.post('/education-records', requirePermission('Education', 'create'), requireEducationPlacement, educationResources.educationRecords.create);
+router.post('/education-records', requirePermission('Education', 'create'), requireResidentInCare, requireEducationPlacement, educationResources.educationRecords.create);
 router.put('/education-records/:id', requirePermission('Education', 'edit'), requireEducationPlacement, educationResources.educationRecords.update);
 router.delete('/education-records/:id', requirePermission('Education', 'delete'), educationResources.educationRecords.delete);
 
 router.use('/education-progress-reports', authenticate, educationModule);
 router.get('/education-progress-reports', educationResources.educationProgressReports.getAll);
 router.get('/education-progress-reports/:id', educationResources.educationProgressReports.getById);
-router.post('/education-progress-reports', requirePermission('Education', 'create'), educationResources.educationProgressReports.create);
+router.post('/education-progress-reports', requirePermission('Education', 'create'), requireResidentInCare, educationResources.educationProgressReports.create);
 router.put('/education-progress-reports/:id', requirePermission('Education', 'edit'), educationResources.educationProgressReports.update);
 router.delete('/education-progress-reports/:id', requirePermission('Education', 'delete'), educationResources.educationProgressReports.delete);
 
 router.use('/education-school-visits', authenticate, educationModule);
 router.get('/education-school-visits', educationResources.educationSchoolVisits.getAll);
 router.get('/education-school-visits/:id', educationResources.educationSchoolVisits.getById);
-router.post('/education-school-visits', requirePermission('Education', 'create'), educationResources.educationSchoolVisits.create);
+router.post('/education-school-visits', requirePermission('Education', 'create'), requireResidentInCare, educationResources.educationSchoolVisits.create);
 router.put('/education-school-visits/:id', requirePermission('Education', 'edit'), educationResources.educationSchoolVisits.update);
 router.delete('/education-school-visits/:id', requirePermission('Education', 'delete'), educationResources.educationSchoolVisits.delete);
 
 router.use('/education-monthly-reports', authenticate, educationModule);
 router.get('/education-monthly-reports', educationResources.educationMonthlyReports.getAll);
 router.get('/education-monthly-reports/:id', educationResources.educationMonthlyReports.getById);
-router.post('/education-monthly-reports', requirePermission('Education', 'create'), educationResources.educationMonthlyReports.create);
+router.post('/education-monthly-reports', requirePermission('Education', 'create'), requireResidentInCare, educationResources.educationMonthlyReports.create);
 router.put('/education-monthly-reports/:id', requirePermission('Education', 'edit'), educationResources.educationMonthlyReports.update);
 router.delete('/education-monthly-reports/:id', requirePermission('Education', 'delete'), educationResources.educationMonthlyReports.delete);
 

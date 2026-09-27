@@ -479,9 +479,45 @@ export function Education() {
   const [students, setStudents] = useState<Student[]>(() => loadStudents());
   const [searchTerm, setSearchTerm] = useState('');
   const [activeLevel, setActiveLevel] = useState<'all' | EducationLevel>('all');
+  /**
+   * Which half of the roll the master list is showing.
+   *
+   * The working view is the children still in the shelter. A learner whose
+   * resident has been discharged stays in the database — the record is the history
+   * of that stay, and the Documents tab and the Reports point at it — but the
+   * Educator no longer files progress for them. They are one click away rather
+   * than gone, which is what "look back at past learners" asks for.
+   */
+  const [rosterView, setRosterView] = useState<'current' | 'past'>('current');
   const { children: residents, documents, addDocument } = useData();
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState('masterlist');
+
+  /**
+   * A learner whose resident is no longer in the shelter.
+   *
+   * Derived from the resident's own status rather than a flag on the education
+   * record: the resident is already the authority on whether a child is here, and
+   * a second copy of that is how the two come to disagree. A record with no
+   * `residentId` is never treated as past — an unknown is not an answer, and
+   * hiding a learner on a guess is worse than showing one who has left.
+   *
+   * Declared here, above every consumer: `totalLearners` and the quarterly pool
+   * both filter on it, and a `const` arrow referenced before its declaration
+   * throws at run time even though the call sits inside a callback, where the
+   * type checker cannot see it.
+   */
+  const isPastLearner = (student: Student) => {
+    if (!student.residentId) return false;
+    const status = residents.find(r => r.id === student.residentId)?.status;
+    return status === 'Discharged' || status === 'Absconded';
+  };
+
+  const pastLearnerCount = students.filter(isPastLearner).length;
+  const currentLearnerCount = students.length - pastLearnerCount;
+
+  /** The half of the roll the master list is showing, before search and level. */
+  const rosterStudents = students.filter(s => (rosterView === 'past') === isPastLearner(s));
 
   // Student dialog
   const [isStudentDialogOpen, setIsStudentDialogOpen] = useState(false);
@@ -810,7 +846,7 @@ export function Education() {
   };
 
   // Stats
-  const totalLearners = students.filter(s => s.status === 'Active').length;
+  const totalLearners = students.filter(s => s.status === 'Active' && !isPastLearner(s)).length;
   const totalVisits = visitReports.length; // each report = 1 visit
 
 
@@ -1095,7 +1131,7 @@ export function Education() {
   };
 
   // ── FILTER ────────────────────────────────────────────────────────────────
-  const filtered = students.filter(s => {
+  const filtered = rosterStudents.filter(s => {
     const matchSearch =
       s.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       s.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -1234,12 +1270,33 @@ export function Education() {
       {/* Main Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="mb-2 w-full flex">
-          <TabsTrigger value="masterlist" className="flex-1">Student Master List ({students.length})</TabsTrigger>
+          <TabsTrigger value="masterlist" className="flex-1">Student Master List ({currentLearnerCount})</TabsTrigger>
           <TabsTrigger value="visits" className="flex-1">School Visits</TabsTrigger>
         </TabsList>
 
         {/* MASTER LIST */}
         <TabsContent value="masterlist">
+          {/* Current / Past. The working view is the children still in the
+              shelter; a discharged learner stays in the database as history and
+              is one click away rather than gone. */}
+          <div className="mb-3 inline-flex rounded-lg border border-gray-200 p-0.5">
+            {([
+              ['current', `Current (${currentLearnerCount})`],
+              ['past', `Past learners (${pastLearnerCount})`],
+            ] as const).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setRosterView(key)}
+                className={`rounded-md px-3 py-1.5 text-xs font-bold transition-colors ${
+                  rosterView === key ? 'bg-[#2F3E46] text-white' : 'text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
           {/* Level filter pills */}
           <div className="flex flex-wrap gap-2 mb-4">
             <button
@@ -1250,11 +1307,11 @@ export function Education() {
                   : 'border-gray-200 text-gray-600 hover:border-[#2F3E46]'
               }`}
             >
-              All ({students.length})
+              All ({rosterStudents.length})
             </button>
             {EDUCATION_LEVELS.map(lvl => {
               const c = LEVEL_COLORS[lvl];
-              const count = students.filter(s => s.educationLevel === lvl).length;
+              const count = rosterStudents.filter(s => s.educationLevel === lvl).length;
               return (
                 <button
                   key={lvl}
@@ -1317,9 +1374,9 @@ export function Education() {
           </div>
 
           {/* Per-student visit count */}
-          {students.filter(s => s.status === 'Active').length > 0 && (
+          {students.filter(s => s.status === 'Active' && !isPastLearner(s)).length > 0 && (
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-              {students.filter(s => s.status === 'Active').map(s => {
+              {students.filter(s => s.status === 'Active' && !isPastLearner(s)).map(s => {
                 const count = visitReports.filter(v => v.studentId === s.id && (v.status ?? 'Completed') === 'Completed').length;
                 return (
                   <div key={s.id} className="p-3 border border-gray-200 rounded-xl bg-white flex items-center gap-3">
@@ -1803,7 +1860,7 @@ export function Education() {
               <Select value={progressStudent?.id || ''} onValueChange={id => setProgressStudent(students.find(s => s.id === id) || null)}>
                 <SelectTrigger><SelectValue placeholder="Select learner..." /></SelectTrigger>
                 <SelectContent>
-                  {students.filter(s => s.status === 'Active').map(s => (
+                  {students.filter(s => s.status === 'Active' && !isPastLearner(s)).map(s => (
                     <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
                   ))}
                 </SelectContent>
@@ -1877,10 +1934,10 @@ export function Education() {
               >
                 <SelectTrigger><SelectValue placeholder="Select learner..." /></SelectTrigger>
                 <SelectContent>
-                  {quarterlyLearnerPool.filter(s => s.status === 'Active').map(s => (
+                  {quarterlyLearnerPool.filter(s => s.status === 'Active' && !isPastLearner(s)).map(s => (
                     <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
                   ))}
-                  {quarterlyLearnerPool.filter(s => s.status === 'Active').length === 0 && (
+                  {quarterlyLearnerPool.filter(s => s.status === 'Active' && !isPastLearner(s)).length === 0 && (
                     <div className="px-3 py-2 text-xs text-gray-500">No active learners are assigned to you.</div>
                   )}
                 </SelectContent>
@@ -1975,7 +2032,7 @@ export function Education() {
               <Select value={visitForm.studentId} onValueChange={v => setVisitForm(p => ({...p, studentId: v}))}>
                 <SelectTrigger><SelectValue placeholder="Select learner..." /></SelectTrigger>
                 <SelectContent>
-                  {students.filter(s => s.status === 'Active').map(s => (
+                  {students.filter(s => s.status === 'Active' && !isPastLearner(s)).map(s => (
                     <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
                   ))}
                 </SelectContent>
