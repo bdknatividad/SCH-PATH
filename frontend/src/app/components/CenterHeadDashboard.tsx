@@ -20,13 +20,29 @@
  * per-record route (Court Records, Education), the link opens the module with the
  * relevant tab selected rather than pretending a detail page exists.
  *
- * Layout, top to bottom:
+ * ## Charts
+ *
+ * Four charts, each drawn from a distribution the server already returns. No
+ * series is invented to fill a hole, and a chart whose data is empty is replaced
+ * by a sentence rather than drawn flat:
+ *
+ *   Rehabilitation phase    horizontal bars   `residents.byPhase`
+ *   Behavioural status      donut             `residents.behavioral`
+ *   Violations by severity  donut             `violations.bySeverity`
+ *   Workload by kind        stacked bars      `schedules.*Counts`
+ *
+ * Case type is a bar list rather than a chart: its labels are free text typed by
+ * staff, so a chart axis would clip them. Recharts animation is off — this page
+ * re-reads itself every minute and whenever the window regains focus, and
+ * re-animating four charts on every read is noise.
+ *
+ * ## Layout, top to bottom
  *   1. Command bar      — who this is, when it was read, manual refresh
- *   2. Action Center    — the summary strip, then what is waiting and on what
- *   3. Facility status  — one band, not six competing cards
- *   4. Timeline         — Today | Upcoming | Overdue, the same feed split three ways
- *   5. Residents        — rehabilitation phase, behavioural status, case type
- *   6. Violations and recent admissions
+ *   2. KPI strip        — six facility numbers, one band
+ *   3. Action Center    — the decision queue as a table, and what is late
+ *   4. Residents        — three cuts of one population
+ *   5. Schedule         — workload chart, then Today | Upcoming | Overdue tables
+ *   6. Violations and admissions
  *   7. TRI statistics, reused from the TRI module
  */
 
@@ -35,9 +51,13 @@ import { useNavigate } from 'react-router-dom';
 import {
   Users, UserPlus, UserMinus, Calendar, CalendarClock, AlertTriangle,
   FileText, ClipboardCheck, ClipboardList, Clock, Gavel, GraduationCap,
-  ShieldAlert, RefreshCw, Inbox, Scale, ChevronRight,
-  BookOpen, Stethoscope, ListChecks, Hourglass, CheckCircle2,
+  ShieldAlert, RefreshCw, Inbox, Scale, ChevronRight, Landmark,
+  BookOpen, Stethoscope, ListChecks, Hourglass, CheckCircle2, ChartColumn,
 } from 'lucide-react';
+import {
+  PieChart, Pie, Cell, ResponsiveContainer, BarChart,
+  Bar as RechartsBar, XAxis, YAxis, Tooltip as RechartsTooltip,
+} from 'recharts';
 import { useAuth } from '../state/AuthContext';
 import { request } from '@/services/api';
 import { TriStatistics } from './TriStatistics';
@@ -195,8 +215,26 @@ interface Overview {
 
 // ── PRESENTATION PRIMITIVES ─────────────────────────────────────────────────
 
+/** The two brand colours the rest of the app is built from. */
 const INK = '#2F3E46';
 const ACCENT = '#FFD100';
+
+/** Every surface on the page. One shadow, so nothing looks a shade deeper. */
+const SURFACE = 'rounded-xl border border-gray-200 bg-white shadow-[0_1px_2px_rgba(16,24,40,0.04)]';
+
+/** The one tooltip shape, shared by all four charts. */
+const TOOLTIP_STYLE = {
+  contentStyle: {
+    borderRadius: 10,
+    border: '1px solid #e5e7eb',
+    boxShadow: '0 6px 16px rgba(16,24,40,0.10)',
+    fontSize: 11,
+    padding: '6px 10px',
+    backgroundColor: '#ffffff',
+  },
+  labelStyle: { color: INK, fontWeight: 700, fontSize: 11, marginBottom: 2 },
+  itemStyle: { color: '#374151', fontSize: 11, padding: 0 },
+};
 
 type Tone = 'danger' | 'warn' | 'info' | 'ok' | 'muted' | 'review';
 
@@ -245,7 +283,7 @@ function statusTone(status?: string | null): Tone {
   }
 }
 
-/** "Today" / "Tomorrow" / "In 4 days" / "6 days overdue". */
+/** "Today" / "Tomorrow" / "In 4 days" / "6 days late". */
 function relativeLabel(days: number): string {
   if (days === 0) return 'Today';
   if (days === 1) return 'Tomorrow';
@@ -305,13 +343,13 @@ function daysAgo(value?: string | null): number | null {
   return Math.max(0, Math.floor((Date.now() - parsed.getTime()) / 86400000));
 }
 
-/** "waiting 3 days" / "waiting today" — the age of a queued item. */
+/** "3 days waiting" — the age of a queued item. Null when it has no timestamp. */
 function waitingLabel(value?: string | null): string | null {
   const days = daysAgo(value);
   if (days === null) return null;
-  if (days === 0) return 'since today';
-  if (days === 1) return '1 day waiting';
-  return `${days} days waiting`;
+  if (days === 0) return 'today';
+  if (days === 1) return '1 day';
+  return `${days} days`;
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -320,12 +358,19 @@ function monthName(month?: number | null): string {
   return Number.isFinite(index) && index >= 1 && index <= 12 ? MONTHS[index - 1] : '';
 }
 
+/** The percentage of a whole, rounded. Zero total reads 0, never NaN. */
+function percentOf(count: number, total: number): number {
+  return total > 0 ? Math.round((count / total) * 100) : 0;
+}
+
+// ── SHELL ───────────────────────────────────────────────────────────────────
+
 /**
  * A section. Fewer, larger surfaces rather than a wall of small boxes: the page
  * has six sections, not sixteen cards.
  */
 function Section({
-  icon: Icon, title, subtitle, action, children, className = '',
+  icon: Icon, title, subtitle, action, children, className = '', bodyClassName = 'p-5',
 }: {
   icon: React.ComponentType<{ className?: string }>;
   title: string;
@@ -333,31 +378,46 @@ function Section({
   action?: React.ReactNode;
   children: React.ReactNode;
   className?: string;
+  bodyClassName?: string;
 }) {
   return (
-    <section className={`flex flex-col rounded-2xl border border-gray-200/80 bg-white shadow-[0_1px_2px_rgba(47,62,70,0.04)] ${className}`}>
-      <header className="flex items-start justify-between gap-3 border-b border-gray-100 px-5 py-3.5">
+    <section className={`flex flex-col ${SURFACE} ${className}`}>
+      <header className="flex flex-wrap items-start justify-between gap-3 border-b border-gray-100 px-5 py-3.5">
         <div className="flex min-w-0 items-start gap-3">
-          <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl" style={{ backgroundColor: `${ACCENT}26` }}>
-            <Icon className="h-4 w-4 text-[#2F3E46]" />
+          <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg" style={{ backgroundColor: `${ACCENT}2E` }}>
+            <Icon className="h-4 w-4" />
           </span>
           <div className="min-w-0">
             <h3 className="truncate text-sm font-bold" style={{ color: INK }}>{title}</h3>
-            {subtitle && <p className="mt-0.5 text-[11px] leading-tight text-gray-500">{subtitle}</p>}
+            {subtitle && <p className="mt-0.5 text-[11px] leading-snug text-gray-500">{subtitle}</p>}
           </div>
         </div>
         {action}
       </header>
-      <div className="flex-1 p-5">{children}</div>
+      <div className={`flex-1 ${bodyClassName}`}>{children}</div>
     </section>
+  );
+}
+
+/** The small "Open …" link a section header carries. */
+function SectionLink({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="shrink-0 self-center rounded-lg border border-gray-200 px-2.5 py-1 text-[11px] font-bold transition-colors hover:border-[#FFD100] hover:bg-[#FFD100]/15"
+      style={{ color: INK }}
+    >
+      {label}
+    </button>
   );
 }
 
 /** A group heading inside a section — "Today", "Awaiting a decision". */
 function GroupHeading({ label, count, tone = 'muted', children }: { label: string; count?: number; tone?: Tone; children?: React.ReactNode }) {
   return (
-    <div className="mb-2 flex items-center justify-between gap-2">
-      <h4 className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-gray-500">
+    <div className="mb-2.5 flex items-center justify-between gap-2">
+      <h4 className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-500">
         {tone !== 'muted' && <span className={`h-1.5 w-1.5 rounded-full ${TONE[tone].dot}`} />}
         {label}
       </h4>
@@ -372,7 +432,7 @@ function GroupHeading({ label, count, tone = 'muted', children }: { label: strin
 }
 
 function Empty({ children }: { children: React.ReactNode }) {
-  return <p className="py-4 text-center text-xs italic text-gray-400">{children}</p>;
+  return <p className="py-5 text-center text-[11px] italic text-gray-400">{children}</p>;
 }
 
 /** The all-clear state. Deliberately calm, never a bare zero. */
@@ -385,29 +445,166 @@ function Clear({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** A row that navigates somewhere. Used for every list on the page. */
-function Row({
-  onClick, children, className = '', tone,
-}: {
-  onClick: () => void;
-  children: React.ReactNode;
-  className?: string;
-  tone?: Tone;
-}) {
+// ── TABLE PRIMITIVES ────────────────────────────────────────────────────────
+// The markup the rest of the app's tables use (Violations, Child Records), so a
+// Center Head reading this page and then a module sees the same table.
+
+function Th({ children, className = '' }: { children?: React.ReactNode; className?: string }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`group flex w-full items-center gap-3 rounded-xl border border-transparent px-2.5 py-2 text-left transition-colors hover:border-[#FFD100] hover:bg-[#FFD100]/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#FFD100] ${className}`}
-    >
-      {tone && <span className={`h-8 w-1 shrink-0 rounded-full ${TONE[tone].dot}`} />}
+    <th scope="col" className={`whitespace-nowrap px-3 py-2 text-left text-[10px] font-bold uppercase tracking-wider text-gray-500 ${className}`}>
       {children}
-      <ChevronRight className="h-4 w-4 shrink-0 text-gray-300 transition-colors group-hover:text-[#2F3E46]" />
-    </button>
+    </th>
   );
 }
 
-/** One metric in the facility band. */
+function Td({
+  children, className = '', style, title,
+}: {
+  children?: React.ReactNode;
+  className?: string;
+  style?: React.CSSProperties;
+  title?: string;
+}) {
+  return (
+    <td style={style} title={title} className={`px-3 py-2.5 align-middle text-xs text-gray-600 ${className}`}>
+      {children}
+    </td>
+  );
+}
+
+/** A table row that navigates. Every list on the page is one of these. */
+function Tr({ onClick, children, title }: { onClick: () => void; children: React.ReactNode; title?: string }) {
+  return (
+    <tr
+      onClick={onClick}
+      title={title}
+      className="cursor-pointer border-b border-gray-100 transition-colors last:border-0 hover:bg-[#FFD100]/10"
+    >
+      {children}
+    </tr>
+  );
+}
+
+/** The scroll shell every table sits in, so a narrow screen scrolls not squashes. */
+function TableShell({ minWidth, children }: { minWidth: string; children: React.ReactNode }) {
+  return (
+    <div className="-mx-5 overflow-x-auto px-5">
+      <table className="w-full border-collapse text-left text-sm" style={{ minWidth }}>
+        {children}
+      </table>
+    </div>
+  );
+}
+
+/** The trailing chevron cell, so every clickable row ends the same way. */
+function GoCell() {
+  return (
+    <Td className="w-8 pr-2 text-right">
+      <ChevronRight className="ml-auto h-4 w-4 text-gray-300" />
+    </Td>
+  );
+}
+
+// ── CHART PRIMITIVES ────────────────────────────────────────────────────────
+
+/** A labelled slice of the whole. `rows` is a server distribution, unmodified. */
+function Donut({
+  rows, colors, unit, onPick,
+}: {
+  rows: { label: string; count: number }[];
+  colors: Record<string, string>;
+  unit: string;
+  onPick: () => void;
+}) {
+  const total = rows.reduce((sum, row) => sum + row.count, 0);
+  const drawn = rows.filter((row) => row.count > 0);
+  if (total === 0) return <Empty>Nothing to chart yet.</Empty>;
+
+  return (
+    <div className="flex min-w-0 items-center gap-4">
+      <div className="relative h-[132px] w-[132px] shrink-0">
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart>
+            <Pie
+              data={drawn}
+              dataKey="count"
+              nameKey="label"
+              innerRadius={41}
+              outerRadius={64}
+              paddingAngle={2}
+              stroke="#ffffff"
+              strokeWidth={2}
+              isAnimationActive={false}
+            >
+              {drawn.map((row) => (
+                <Cell key={row.label} fill={colors[row.label] || '#9ca3af'} />
+              ))}
+            </Pie>
+            <RechartsTooltip
+              {...TOOLTIP_STYLE}
+              formatter={(value: number | string) => `${value} ${unit}`}
+            />
+          </PieChart>
+        </ResponsiveContainer>
+        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+          <span className="text-[22px] font-bold leading-none tabular-nums" style={{ color: INK }}>{total}</span>
+          <span className="mt-1 text-[9px] font-bold uppercase tracking-wider text-gray-400">Total</span>
+        </div>
+      </div>
+
+      <ul className="min-w-0 flex-1 space-y-0.5">
+        {rows.map((row) => (
+          <li key={row.label}>
+            <button
+              type="button"
+              onClick={onPick}
+              className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-[#FFD100]/15"
+            >
+              <span className="h-2 w-2 shrink-0 rounded-sm" style={{ backgroundColor: colors[row.label] || '#9ca3af' }} />
+              <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-gray-600">{row.label}</span>
+              <span className="shrink-0 text-[11px] font-bold tabular-nums" style={{ color: INK }}>{row.count}</span>
+              <span className="w-8 shrink-0 text-right text-[10px] tabular-nums text-gray-400">{percentOf(row.count, total)}%</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** A horizontal bar list, for distributions whose labels are free text. */
+function BarList({
+  rows, total, fill, onPick,
+}: {
+  rows: { label: string; count: number }[];
+  total: number;
+  fill: string;
+  onPick: () => void;
+}) {
+  return (
+    <ul className="space-y-1.5">
+      {rows.map((row) => (
+        <li key={row.label}>
+          <button
+            type="button"
+            onClick={onPick}
+            title={`${row.label} — ${row.count} resident${row.count === 1 ? '' : 's'}`}
+            className="flex w-full items-center gap-2.5 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-[#FFD100]/15"
+          >
+            <span className="w-[104px] shrink-0 truncate text-[11px] font-medium text-gray-600">{row.label}</span>
+            <span className="h-2 flex-1 overflow-hidden rounded-full bg-gray-100">
+              <span className="block h-full rounded-full" style={{ width: `${percentOf(row.count, total)}%`, backgroundColor: fill }} />
+            </span>
+            <span className="w-4 shrink-0 text-right text-[11px] font-bold tabular-nums" style={{ color: INK }}>{row.count}</span>
+            <span className="w-7 shrink-0 text-right text-[10px] tabular-nums text-gray-400">{percentOf(row.count, total)}%</span>
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** One metric in the KPI strip. */
 function Metric({
   label, value, sub, icon: Icon, onClick, tone = 'muted', loading = false, hint,
 }: {
@@ -425,50 +622,21 @@ function Metric({
       type="button"
       onClick={onClick}
       title={hint}
-      className="group flex min-w-0 flex-1 flex-col items-start px-4 py-3.5 text-left transition-colors first:pl-5 last:pr-5 hover:bg-[#FFD100]/10 focus:outline-none focus-visible:bg-[#FFD100]/15"
+      className="group flex min-w-0 flex-col items-start px-4 py-3.5 text-left transition-colors hover:bg-[#FFD100]/12 focus:outline-none focus-visible:bg-[#FFD100]/15"
     >
-      <span className="flex items-center gap-1.5">
+      <span className="flex w-full items-center gap-1.5">
         <Icon className="h-3.5 w-3.5 shrink-0 text-gray-400 transition-colors group-hover:text-[#2F3E46]" />
         <span className="truncate text-[10px] font-bold uppercase tracking-wider text-gray-500">{label}</span>
       </span>
       {loading ? (
         <span className="mt-2 h-7 w-12 animate-pulse rounded bg-gray-100" />
       ) : (
-        <span className="mt-1.5 text-[26px] font-bold leading-none tabular-nums" style={{ color: INK }}>{value}</span>
+        <span className="mt-1.5 text-[25px] font-bold leading-none tabular-nums" style={{ color: INK }}>{value}</span>
       )}
-      <span className="mt-1.5 flex min-w-0 items-center gap-1.5 text-[11px] leading-tight text-gray-500">
+      <span className="mt-1.5 flex w-full min-w-0 items-center gap-1.5 text-[10px] leading-tight text-gray-500">
         {tone !== 'muted' && <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${TONE[tone].dot}`} />}
         <span className="truncate">{sub}</span>
       </span>
-    </button>
-  );
-}
-
-/** A bar in one of the resident breakdowns. */
-function Bar({
-  label, count, total, fill, onClick, title,
-}: {
-  label: string;
-  count: number;
-  total: number;
-  fill: string;
-  onClick: () => void;
-  title?: string;
-}) {
-  const percent = total > 0 ? Math.round((count / total) * 100) : 0;
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={title || label}
-      className="flex w-full items-center gap-3 rounded-lg px-1 py-1 text-left transition-colors hover:bg-gray-50"
-    >
-      <span className="w-[92px] shrink-0 truncate text-xs font-medium text-gray-600">{label}</span>
-      <span className="h-2 flex-1 overflow-hidden rounded-full bg-gray-100">
-        <span className={`block h-full rounded-full transition-all ${fill}`} style={{ width: `${percent}%` }} />
-      </span>
-      <span className="w-5 shrink-0 text-right text-xs font-bold tabular-nums" style={{ color: INK }}>{count}</span>
-      <span className="w-8 shrink-0 text-right text-[10px] tabular-nums text-gray-400">{percent}%</span>
     </button>
   );
 }
@@ -477,24 +645,34 @@ function Bar({
 const KIND: Record<ScheduleKind, { icon: React.ComponentType<{ className?: string }>; bg: string; fg: string; label: string }> = {
   activity: { icon: Calendar, bg: 'bg-sky-50', fg: 'text-sky-600', label: 'Activity' },
   assessment: { icon: ClipboardCheck, bg: 'bg-violet-50', fg: 'text-violet-600', label: 'Assessment' },
-  hearing: { icon: Gavel, bg: 'bg-amber-50', fg: 'text-amber-600', label: 'Court hearing' },
+  hearing: { icon: Gavel, bg: 'bg-amber-50', fg: 'text-amber-600', label: 'Hearing' },
   intervention: { icon: ShieldAlert, bg: 'bg-rose-50', fg: 'text-rose-600', label: 'Intervention' },
   schoolVisit: { icon: GraduationCap, bg: 'bg-emerald-50', fg: 'text-emerald-600', label: 'School visit' },
   triDeadline: { icon: ClipboardList, bg: 'bg-indigo-50', fg: 'text-indigo-600', label: 'TRI deadline' },
 };
 
-/** The kinds the timeline's per-kind summary strip prints, in reading order. */
+/** The kinds the workload chart and the per-kind summary print, in reading order. */
 const SUMMARY_KINDS: ScheduleKind[] = ['activity', 'assessment', 'hearing', 'intervention', 'schoolVisit', 'triDeadline'];
 
-/** The colours the behavioral bands print, matching the Child Detail tab. */
-const BEHAVIORAL_FILL: Record<string, string> = {
-  'Very Good': 'bg-emerald-500',
-  Good: 'bg-sky-500',
-  Fair: 'bg-amber-500',
-  'Needs Improvement': 'bg-red-500',
-  'Not Rated': 'bg-gray-400',
-  'Still Monitoring': 'bg-blue-400',
+/** The colours the behavioural bands print, matching the Child Detail tab. */
+const BEHAVIORAL_COLORS: Record<string, string> = {
+  'Very Good': '#10b981',
+  Good: '#0ea5e9',
+  Fair: '#f59e0b',
+  'Needs Improvement': '#ef4444',
+  'Not Rated': '#9ca3af',
+  'Still Monitoring': '#60a5fa',
 };
+
+/** The Violations module's own severity colours. */
+const SEVERITY_COLORS: Record<string, string> = {
+  Minor: '#facc15',
+  Major: '#f97316',
+  Critical: '#dc2626',
+};
+
+/** Phase bars are shades of the brand slate, darkest first. */
+const PHASE_COLORS = ['#2F3E46', '#46595F', '#5E747C', '#7C9299', '#A3B4B9', '#C8D3D6'];
 
 /** What the resident breakdowns count — one population, three cuts. */
 const RESIDENTS_ACTIVE = '/children?filter=Active';
@@ -545,11 +723,6 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
 
   const open = useCallback((path: string) => navigate(path), [navigate]);
 
-  // ── Navigation ───────────────────────────────────────────────────────────
-  // Every click on this page ends up in one of these functions, so the mapping
-  // from "what the Center Head is looking at" to "where it lives" is in one
-  // place and cannot drift row by row.
-
   /** A schedule row → its own record where one exists, else the module. */
   const scheduleRoute = useCallback((item: ScheduleItem) => {
     switch (item.kind) {
@@ -566,17 +739,17 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
   // ── Derived view models ──────────────────────────────────────────────────
 
   /**
-   * Everything waiting on a decision, from all four queues plus the document
-   * inbox, as one list. A Center Head does not care which module filed the
-   * paperwork — only that it is theirs to decide — so the sources are merged and
-   * ordered by how long each has been waiting, oldest first.
+   * Everything waiting on a decision, from all five queues, as one list. A
+   * Center Head does not care which module filed the paperwork — only that it is
+   * theirs to decide — so the sources are merged and ordered by how long each
+   * has been waiting, oldest first.
    */
   const decisionQueue = useMemo(() => {
     if (!data) return [];
     type Item = {
       key: string; source: string; icon: React.ComponentType<{ className?: string }>;
-      bg: string; fg: string; title: string; meta: string; status: string;
-      submittedAt: string | null; to: string;
+      bg: string; fg: string; title: string; resident: string; detail: string; status: string;
+      queuedAt: string | null; to: string;
     };
     const items: Item[] = [];
 
@@ -584,65 +757,80 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
       items.push({
         key: `doc-${doc.id}`, source: 'Document', icon: FileText, bg: 'bg-gray-100', fg: 'text-gray-600',
         title: doc.title,
-        meta: [doc.residentNameLive || doc.residentName || 'No resident', doc.documentCategory].filter(Boolean).join(' · '),
+        resident: doc.residentNameLive || doc.residentName || '—',
+        detail: doc.documentCategory || doc.type || '—',
         status: doc.status,
-        submittedAt: doc.submittedAt || null,
+        queuedAt: doc.submittedAt || null,
         to: `/documents?tab=pending&docId=${encodeURIComponent(doc.id)}`,
       });
     }
     for (const row of data.reports.anecdotal.items) {
       items.push({
         key: `an-${row.id}`, source: 'Anecdotal', icon: BookOpen, bg: 'bg-violet-50', fg: 'text-violet-600',
-        title: `${row.residentName || row.residentId}`,
-        meta: [`${monthName(row.reportMonth)} ${row.reportYear}`, row.submittedBy].filter(Boolean).join(' · '),
-        status: row.status, submittedAt: row.submittedAt || null,
+        title: `${monthName(row.reportMonth)} ${row.reportYear}`.trim() || 'Anecdotal report',
+        resident: row.residentName || row.residentId,
+        detail: row.submittedBy ? `by ${row.submittedBy}` : '—',
+        status: row.status, queuedAt: row.submittedAt || null,
         to: `/reports?tab=review&anecdotalId=${encodeURIComponent(row.id)}`,
       });
     }
     for (const row of data.reports.quarterly.items) {
       items.push({
         key: `qr-${row.id}`, source: 'Quarterly', icon: ListChecks, bg: 'bg-sky-50', fg: 'text-sky-600',
-        title: `${row.residentName || row.residentId}`,
-        meta: [`Quarterly Progress · ${row.periodLabel || `${shortDay(row.periodStart)} – ${shortDay(row.periodEnd)}`}`, row.submittedBy].filter(Boolean).join(' · '),
-        status: row.status, submittedAt: row.submittedAt || null,
+        title: row.periodLabel || `${shortDay(row.periodStart)} – ${shortDay(row.periodEnd)}`,
+        resident: row.residentName || row.residentId,
+        detail: row.submittedBy ? `by ${row.submittedBy}` : '—',
+        status: row.status, queuedAt: row.submittedAt || null,
         to: `/reports?quarterlyReportId=${encodeURIComponent(row.id)}`,
       });
     }
     for (const row of data.reports.tri.items) {
       items.push({
         key: `tri-${row.id}`, source: 'TRI', icon: ClipboardList, bg: 'bg-amber-50', fg: 'text-amber-600',
-        title: `${row.residentName || row.residentId}`,
         // No leading "TRI ·" here: the row already prints its `source`, so
         // repeating it produced "TRI · TRI · Sep 2026".
-        meta: [
-          `${monthName(row.reportingMonth)} ${row.reportingYear}`,
+        title: `${monthName(row.reportingMonth)} ${row.reportingYear}`.trim() || 'TRI',
+        resident: row.residentName || row.residentId,
+        detail: [
           row.finalPoints != null ? `${row.finalPoints} pts` : null,
           row.rating,
-        ].filter(Boolean).join(' · '),
-        status: row.status, submittedAt: row.submittedAt || null,
+          row.submittedBy ? `by ${row.submittedBy}` : null,
+        ].filter(Boolean).join(' · ') || '—',
+        status: row.status, queuedAt: row.submittedAt || null,
         to: `/tri?recordId=${encodeURIComponent(row.id)}`,
       });
     }
     for (const row of data.reports.education.items) {
       items.push({
         key: `ed-${row.id}`, source: 'Education', icon: GraduationCap, bg: 'bg-emerald-50', fg: 'text-emerald-600',
-        title: `${row.residentName || row.residentId}`,
-        meta: `Education monthly · ${row.reportMonthKey || '—'}`,
-        status: row.status, submittedAt: row.submittedAt || null,
+        title: row.reportMonthKey || 'Education monthly',
+        resident: row.residentName || row.residentId,
+        detail: row.submittedBy ? `by ${row.submittedBy}` : '—',
+        status: row.status, queuedAt: row.submittedAt || null,
         to: '/education',
+      });
+    }
+    for (const row of data.accessRequests.items) {
+      items.push({
+        key: `ar-${row.id}`, source: 'Access', icon: Inbox, bg: 'bg-amber-50', fg: 'text-amber-600',
+        title: `${row.moduleName || 'Module'} access`,
+        resident: row.residentName || row.residentId || row.requesterUsername,
+        detail: `${row.requesterUsername}${row.recordTab ? ` · ${row.recordTab}` : ''}`,
+        status: 'Pending', queuedAt: row.createdAt || null,
+        to: '/documents?tab=access',
       });
     }
 
     // Oldest first: the item that has been waiting longest is the one to clear.
     // An item with no timestamp sorts last rather than jumping the queue.
-    items.sort((a, b) => String(a.submittedAt || '9999').localeCompare(String(b.submittedAt || '9999')));
+    items.sort((a, b) => String(a.queuedAt || '9999').localeCompare(String(b.queuedAt || '9999')));
     return items;
   }, [data]);
 
   /**
-   * The four summary numbers on the Action Center strip. Only the non-zero ones
-   * are rendered: a page that always shows five zeroes trains the reader to
-   * ignore all five.
+   * The summary numbers on the Action Center strip. Only the non-zero ones are
+   * rendered: a page that always shows seven zeroes trains the reader to ignore
+   * all seven.
    */
   const attention = useMemo(() => {
     if (!data) return [];
@@ -671,16 +859,46 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
     : 0;
 
   /**
-   * Is the "Past due" column genuinely empty?
-   *
-   * Three stacked grey "nothing here" boxes is a lot of furniture to say one
-   * thing, and it made the column read as broken rather than clear. When there
-   * is nothing late, one calm line says it.
+   * The queue's composition as one stacked bar — how much of the backlog is
+   * paperwork, how much is reports, how much is permissions. Only drawn when
+   * something is actually queued.
    */
-  const pastDueEmpty = !data
-    || (data.admissions.expectedOverdue.length === 0
-      && data.discharges.pendingRecommendations.length === 0
-      && data.admissions.expectedUpcoming.length === 0);
+  const queueMix = useMemo(() => {
+    if (!data || decisionTotal === 0) return [];
+    return ([
+      { label: 'Documents', count: data.documents.count, color: INK },
+      { label: 'Reports', count: data.reports.total, color: ACCENT },
+      { label: 'Access requests', count: data.accessRequests.count, color: '#f59e0b' },
+    ]).filter((part) => part.count > 0);
+  }, [data, decisionTotal]);
+
+  /** The deadline groups, each dropped when it has nothing in it. */
+  const deadlineGroups = useMemo(() => {
+    if (!data) return [];
+    return ([
+      {
+        key: 'expectedOverdue', label: 'Discharge dates passed', icon: Hourglass, tone: 'danger' as Tone,
+        rows: data.admissions.expectedOverdue.map((row) => ({
+          key: `eo-${row.residentId}`, residentId: row.residentId, name: row.residentName || row.residentId,
+          meta: `Expected ${shortDay(row.expectedDate)}`, badge: `${row.daysOverdue}d late`, tone: 'danger' as Tone,
+        })),
+      },
+      {
+        key: 'discharge', label: 'Discharge recommendations', icon: UserMinus, tone: 'warn' as Tone,
+        rows: data.discharges.pendingRecommendations.map((rec) => ({
+          key: rec.id, residentId: rec.residentId, name: rec.residentName || rec.residentId,
+          meta: `${rec.thresholdType} · ${monthName(rec.reportingMonth)} ${rec.reportingYear}`, badge: 'Pending', tone: 'warn' as Tone,
+        })),
+      },
+      {
+        key: 'expectedUpcoming', label: 'Discharge dates ahead', icon: CalendarClock, tone: 'info' as Tone,
+        rows: data.admissions.expectedUpcoming.map((row) => ({
+          key: `eu-${row.residentId}`, residentId: row.residentId, name: row.residentName || row.residentId,
+          meta: `Expected ${shortDay(row.expectedDate)}`, badge: relativeLabel(row.days), tone: relativeTone(row.days),
+        })),
+      },
+    ]).filter((group) => group.rows.length > 0);
+  }, [data]);
 
   const phaseTotal = data?.residents.byPhase.reduce((sum, row) => sum + row.count, 0) || 0;
   const caseTypeTotal = data?.residents.byCaseType.reduce((sum, row) => sum + row.count, 0) || 0;
@@ -714,26 +932,88 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
       .join(' · ')
     : '';
 
-  /** One schedule row, shared by the three timeline groups. */
-  const scheduleRow = (item: ScheduleItem) => {
-    const meta = KIND[item.kind] || KIND.activity;
-    const Icon = meta.icon;
-    const late = item.days < 0;
+  /**
+   * Workload by kind: today's share, the rest of what is ahead, and what has
+   * already been missed. `ahead` is net of today so the three segments add up to
+   * the feed's own totals instead of double-counting the day.
+   */
+  const workload = useMemo(() => {
+    if (!data) return [];
+    return SUMMARY_KINDS
+      .map((kind) => ({
+        label: KIND[kind].label,
+        today: data.schedules.today[kind] || 0,
+        ahead: Math.max(0, (data.schedules.upcomingCounts[kind] || 0) - (data.schedules.today[kind] || 0)),
+        overdue: data.schedules.overdueCounts[kind] || 0,
+      }))
+      .filter((row) => row.today + row.ahead + row.overdue > 0);
+  }, [data]);
+
+  /** The Violations module's status buckets, in the order the module lists them. */
+  const violationBuckets = useMemo(() => {
+    if (!data) return [];
+    const v = data.violations;
+    return ([
+      { label: 'Reviewed — in the Violation List', count: v.reviewed, tone: 'review' as Tone },
+      { label: 'Overdue — intervention month passed', count: v.overdue, tone: 'danger' as Tone },
+      { label: 'Pending review — not yet in the list', count: v.pendingReview, tone: 'warn' as Tone },
+      { label: 'Resolved', count: v.resolved, tone: 'ok' as Tone },
+      { label: 'Rejected', count: v.rejected, tone: 'muted' as Tone },
+    ]);
+  }, [data]);
+
+  const severityRows = data
+    ? [
+      { label: 'Minor', count: data.violations.bySeverity.Minor },
+      { label: 'Major', count: data.violations.bySeverity.Major },
+      { label: 'Critical', count: data.violations.bySeverity.Critical },
+    ]
+    : [];
+
+  /**
+   * One schedule table, shared by the three timeline groups. `empty` is passed
+   * in whole rather than as text so the overdue column can carry the all-clear
+   * state instead of a grey sentence.
+   */
+  const scheduleTable = (items: ScheduleItem[], limit: number, empty: React.ReactNode) => {
+    if (items.length === 0) return empty;
     return (
-      <li key={`${item.kind}-${item.id}`}>
-        <Row onClick={() => open(scheduleRoute(item))} tone={late ? 'danger' : undefined}>
-          <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ${meta.bg}`}>
-            <Icon className={`h-4 w-4 ${meta.fg}`} />
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-xs font-semibold" style={{ color: INK }}>{item.title}</span>
-            <span className="block truncate text-[10px] text-gray-400">
-              {[shortDay(item.date), item.time || null, item.residentName, item.location, meta.label].filter(Boolean).join(' · ')}
-            </span>
-          </span>
-          <Pill tone={relativeTone(item.days)}>{relativeLabel(item.days)}</Pill>
-        </Row>
-      </li>
+      <TableShell minWidth="320px">
+        <tbody className="divide-y divide-gray-100">
+          {items.slice(0, limit).map((item) => {
+            const meta = KIND[item.kind] || KIND.activity;
+            const Icon = meta.icon;
+            return (
+              <Tr
+                key={`${item.kind}-${item.id}`}
+                onClick={() => open(scheduleRoute(item))}
+                title={`${item.title} — ${relativeLabel(item.days)}`}
+              >
+                <Td className="w-[74px] whitespace-nowrap">
+                  <span className="block text-[11px] font-bold" style={{ color: INK }}>{shortDay(item.date)}</span>
+                  {item.time && <span className="block text-[10px] tabular-nums text-gray-400">{item.time}</span>}
+                </Td>
+                <Td className="min-w-0">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md ${meta.bg}`}>
+                      <Icon className={`h-3 w-3 ${meta.fg}`} />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[11px] font-semibold" style={{ color: INK }}>{item.title}</span>
+                      <span className="block truncate text-[10px] text-gray-400">
+                        {[item.residentName, item.location, item.caseNumber].filter(Boolean).join(' · ') || meta.label}
+                      </span>
+                    </span>
+                  </span>
+                </Td>
+                <Td className="w-[86px] text-right">
+                  <Pill tone={relativeTone(item.days)}>{relativeLabel(item.days)}</Pill>
+                </Td>
+              </Tr>
+            );
+          })}
+        </tbody>
+      </TableShell>
     );
   };
 
@@ -742,7 +1022,7 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
     <div className="space-y-5">
 
       {/* 1 ── Command bar */}
-      <header className="relative overflow-hidden rounded-2xl bg-[#2F3E46] px-6 py-5 shadow-md">
+      <header className="relative overflow-hidden rounded-xl bg-[#2F3E46] px-6 py-5 shadow-md">
         <div className="absolute inset-y-0 left-0 w-1.5 bg-[#FFD100]" />
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
@@ -766,7 +1046,7 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
           </div>
           <div className="flex shrink-0 items-center gap-2">
             {data && (
-              <div className="hidden rounded-xl bg-white/5 px-3.5 py-2 text-right sm:block">
+              <div className="hidden rounded-lg bg-white/5 px-3.5 py-2 text-right sm:block">
                 <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">In the facility</p>
                 <p className="text-lg font-bold leading-none text-white tabular-nums">{data.residents.active}</p>
               </div>
@@ -775,7 +1055,7 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
               type="button"
               onClick={() => load(true)}
               disabled={refreshing}
-              className="flex items-center gap-2 rounded-xl border border-white/20 px-3.5 py-2 text-xs font-bold text-white transition-colors hover:bg-white/10 disabled:opacity-60"
+              className="flex items-center gap-2 rounded-lg border border-white/20 px-3.5 py-2 text-xs font-bold text-white transition-colors hover:bg-white/10 disabled:opacity-60"
             >
               <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
               Refresh
@@ -785,7 +1065,7 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
       </header>
 
       {error && (
-        <div className="flex items-start gap-2.5 rounded-2xl border border-red-200 bg-red-50 px-4 py-3">
+        <div className="flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" />
           <div>
             <p className="text-sm font-bold text-red-700">The dashboard could not be read</p>
@@ -794,230 +1074,10 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
         </div>
       )}
 
-      {/* 2 ── ACTION CENTER. The summary strip is a single line of numbers, not
-          six bordered boxes — the detail lives in the two columns below it. */}
-      <Section
-        icon={AlertTriangle}
-        title="Action Center"
-        subtitle="Everything that is waiting on the Center Head, and how long it has been waiting."
-      >
-        {/* The summary strip. Only non-zero counts appear. */}
-        {loading && !data ? (
-          <div className="mb-5 h-10 animate-pulse rounded-xl bg-gray-100" />
-        ) : attention.length === 0 ? (
-          <div className="mb-5">
-            <Clear>Nothing is waiting on you. No document, report, request or deadline is outstanding.</Clear>
-          </div>
-        ) : (
-          <div className="mb-5 flex flex-wrap items-stretch gap-x-6 gap-y-3 rounded-xl border border-gray-100 bg-gray-50/60 px-4 py-3">
-            {attention.map((chip) => {
-              const Icon = chip.icon;
-              return (
-                <button
-                  key={chip.key}
-                  type="button"
-                  onClick={() => open(chip.to)}
-                  className="group flex min-w-0 items-center gap-2 text-left"
-                >
-                  <Icon className={`h-3.5 w-3.5 shrink-0 ${TONE[chip.tone].text}`} />
-                  <span className="min-w-0 truncate text-[11px] font-semibold text-gray-600 group-hover:text-[#2F3E46]">{chip.label}</span>
-                  <span className={`text-base font-bold leading-none tabular-nums ${TONE[chip.tone].text}`}>{chip.count}</span>
-                </button>
-              );
-            })}
-          </div>
-        )}
-
-        <div className="grid gap-6 lg:grid-cols-2">
-          {/* What is waiting on a decision */}
-          <div className="min-w-0">
-            <GroupHeading label="Awaiting a decision" count={decisionTotal} tone="review">
-              {data && data.reports.total > 0 && (
-                <span className="hidden items-center gap-1.5 sm:flex">
-                  {([
-                    ['Anecdotal', data.reports.anecdotal.count],
-                    ['Quarterly', data.reports.quarterly.count],
-                    ['TRI', data.reports.tri.count],
-                    ['Education', data.reports.education.count],
-                  ] as [string, number][]).map(([label, count]) => (
-                    <span
-                      key={label}
-                      title={`${count} ${label} report${count === 1 ? '' : 's'} awaiting review`}
-                      className={`rounded-md border px-1.5 py-0.5 text-[10px] font-bold ${count > 0 ? TONE.review.chip : 'border-gray-200 bg-gray-50 text-gray-300'}`}
-                    >
-                      {label.slice(0, 3)} {count}
-                    </span>
-                  ))}
-                </span>
-              )}
-            </GroupHeading>
-
-            {loading && !data ? (
-              <div className="space-y-2">{[0, 1, 2, 3].map((n) => <div key={n} className="h-11 animate-pulse rounded-xl bg-gray-100" />)}</div>
-            ) : decisionQueue.length === 0 && (data?.accessRequests.count || 0) === 0 ? (
-              <Clear>Every submitted document and report has been decided.</Clear>
-            ) : (
-              <ul className="-mx-1 space-y-0.5">
-                {decisionQueue.slice(0, 8).map((item) => {
-                  const Icon = item.icon;
-                  const waiting = waitingLabel(item.submittedAt);
-                  return (
-                    <li key={item.key}>
-                      <Row onClick={() => open(item.to)}>
-                        <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ${item.bg}`}>
-                          <Icon className={`h-4 w-4 ${item.fg}`} />
-                        </span>
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-xs font-semibold" style={{ color: INK }}>{item.title}</span>
-                          <span className="block truncate text-[10px] text-gray-400">
-                            {[item.source, item.meta, waiting].filter(Boolean).join(' · ')}
-                          </span>
-                        </span>
-                        <Pill tone={statusTone(item.status)}>{item.status}</Pill>
-                      </Row>
-                    </li>
-                  );
-                })}
-                {decisionQueue.length > 8 && (
-                  <li className="px-2.5 pt-1.5 text-[11px] text-gray-400">
-                    {decisionQueue.length - 8} more in the review queues.
-                  </li>
-                )}
-              </ul>
-            )}
-
-            {/* Access requests — a decision only the Center Head makes. */}
-            {(data?.accessRequests.count || 0) > 0 && (
-              <div className="mt-4 border-t border-dashed border-gray-100 pt-3.5">
-                <GroupHeading label="Access requests" count={data?.accessRequests.count} tone="warn" />
-                <ul className="-mx-1 space-y-0.5">
-                  {data!.accessRequests.items.slice(0, 4).map((row) => (
-                    <li key={row.id}>
-                      <Row onClick={() => open('/documents?tab=access')}>
-                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-amber-50">
-                          <Inbox className="h-4 w-4 text-amber-600" />
-                        </span>
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-xs font-semibold" style={{ color: INK }}>
-                            {row.requesterUsername} · {row.moduleName || 'module'}
-                          </span>
-                          <span className="block truncate text-[10px] text-gray-400">
-                            {[row.residentName || row.residentId, row.reason, waitingLabel(row.createdAt)].filter(Boolean).join(' · ')}
-                          </span>
-                        </span>
-                        <Pill tone="warn">Pending</Pill>
-                      </Row>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {/* Incident reports — not the Center Head's queue, but visible. */}
-            {(data?.reports.incidentPending || 0) > 0 && (
-              <p className="mt-4 rounded-xl bg-gray-50 px-3 py-2 text-[11px] leading-relaxed text-gray-500">
-                <span className="font-bold" style={{ color: INK }}>{data!.reports.incidentPending}</span> incident report
-                {data!.reports.incidentPending === 1 ? '' : 's'} still awaiting Psychological / Social Worker verification
-                — not your queue, counted so the workload is visible.
-              </p>
-            )}
-          </div>
-
-          {/* What is late, and the decisions attached to it */}
-          <div className="min-w-0 lg:border-l lg:border-gray-100 lg:pl-6">
-            <GroupHeading
-              label="Past due"
-              tone="danger"
-              count={(data?.admissions.expectedOverdue.length || 0) + (data?.discharges.pendingRecommendations.length || 0)}
-            />
-
-            {pastDueEmpty ? (
-              <Clear>Nothing is past due, and no discharge decision is waiting.</Clear>
-            ) : (
-            <div className="space-y-4">
-              {/* Expected discharge dates that have passed */}
-              <div>
-                <h5 className="mb-1.5 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">
-                  <Hourglass className="h-3 w-3" /> Expected discharge dates passed
-                </h5>
-                {(data?.admissions.expectedOverdue.length || 0) > 0 ? (
-                  <ul className="-mx-1 space-y-0.5">
-                    {data!.admissions.expectedOverdue.slice(0, 4).map((row) => (
-                      <li key={`eo-${row.residentId}`}>
-                        <Row onClick={() => open(`/children/${row.residentId}?tab=personal`)} tone="danger">
-                          <span className="min-w-0 flex-1">
-                            <span className="block truncate text-xs font-semibold" style={{ color: INK }}>{row.residentName || row.residentId}</span>
-                            <span className="block text-[10px] text-gray-400">Expected {shortDay(row.expectedDate)}</span>
-                          </span>
-                          <Pill tone="danger">{row.daysOverdue}d late</Pill>
-                        </Row>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="rounded-lg bg-gray-50 px-2.5 py-2 text-[11px] text-gray-400">No expected discharge date has passed.</p>
-                )}
-              </div>
-
-              {/* Discharge recommendations — a decision only the Center Head makes */}
-              <div>
-                <h5 className="mb-1.5 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">
-                  <UserMinus className="h-3 w-3" /> Discharge recommendations
-                </h5>
-                {(data?.discharges.pendingRecommendations.length || 0) > 0 ? (
-                  <ul className="-mx-1 space-y-0.5">
-                    {data!.discharges.pendingRecommendations.slice(0, 4).map((rec) => (
-                      <li key={rec.id}>
-                        <Row onClick={() => open(`/children/${rec.residentId}?tab=personal`)} tone="warn">
-                          <span className="min-w-0 flex-1">
-                            <span className="block truncate text-xs font-semibold" style={{ color: INK }}>{rec.residentName || rec.residentId}</span>
-                            <span className="block truncate text-[10px] text-gray-400">
-                              {rec.thresholdType} · {monthName(rec.reportingMonth)} {rec.reportingYear}
-                            </span>
-                          </span>
-                          <Pill tone="warn">Pending</Pill>
-                        </Row>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="rounded-lg bg-gray-50 px-2.5 py-2 text-[11px] text-gray-400">No recommendation is waiting.</p>
-                )}
-              </div>
-
-              {/* Upcoming expected discharge dates — the other half of the same list */}
-              <div>
-                <h5 className="mb-1.5 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">
-                  <CalendarClock className="h-3 w-3" /> Expected discharge dates ahead
-                </h5>
-                {(data?.admissions.expectedUpcoming.length || 0) > 0 ? (
-                  <ul className="-mx-1 space-y-0.5">
-                    {data!.admissions.expectedUpcoming.slice(0, 3).map((row) => (
-                      <li key={`eu-${row.residentId}`}>
-                        <Row onClick={() => open(`/children/${row.residentId}?tab=personal`)}>
-                          <span className="min-w-0 flex-1">
-                            <span className="block truncate text-xs font-semibold" style={{ color: INK }}>{row.residentName || row.residentId}</span>
-                            <span className="block text-[10px] text-gray-400">Expected {shortDay(row.expectedDate)}</span>
-                          </span>
-                          <Pill tone={relativeTone(row.days)}>{relativeLabel(row.days)}</Pill>
-                        </Row>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="rounded-lg bg-gray-50 px-2.5 py-2 text-[11px] text-gray-400">No expected discharge date is set.</p>
-                )}
-              </div>
-            </div>
-            )}
-          </div>
-        </div>
-      </Section>
-
-      {/* 3 ── Facility status. One band with hairline dividers instead of six
+      {/* 2 ── KPI strip. One band with hairline dividers instead of six
           separate cards, so the numbers read as one picture of the home. */}
-      <div className="overflow-hidden rounded-2xl border border-gray-200/80 bg-white shadow-[0_1px_2px_rgba(47,62,70,0.04)]">
-        <div className="flex flex-wrap divide-y divide-gray-100 sm:divide-y-0 lg:divide-x">
+      <div className={`overflow-hidden ${SURFACE}`}>
+        <div className="grid grid-cols-2 divide-x divide-y divide-gray-100 sm:grid-cols-3 lg:grid-cols-6 lg:divide-y-0">
           <Metric
             label="Active Residents" icon={Users} loading={loading}
             value={data?.residents.active ?? 0}
@@ -1065,15 +1125,267 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
         </div>
       </div>
 
-      {/* 4 ── TIMELINE. One feed, split three ways: what is on today, what is
-          coming, and what has been missed. */}
+      {/* 3 ── ACTION CENTER. The queue as a table, the deadlines beside it. */}
+      <Section
+        icon={AlertTriangle}
+        title="Action Center"
+        subtitle="Everything waiting on the Center Head, and how long it has been waiting."
+      >
+        {/* The summary strip. Only non-zero counts appear. */}
+        {loading && !data ? (
+          <div className="mb-5 h-10 animate-pulse rounded-lg bg-gray-100" />
+        ) : attention.length === 0 ? (
+          <div className="mb-5">
+            <Clear>Nothing is waiting on you. No document, report, request or deadline is outstanding.</Clear>
+          </div>
+        ) : (
+          <div className="mb-5 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4">
+            {attention.map((chip) => {
+              const Icon = chip.icon;
+              return (
+                <button
+                  key={chip.key}
+                  type="button"
+                  onClick={() => open(chip.to)}
+                  className="group flex min-w-0 items-center gap-2 rounded-lg border border-gray-200 bg-gray-50/60 px-3 py-2 text-left transition-colors hover:border-[#FFD100] hover:bg-[#FFD100]/12"
+                >
+                  <Icon className={`h-3.5 w-3.5 shrink-0 ${TONE[chip.tone].text}`} />
+                  <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-gray-600 group-hover:text-[#2F3E46]">{chip.label}</span>
+                  <span className={`shrink-0 text-sm font-bold leading-none tabular-nums ${TONE[chip.tone].text}`}>{chip.count}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {/* The queue's composition. A single bar answers "what is the backlog
+            made of" before the table answers "which item is next". */}
+        {queueMix.length > 0 && (
+          <div className="mb-5">
+            <div className="flex h-2 overflow-hidden rounded-full bg-gray-100">
+              {queueMix.map((part) => (
+                <span key={part.label} style={{ width: `${percentOf(part.count, decisionTotal)}%`, backgroundColor: part.color }} />
+              ))}
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1">
+              {queueMix.map((part) => (
+                <span key={part.label} className="flex items-center gap-1.5 text-[10px] font-medium text-gray-500">
+                  <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: part.color }} />
+                  {part.label}
+                  <span className="font-bold tabular-nums" style={{ color: INK }}>{part.count}</span>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div className="grid gap-6 lg:grid-cols-3">
+          {/* What is waiting on a decision */}
+          <div className="min-w-0 lg:col-span-2">
+            <GroupHeading label="Awaiting a decision" count={decisionTotal} tone="review" />
+
+            {loading && !data ? (
+              <div className="space-y-2">{[0, 1, 2, 3].map((n) => <div key={n} className="h-10 animate-pulse rounded-lg bg-gray-100" />)}</div>
+            ) : decisionQueue.length === 0 ? (
+              <Clear>Every submitted document and report has been decided.</Clear>
+            ) : (
+              <>
+                <TableShell minWidth="560px">
+                  <thead className="border-b border-gray-200 bg-gray-50/80">
+                    <tr>
+                      <Th className="w-[104px]">Source</Th>
+                      <Th>Item</Th>
+                      <Th className="w-[22%]">Resident</Th>
+                      <Th className="w-[92px]">Status</Th>
+                      <Th className="w-[72px] text-right">Waiting</Th>
+                      <Th className="w-8" />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {decisionQueue.slice(0, 8).map((item) => {
+                      const Icon = item.icon;
+                      const waiting = waitingLabel(item.queuedAt);
+                      return (
+                        <Tr key={item.key} onClick={() => open(item.to)} title={item.title}>
+                          <Td>
+                            <span className="flex items-center gap-1.5">
+                              <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md ${item.bg}`}>
+                                <Icon className={`h-3 w-3 ${item.fg}`} />
+                              </span>
+                              <span className="truncate text-[10px] font-bold uppercase tracking-wide text-gray-500">{item.source}</span>
+                            </span>
+                          </Td>
+                          <Td>
+                            <span className="block truncate font-semibold" style={{ color: INK }}>{item.title}</span>
+                            <span className="block truncate text-[10px] text-gray-400">{item.detail}</span>
+                          </Td>
+                          <Td className="truncate">{item.resident}</Td>
+                          <Td><Pill tone={statusTone(item.status)}>{item.status}</Pill></Td>
+                          <Td
+                            className="text-right text-[11px] tabular-nums text-gray-500"
+                            title={item.queuedAt ? `Queued ${shortDateTime(item.queuedAt)}` : undefined}
+                          >
+                            {waiting || '—'}
+                          </Td>
+                          <GoCell />
+                        </Tr>
+                      );
+                    })}
+                  </tbody>
+                </TableShell>
+                {decisionQueue.length > 8 && (
+                  <p className="px-3 pt-2 text-[11px] text-gray-400">
+                    {decisionQueue.length - 8} more in the review queues.
+                  </p>
+                )}
+              </>
+            )}
+
+            {/* Incident reports — not the Center Head's queue, but visible. */}
+            {(data?.reports.incidentPending || 0) > 0 && (
+              <p className="mt-4 rounded-lg bg-gray-50 px-3 py-2 text-[11px] leading-relaxed text-gray-500">
+                <span className="font-bold" style={{ color: INK }}>{data!.reports.incidentPending}</span> incident report
+                {data!.reports.incidentPending === 1 ? '' : 's'} still awaiting Psychological / Social Worker verification
+                — not your queue, counted so the workload is visible.
+              </p>
+            )}
+          </div>
+
+          {/* What is late, and the decisions attached to it */}
+          <div className="min-w-0 lg:border-l lg:border-gray-100 lg:pl-6">
+            <GroupHeading
+              label="Deadlines"
+              tone="danger"
+              count={(data?.admissions.expectedOverdue.length || 0) + (data?.discharges.pendingRecommendations.length || 0)}
+            />
+
+            {deadlineGroups.length === 0 ? (
+              <Clear>Nothing is past due, and no discharge decision is waiting.</Clear>
+            ) : (
+              <div className="space-y-4">
+                {deadlineGroups.map((group) => {
+                  const Icon = group.icon;
+                  return (
+                    <div key={group.key}>
+                      <h5 className="mb-1.5 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">
+                        <Icon className="h-3 w-3" /> {group.label}
+                      </h5>
+                      <ul className="space-y-0.5">
+                        {group.rows.slice(0, 4).map((row) => (
+                          <li key={row.key}>
+                            <button
+                              type="button"
+                              onClick={() => open(`/children/${row.residentId}?tab=personal`)}
+                              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-[#FFD100]/15"
+                            >
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate text-[11px] font-semibold" style={{ color: INK }}>{row.name}</span>
+                                <span className="block truncate text-[10px] text-gray-400">{row.meta}</span>
+                              </span>
+                              <Pill tone={row.tone}>{row.badge}</Pill>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                      {group.rows.length > 4 && (
+                        <p className="px-2 pt-1 text-[10px] text-gray-400">+{group.rows.length - 4} more</p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      </Section>
+
+      {/* 4 ── RESIDENTS. One population, three cuts: rehabilitation phase,
+          behavioural status, case type. */}
+      <Section
+        icon={Users}
+        title="Residents"
+        subtitle={`How the ${data?.residents.active ?? 0} residents currently in the facility are distributed. Every cut counts the same residents.`}
+        action={<SectionLink label="Open Child Records" onClick={() => open(RESIDENTS_ACTIVE)} />}
+      >
+        {loading && !data ? (
+          <div className="grid gap-6 lg:grid-cols-3">
+            {[0, 1, 2].map((n) => <div key={n} className="h-40 animate-pulse rounded-lg bg-gray-100" />)}
+          </div>
+        ) : (
+          <div className="grid gap-6 lg:grid-cols-3">
+            {/* Rehabilitation phase */}
+            <div className="min-w-0">
+              <GroupHeading label="By rehabilitation phase" count={phaseTotal} />
+              {data && data.residents.byPhase.length > 0 ? (
+                <ResponsiveContainer width="100%" height={Math.max(120, data.residents.byPhase.length * 38 + 16)}>
+                  <BarChart data={data.residents.byPhase} layout="vertical" margin={{ top: 0, right: 30, bottom: 0, left: 0 }} barSize={16}>
+                    <XAxis type="number" hide />
+                    <YAxis
+                      type="category" dataKey="short" width={98} tickLine={false} axisLine={false}
+                      tick={{ fontSize: 10, fill: '#6b7280' }}
+                    />
+                    <RechartsTooltip
+                      {...TOOLTIP_STYLE}
+                      formatter={(value: number | string) => `${value} resident${Number(value) === 1 ? '' : 's'}`}
+                    />
+                    <RechartsBar
+                      dataKey="count" radius={[0, 4, 4, 0]} isAnimationActive={false}
+                      label={{ position: 'right', fontSize: 10, fill: INK, fontWeight: 700 }}
+                    >
+                      {data.residents.byPhase.map((row, index) => (
+                        <Cell key={row.phase} fill={PHASE_COLORS[index % PHASE_COLORS.length]} />
+                      ))}
+                    </RechartsBar>
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <Empty>No resident has a phase set.</Empty>
+              )}
+              <p className="mt-2 text-[10px] leading-relaxed text-gray-400">
+                The case phase Child Records holds for each resident, in the order the phases run.
+              </p>
+            </div>
+
+            {/* Behavioural status */}
+            <div className="min-w-0 lg:border-l lg:border-gray-100 lg:pl-6">
+              <GroupHeading label="By behavioral status" count={behavioralTotal} />
+              <Donut
+                rows={data?.residents.behavioral || []}
+                colors={BEHAVIORAL_COLORS}
+                unit="resident(s)"
+                onPick={() => open(RESIDENTS_ACTIVE)}
+              />
+              <p className="mt-2 text-[10px] leading-relaxed text-gray-400">
+                The rating on each resident's newest Finalized TRI, exactly as their Behavioral tab shows it.
+              </p>
+            </div>
+
+            {/* Case type — a list, because its labels are free text */}
+            <div className="min-w-0 lg:border-l lg:border-gray-100 lg:pl-6">
+              <GroupHeading label="By case type" count={caseTypeTotal} />
+              {data && data.residents.byCaseType.length > 0 ? (
+                <BarList
+                  rows={data.residents.byCaseType}
+                  total={caseTypeTotal}
+                  fill={ACCENT}
+                  onPick={() => open(RESIDENTS_ACTIVE)}
+                />
+              ) : (
+                <Empty>No resident has a case type set.</Empty>
+              )}
+            </div>
+          </div>
+        )}
+      </Section>
+
+      {/* 5 ── SCHEDULE. Where the workload sits, then the feed itself. */}
       <Section
         icon={CalendarClock}
         title="Schedule Timeline"
         subtitle="Every dated commitment across the facility, read live — today, what is ahead, and what has been missed."
         action={
           data && (
-            <div className="hidden shrink-0 items-center gap-1.5 md:flex">
+            <div className="hidden shrink-0 flex-wrap items-center gap-1.5 md:flex">
               {SUMMARY_KINDS.map((kind) => {
                 const Icon = KIND[kind].icon;
                 const count = data.schedules.upcomingCounts[kind];
@@ -1092,12 +1404,53 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
           )
         }
       >
+        {/* Workload by kind */}
+        <div className="mb-5 rounded-lg border border-gray-100 bg-gray-50/50 px-4 py-3.5">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h4 className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+              <ChartColumn className="h-3 w-3" /> Workload by kind
+            </h4>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              {([
+                ['Today', ACCENT],
+                ['Ahead', INK],
+                ['Overdue', '#dc2626'],
+              ] as [string, string][]).map(([label, color]) => (
+                <span key={label} className="flex items-center gap-1.5 text-[10px] font-medium text-gray-500">
+                  <span className="h-2 w-2 rounded-sm" style={{ backgroundColor: color }} />
+                  {label}
+                </span>
+              ))}
+            </div>
+          </div>
+          {loading && !data ? (
+            <div className="h-[180px] animate-pulse rounded bg-gray-100" />
+          ) : workload.length > 0 ? (
+            <ResponsiveContainer width="100%" height={workload.length * 32 + 12}>
+              <BarChart data={workload} layout="vertical" margin={{ top: 0, right: 8, bottom: 0, left: 0 }} barSize={13}>
+                <XAxis type="number" hide />
+                <YAxis
+                  type="category" dataKey="label" width={88} tickLine={false} axisLine={false}
+                  tick={{ fontSize: 10, fill: '#6b7280' }}
+                />
+                <RechartsTooltip {...TOOLTIP_STYLE} />
+                <RechartsBar dataKey="today" stackId="w" fill={ACCENT} name="Today" isAnimationActive={false} />
+                <RechartsBar dataKey="ahead" stackId="w" fill={INK} name="Ahead" isAnimationActive={false} />
+                <RechartsBar dataKey="overdue" stackId="w" fill="#dc2626" name="Overdue" isAnimationActive={false} radius={[0, 3, 3, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <Empty>Nothing is on the calendar at all — no activity, assessment, hearing, intervention, visit or TRI deadline.</Empty>
+          )}
+        </div>
+
+        {/* The feed, split three ways */}
         {loading && !data ? (
           <div className="grid gap-5 lg:grid-cols-3">
             {[0, 1, 2].map((n) => (
               <div key={n} className="space-y-2">
                 <div className="h-4 w-24 animate-pulse rounded bg-gray-100" />
-                {[0, 1, 2].map((m) => <div key={m} className="h-11 animate-pulse rounded-xl bg-gray-100" />)}
+                {[0, 1, 2].map((m) => <div key={m} className="h-10 animate-pulse rounded-lg bg-gray-100" />)}
               </div>
             ))}
           </div>
@@ -1106,24 +1459,16 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
             {/* Today */}
             <div className="min-w-0">
               <GroupHeading label="Today" count={data?.schedules.today.total} tone="warn" />
-              {todayItems.length > 0 ? (
-                <ul className="-mx-1 space-y-0.5">{todayItems.map(scheduleRow)}</ul>
-              ) : (
-                <p className="rounded-xl bg-gray-50 px-3 py-3 text-[11px] text-gray-400">Nothing is booked for today.</p>
-              )}
+              {scheduleTable(todayItems, 6, <Empty>Nothing is booked for today.</Empty>)}
             </div>
 
             {/* Upcoming */}
             <div className="min-w-0 lg:border-l lg:border-gray-100 lg:pl-6">
               <GroupHeading label="Upcoming" count={aheadCount} tone="info" />
-              {upcomingItems.length > 0 ? (
-                <ul className="-mx-1 space-y-0.5">{upcomingItems.slice(0, 10).map(scheduleRow)}</ul>
-              ) : (
-                <p className="rounded-xl bg-gray-50 px-3 py-3 text-[11px] text-gray-400">Nothing is booked ahead.</p>
-              )}
-              {aheadCount > Math.min(upcomingItems.length, 10) && (
-                <p className="px-2.5 pt-1.5 text-[11px] text-gray-400">
-                  showing {Math.min(upcomingItems.length, 10)} of {aheadCount}
+              {scheduleTable(upcomingItems, 8, <Empty>Nothing is booked ahead.</Empty>)}
+              {aheadCount > Math.min(upcomingItems.length, 8) && (
+                <p className="px-3 pt-1.5 text-[10px] text-gray-400">
+                  showing {Math.min(upcomingItems.length, 8)} of {aheadCount}
                 </p>
               )}
             </div>
@@ -1131,112 +1476,14 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
             {/* Overdue */}
             <div className="min-w-0 lg:border-l lg:border-gray-100 lg:pl-6">
               <GroupHeading label="Overdue" count={data?.schedules.overdueCounts.total} tone="danger" />
-              {overdueItems.length > 0 ? (
-                <ul className="-mx-1 space-y-0.5">{overdueItems.slice(0, 8).map(scheduleRow)}</ul>
-              ) : (
-                <Clear>Nothing has been missed.</Clear>
-              )}
+              {scheduleTable(overdueItems, 8, <Clear>Nothing has been missed.</Clear>)}
               {data && data.schedules.overdueCounts.total > overdueItems.length && (
-                <p className="px-2.5 pt-1.5 text-[11px] text-gray-400">
+                <p className="px-3 pt-1.5 text-[10px] text-gray-400">
                   showing {Math.min(overdueItems.length, 8)} of {data.schedules.overdueCounts.total}
                 </p>
               )}
             </div>
           </div>
-        )}
-      </Section>
-
-      {/* 5 ── RESIDENTS. One section, three cuts of the same population:
-          rehabilitation phase, behavioural status, case type. */}
-      <Section
-        icon={Users}
-        title="Residents"
-        subtitle={`How the ${data?.residents.active ?? 0} residents currently in the facility are distributed. Every cut counts the same residents.`}
-        action={
-          <button
-            type="button"
-            onClick={() => open(RESIDENTS_ACTIVE)}
-            className="shrink-0 text-[11px] font-bold underline decoration-[#FFD100] decoration-2 underline-offset-2 hover:decoration-[#2F3E46]"
-            style={{ color: INK }}
-          >
-            Open Child Records
-          </button>
-        }
-      >
-        {data && (data.residents.byPhase.length > 0 || data.residents.behavioral.length > 0 || data.residents.byCaseType.length > 0) ? (
-          <div className="grid gap-6 lg:grid-cols-3">
-            {/* Rehabilitation phase */}
-            <div className="min-w-0">
-              <GroupHeading label="By rehabilitation phase" count={phaseTotal} />
-              {data.residents.byPhase.length > 0 ? (
-                <div className="space-y-0.5">
-                  {data.residents.byPhase.map((row) => (
-                    <Bar
-                      key={row.phase}
-                      label={row.short}
-                      count={row.count}
-                      total={phaseTotal}
-                      fill="bg-[#2F3E46]"
-                      title={`${row.phase} — ${row.count} resident${row.count === 1 ? '' : 's'}`}
-                      onClick={() => open(RESIDENTS_ACTIVE)}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <Empty>No resident has a phase set.</Empty>
-              )}
-            </div>
-
-            {/* Behavioural status */}
-            <div className="min-w-0 lg:border-l lg:border-gray-100 lg:pl-6">
-              <GroupHeading label="By behavioral status" count={behavioralTotal} />
-              {data.residents.behavioral.length > 0 ? (
-                <div className="space-y-0.5">
-                  {data.residents.behavioral.map((row) => (
-                    <Bar
-                      key={row.label}
-                      label={row.label}
-                      count={row.count}
-                      total={behavioralTotal}
-                      fill={BEHAVIORAL_FILL[row.label] || 'bg-gray-400'}
-                      title={`${row.label} — ${row.count} resident${row.count === 1 ? '' : 's'}`}
-                      onClick={() => open(RESIDENTS_ACTIVE)}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <Empty>No active resident.</Empty>
-              )}
-              <p className="mt-2.5 text-[10px] leading-relaxed text-gray-400">
-                The rating on each resident's newest Finalized TRI, exactly as their Behavioral tab shows it.
-              </p>
-            </div>
-
-            {/* Case type */}
-            <div className="min-w-0 lg:border-l lg:border-gray-100 lg:pl-6">
-              <GroupHeading label="By case type" count={caseTypeTotal} />
-              {data.residents.byCaseType.length > 0 ? (
-                <div className="space-y-0.5">
-                  {data.residents.byCaseType.map((row) => (
-                    <Bar
-                      key={row.label}
-                      label={row.label}
-                      count={row.count}
-                      total={caseTypeTotal}
-                      fill="bg-[#FFD100]"
-                      onClick={() => open(RESIDENTS_ACTIVE)}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <Empty>No resident has a case type set.</Empty>
-              )}
-            </div>
-          </div>
-        ) : loading ? (
-          <Empty>Reading…</Empty>
-        ) : (
-          <Empty>No active resident is on record.</Empty>
         )}
       </Section>
 
@@ -1246,72 +1493,49 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
           icon={Scale}
           title="Violations"
           subtitle="Incidents still on the books, by severity, and where each one stands."
-          action={
-            <button
-              type="button"
-              onClick={() => open('/violations')}
-              className="shrink-0 text-[11px] font-bold underline decoration-[#FFD100] decoration-2 underline-offset-2 hover:decoration-[#2F3E46]"
-              style={{ color: INK }}
-            >
-              Open Violations
-            </button>
-          }
+          action={<SectionLink label="Open Violations" onClick={() => open('/violations')} />}
         >
           {data ? (
             <div className="space-y-5">
-              <div className="grid grid-cols-3 gap-2.5">
-                {([
-                  { label: 'Minor', count: data.violations.bySeverity.Minor, cls: 'border-yellow-200 bg-yellow-50 text-yellow-700' },
-                  { label: 'Major', count: data.violations.bySeverity.Major, cls: 'border-orange-200 bg-orange-50 text-orange-700' },
-                  { label: 'Critical', count: data.violations.bySeverity.Critical, cls: 'border-red-200 bg-red-50 text-red-700' },
-                ]).map((row) => (
-                  <button
-                    key={row.label}
-                    type="button"
-                    onClick={() => open('/violations')}
-                    className={`rounded-xl border p-3 text-left transition-transform hover:-translate-y-0.5 ${row.cls}`}
-                  >
-                    <span className="block text-[10px] font-bold uppercase tracking-wide opacity-80">{row.label}</span>
-                    <span className="mt-1 block text-2xl font-bold leading-none tabular-nums">{row.count}</span>
-                  </button>
-                ))}
+              <div>
+                <GroupHeading label="Severity of the open cases" count={data.violations.open} />
+                <Donut
+                  rows={severityRows}
+                  colors={SEVERITY_COLORS}
+                  unit="case(s)"
+                  onPick={() => open('/violations')}
+                />
+                <p className="mt-2 text-[10px] text-gray-400">
+                  Resolved and Rejected incidents are excluded — these are the {data.violations.open} still live.
+                </p>
               </div>
-              <p className="-mt-2 text-[10px] text-gray-400">
-                Severity of the {data.violations.open} unresolved incident{data.violations.open === 1 ? '' : 's'} — Resolved and Rejected excluded.
-              </p>
 
-              <dl className="space-y-2 text-xs">
-                {([
-                  ['Reviewed (in the Violation List)', data.violations.reviewed, 'review'],
-                  ['Overdue — intervention month passed', data.violations.overdue, 'danger'],
-                  ['Resolved', data.violations.resolved, 'ok'],
-                  ['Pending review — not yet in the list', data.violations.pendingReview, 'warn'],
-                  ['Rejected', data.violations.rejected, 'muted'],
-                  ['Resolved this month', data.violations.resolvedThisMonth, 'ok'],
-                ] as [string, number, Tone][]).map(([label, count, tone]) => (
-                  <div key={label} className="flex items-center justify-between border-b border-dashed border-gray-100 pb-2 last:border-0">
-                    <dt className="flex items-center gap-2 text-gray-500">
-                      <span className={`h-1.5 w-1.5 rounded-full ${TONE[tone].dot}`} />
-                      {label}
-                    </dt>
-                    <dd className={`font-bold tabular-nums ${count > 0 ? '' : 'text-gray-300'}`} style={count > 0 ? { color: INK } : undefined}>{count}</dd>
-                  </div>
-                ))}
-              </dl>
-
-              {data.violations.list > 0 && (
-                <button
-                  type="button"
-                  onClick={() => open('/violations')}
-                  className="flex w-full items-center justify-between rounded-xl border border-gray-200 px-3.5 py-2.5 text-left transition-colors hover:border-[#FFD100] hover:bg-[#FFD100]/10"
-                >
-                  <span className="text-[11px] font-semibold text-gray-500">Violation List — cases that are neither pending nor rejected</span>
-                  <span className="flex items-center gap-1.5 text-sm font-bold tabular-nums" style={{ color: INK }}>
-                    {data.violations.list}
-                    <ChevronRight className="h-4 w-4 text-gray-300" />
-                  </span>
-                </button>
-              )}
+              <div className="border-t border-gray-100 pt-4">
+                <GroupHeading label="Where each case stands" />
+                <TableShell minWidth="320px">
+                  <tbody className="divide-y divide-gray-100">
+                    {violationBuckets.map((bucket) => (
+                      <Tr key={bucket.label} onClick={() => open('/violations')}>
+                        <Td className="min-w-0">
+                          <span className="flex items-center gap-2">
+                            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${TONE[bucket.tone].dot}`} />
+                            <span className="truncate">{bucket.label}</span>
+                          </span>
+                        </Td>
+                        <Td className={`w-12 text-right font-bold tabular-nums ${bucket.count > 0 ? '' : 'text-gray-300'}`}>
+                          {bucket.count}
+                        </Td>
+                      </Tr>
+                    ))}
+                    <Tr key="list-total" onClick={() => open('/violations')}>
+                      <Td className="min-w-0 font-semibold" style={{ color: INK }}>
+                        Violation List — neither pending nor rejected
+                      </Td>
+                      <Td className="w-12 text-right font-bold tabular-nums" style={{ color: INK }}>{data.violations.list}</Td>
+                    </Tr>
+                  </tbody>
+                </TableShell>
+              </div>
             </div>
           ) : (
             <Empty>Reading…</Empty>
@@ -1320,43 +1544,97 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
 
         <Section
           icon={UserPlus}
-          title="Admissions & Discharges"
+          title="Admissions & Court"
           subtitle={`${data?.admissions.current ?? 0} open admission periods · ${data?.admissions.thisMonth ?? 0} opened and ${data?.discharges.thisMonth ?? 0} closed this month.`}
         >
-          {data && data.admissions.recent.length > 0 ? (
-            <>
-              <GroupHeading label="Most recent admissions" count={data.admissions.recent.length} />
-              <ul className="-mx-1 space-y-0.5">
-                {data.admissions.recent.map((row) => (
-                  <li key={row.id}>
-                    <Row onClick={() => open(`/children/${row.residentId}?tab=personal`)}>
-                      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-gray-100">
-                        <UserPlus className="h-4 w-4 text-[#2F3E46]" />
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-xs font-semibold" style={{ color: INK }}>{row.residentName || row.admissionName || row.residentId}</span>
-                        <span className="block text-[10px] text-gray-400">Admission #{row.admissionNumber}</span>
-                      </span>
-                      <span className="shrink-0 text-[11px] font-semibold text-gray-500">{shortDay(row.admissionDate)}</span>
-                    </Row>
-                  </li>
-                ))}
-              </ul>
-              <div className="mt-4 grid grid-cols-3 gap-2.5 border-t border-dashed border-gray-100 pt-3.5">
+          {data ? (
+            <div className="space-y-5">
+              <div>
+                <GroupHeading label="Most recent admissions" count={data.admissions.recent.length} />
+                {data.admissions.recent.length > 0 ? (
+                  <TableShell minWidth="340px">
+                    <tbody className="divide-y divide-gray-100">
+                      {data.admissions.recent.map((row) => (
+                        <Tr key={row.id} onClick={() => open(`/children/${row.residentId}?tab=personal`)}>
+                          <Td className="min-w-0">
+                            <span className="block truncate font-semibold" style={{ color: INK }}>
+                              {row.residentName || row.admissionName || row.residentId}
+                            </span>
+                            <span className="block text-[10px] text-gray-400">Admission #{row.admissionNumber}</span>
+                          </Td>
+                          <Td className="w-[86px] text-right whitespace-nowrap text-[11px] text-gray-500">{shortDay(row.admissionDate)}</Td>
+                          <GoCell />
+                        </Tr>
+                      ))}
+                    </tbody>
+                  </TableShell>
+                ) : (
+                  <Empty>No admissions recorded yet.</Empty>
+                )}
+              </div>
+
+              <div className="border-t border-gray-100 pt-4">
+                <GroupHeading
+                  label="Court hearings"
+                  count={data.hearings.upcoming + data.hearings.overdue}
+                  tone={data.hearings.overdue ? 'danger' : 'muted'}
+                />
+                {data.hearings.upcomingRows.length + data.hearings.overdueRows.length > 0 ? (
+                  <TableShell minWidth="380px">
+                    <tbody className="divide-y divide-gray-100">
+                      {[...data.hearings.overdueRows, ...data.hearings.upcomingRows].slice(0, 5).map((row) => (
+                        <Tr
+                          key={row.id}
+                          onClick={() => open('/court-records?filter=Scheduled')}
+                          title={`${row.courtName || 'Court'} · ${row.caseNumber || 'no case number'}`}
+                        >
+                          <Td className="min-w-0">
+                            <span className="flex items-center gap-2">
+                              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-amber-50">
+                                <Landmark className="h-3 w-3 text-amber-600" />
+                              </span>
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate text-[11px] font-semibold" style={{ color: INK }}>
+                                  {row.residentName || row.residentId}
+                                </span>
+                                <span className="block truncate text-[10px] text-gray-400">
+                                  {[row.hearingType, row.courtName, row.caseNumber].filter(Boolean).join(' · ') || 'Hearing'}
+                                </span>
+                              </span>
+                            </span>
+                          </Td>
+                          <Td className="w-[92px] text-right whitespace-nowrap">
+                            <span className="block text-[11px] font-semibold text-gray-600">{shortDay(row.hearingDate)}</span>
+                            {row.daysOverdue ? (
+                              <Pill tone="danger">{row.daysOverdue}d late</Pill>
+                            ) : (
+                              <span className="block text-[10px] text-gray-400">{row.hearingTime || '—'}</span>
+                            )}
+                          </Td>
+                        </Tr>
+                      ))}
+                    </tbody>
+                  </TableShell>
+                ) : (
+                  <Clear>No hearing is scheduled and none is awaiting an outcome.</Clear>
+                )}
+              </div>
+
+              <div className="grid grid-cols-3 gap-2.5 border-t border-gray-100 pt-4">
                 {([
                   ['On record', data.residents.total],
                   ['Discharged', data.residents.discharged],
                   ['Absconded', data.residents.absconded],
                 ] as [string, number][]).map(([label, count]) => (
-                  <div key={label}>
+                  <div key={label} className="rounded-lg bg-gray-50 px-3 py-2">
                     <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400">{label}</p>
                     <p className="mt-0.5 text-lg font-bold leading-none tabular-nums" style={{ color: INK }}>{count}</p>
                   </div>
                 ))}
               </div>
-            </>
+            </div>
           ) : (
-            <Empty>No admissions recorded yet.</Empty>
+            <Empty>Reading…</Empty>
           )}
         </Section>
       </div>
@@ -1365,7 +1643,7 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
           rating bands are the instrument's own rule — re-deriving them here
           would be a second copy, which is how the two screens would come to
           disagree about a resident's rating. */}
-      <TriStatistics />
+      <TriStatistics refreshKey={data?.generatedAt} />
 
       <p className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 pb-2 text-center text-[10px] text-gray-400">
         <Stethoscope className="h-3 w-3" />

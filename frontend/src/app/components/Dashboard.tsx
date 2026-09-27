@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/app/components/ui/dialog';
 import { Card, CardContent, CardHeader, CardTitle } from '@/app/components/ui/card';
@@ -15,10 +15,22 @@ import { useData, Child, Assessment, Violation } from '../state/DataContext';
 import { useAuth } from '../state/AuthContext';
 import { request } from '@/services/api';
 import { countTriStatistics } from '@/app/components/TriStatistics';
-import { CenterHeadDashboard } from '@/app/components/CenterHeadDashboard';
+import { lazyComponent, RouteFallback } from '@/app/utils/lazyComponent';
 import { canOpenModule } from '@/app/config/moduleAccess';
 import { formatShortDate } from '@/utils/dateFormatter';
 import { pendingReviewQueue } from '@/utils/pendingDocuments';
+
+/**
+ * The command centre is the only screen that imports recharts — roughly 350 kB
+ * of source for four charts. This module is what *every* role loads, so a static
+ * import put the charting library in the chunk a Psychologist, Nurse or Educator
+ * downloads for a page their role can never open. Split out, it loads only for
+ * the two roles that can reach it.
+ */
+const CenterHeadDashboard = lazyComponent(
+  () => import('@/app/components/CenterHeadDashboard'),
+  'CenterHeadDashboard',
+);
 
 // ── FORM CATALOGUE ──────────────────────────────────────────────────────────
 interface FormEntry {
@@ -1920,7 +1932,11 @@ export function Dashboard() {
    * Every hook above has already run, so returning early is safe.
    */
   if (userRole === 'centerhead' || userRole === 'admin') {
-    return <CenterHeadDashboard displayRole={displayRole} />;
+    return (
+      <Suspense fallback={<RouteFallback />}>
+        <CenterHeadDashboard displayRole={displayRole} />
+      </Suspense>
+    );
   }
 
   return (

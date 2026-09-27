@@ -671,9 +671,20 @@ async function centerHeadOverview(req, res, next) {
     // so this tile and the module's own "For Review" badge read the same number.
     // Both rules are copied from `frontend/src/utils/pendingDocuments.ts` — if
     // either changes, that file and this query have to move together.
+    //
+    // `submittedAt` is only written by an explicit submit transition, so a
+    // document uploaded straight into `Submitted` carries `uploadedAt` and a
+    // NULL `submittedAt` — measured on the live database, 11 of the 12 pending
+    // documents were in that state. Reading `submittedAt` alone therefore left
+    // the "waiting since" column blank for almost every row, and made the
+    // oldest-first ordering meaningless (MySQL sorts NULLs together at the
+    // front). The Documents module already reads these two as one field —
+    // `doc.submittedAt || doc.uploadedAt` in `DocumentUpload.tsx` — so this
+    // query adopts the same rule rather than inventing a second one.
     const documents = await safe('documents', async () => {
       const where = `d.status IN ('Submitted', 'Under Review')
                        AND (c.id IS NULL OR c.status <> 'Discharged')`;
+      const queuedAt = 'COALESCE(d.submittedAt, d.uploadedAt)';
       const [[total], [rows]] = await Promise.all([
         pool.query(
           `SELECT COUNT(*) AS n FROM documents d
@@ -682,12 +693,12 @@ async function centerHeadOverview(req, res, next) {
         ),
         pool.query(
           `SELECT d.id, d.residentId, d.residentName, d.title, d.type, d.documentCategory,
-                  d.status, d.uploaderRole, d.submittedAt, d.phase,
+                  d.status, d.uploaderRole, ${queuedAt} AS submittedAt, d.phase,
                   c.name AS residentNameLive
              FROM documents d
              LEFT JOIN children c ON c.id = d.residentId
             WHERE ${where}
-            ORDER BY d.submittedAt ASC, d.id ASC
+            ORDER BY ${queuedAt} ASC, d.id ASC
             LIMIT 8`
         ),
       ]);
