@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useData } from '@/app/state/DataContext';
-import { request, createResource, updateResource, deleteResource } from '@/services/api';
+import { request, createResource, updateResource, deleteResource, describeError } from '@/services/api';
+import { systemDialog } from '@/app/components/SystemDialog';
 import { useAuth } from '@/app/state/AuthContext';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { SignaturePadModal } from '@/app/components/SignaturePad';
@@ -1062,13 +1063,28 @@ export function Education() {
   };
 
   // ── DELETE STUDENT ────────────────────────────────────────────────────────
-  const handleDelete = () => {
+  const handleDelete = async () => {
     if (!deleteTarget || deleteConfirm !== deleteTarget.name) return;
-    persist(students.filter(s => s.id !== deleteTarget.id));
-    void deleteResource('education-records', deleteTarget.id).catch(error => console.error('Unable to delete education record:', error));
+    const target = deleteTarget;
     setIsDeleteOpen(false);
     setDeleteTarget(null);
     setDeleteConfirm('');
+    // The row leaves the list only once the server has actually deleted it.
+    //
+    // It used to be dropped locally first and the request fired into a
+    // `.catch(console.error)`, so a refused or failed delete was
+    // indistinguishable from a successful one: the student vanished from this
+    // screen while staying in the database — which is precisely how "I deleted
+    // them but the educator still sees them" presents.
+    try {
+      await deleteResource('education-records', target.id);
+      persist(students.filter(s => s.id !== target.id));
+    } catch (error) {
+      void systemDialog.failure(
+        'Could not delete the student',
+        describeError(error, `"${target.name}" was not deleted. It is still on the list.`),
+      );
+    }
   };
 
   // ── VIEW ──────────────────────────────────────────────────────────────────
@@ -1104,42 +1120,21 @@ export function Education() {
         let progress = Array.isArray(progressResult.data) ? progressResult.data.map((r: any) => ({ ...r, studentId: r.educationRecordId || r.studentId })) : [];
         let visits = Array.isArray(visitResult.data) ? visitResult.data.map((r: any) => ({ ...r, studentId: r.educationRecordId || r.studentId })) : [];
 
-        // One-time migration for users who already had Education data in the
-        // browser before the database-backed module was introduced.
-        if (records.length === 0 && students.length > 0) {
-          const idMap = new Map<string, string>();
-          const migrated: Student[] = [];
-          for (const cached of students) {
-            const saved = await createResource<Student>('education-records', {
-              ...cached,
-              id: undefined,
-              residentId: cached.residentId || residents.find(c => c.name.trim().toLowerCase() === cached.name.trim().toLowerCase())?.id,
-            } as any);
-            idMap.set(cached.id, saved.id);
-            migrated.push(saved);
-          }
-          for (const report of progress) {
-            const educationRecordId = idMap.get(report.studentId) || report.studentId;
-            if (!idMap.has(report.studentId)) continue;
-            await createResource<any>('education-progress-reports', {
-              ...report, id: undefined, educationRecordId,
-              residentId: migrated.find(s => s.id === educationRecordId)?.residentId,
-            });
-          }
-          for (const visit of visits) {
-            const educationRecordId = idMap.get(visit.studentId) || visit.studentId;
-            if (!idMap.has(visit.studentId)) continue;
-            await createResource<any>('education-school-visits', {
-              ...visit, id: undefined, educationRecordId,
-              residentId: migrated.find(s => s.id === educationRecordId)?.residentId,
-            });
-          }
-          records = migrated;
-          const progressResult2 = await request<{ success: boolean; data: ProgressReport[] }>('/education-progress-reports');
-          const visitResult2 = await request<{ success: boolean; data: SchoolVisitReport[] }>('/education-school-visits');
-          progress = Array.isArray(progressResult2.data) ? progressResult2.data.map((r: any) => ({ ...r, studentId: r.educationRecordId || r.studentId })) : [];
-          visits = Array.isArray(visitResult2.data) ? visitResult2.data.map((r: any) => ({ ...r, studentId: r.educationRecordId || r.studentId })) : [];
-        }
+        // A one-time migration used to run here: when the database returned no
+        // records but this browser still had the pre-database list cached, every
+        // cached student was written back with `createResource`.
+        //
+        // It is gone because it resurrects deleted records. Deleting the last
+        // student empties the table, which is *exactly* the condition that
+        // migration tested for — so the next browser still holding the old cache
+        // re-created everything that had just been deleted. `generateId` restarts
+        // at `EDU001` once the table is empty, so the revived row even carried the
+        // same id as the one removed, which is what made this look like a cache
+        // problem rather than a write.
+        //
+        // MySQL is the source of truth for this module. The cached list is still
+        // read as the offline fallback in the `catch` below; it is never written
+        // back.
 
         setStudents(records);
         setProgressReports(progress);
