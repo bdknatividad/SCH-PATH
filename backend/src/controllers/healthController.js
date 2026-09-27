@@ -20,6 +20,7 @@ const { RESOURCES } = require('../utils/constants');
 const { normalizeRole } = require('../utils/authorization');
 const { categoryForDocument } = require('../utils/documentCategory');
 const { buildHealthRecordDocument } = require('../utils/healthRecordPdf');
+const notifications = require('../services/notificationService');
 
 const baseController = createController('healthRecords');
 
@@ -251,6 +252,45 @@ function validateHealthRecord(data, partial = false) {
  * `refreshData()` as soon as this request resolves, and a document written after
  * the response would not be in that reload — which is the whole bug.
  */
+/**
+ * Tell everyone the matrix lets read this resident's **Medical** tab about a
+ * change to their health record — plus the Houseparents assigned to them.
+ *
+ * The Health module notified nobody at all. A nurse could file a health record, a
+ * prescription note or a whole health form and the people responsible for the
+ * child's daily care were never told, while the record quietly appeared in a tab
+ * they had no reason to open.
+ *
+ * Derived through `notifyResidentEvent`, so the audience follows the same boundary
+ * as the data — the Educator, who holds no Medical tab, is not told — and the
+ * Houseparents are added **by id**, so it is the one assigned to this child rather
+ * than the whole role.
+ *
+ * Fire-and-forget and after the write: a notification that cannot be written is
+ * not a reason to lose the record.
+ */
+async function announceHealthWrite(req, record, label) {
+  try {
+    const residentId = record?.residentId || null;
+    const name = residentId ? await notifications.residentName(residentId) : null;
+    await notifications.notifyResidentEvent(
+      {
+        type: 'Health',
+        priority: 'Medium',
+        residentId,
+        relatedRecordType: 'healthrecords',
+        relatedRecordId: record?.id || null,
+        actorUsername: req.user?.username || null,
+        title: `Health — ${label}${name ? `: ${name}` : ''}`,
+        message: `${req.user?.username || 'The Nurse'} ${label}${name ? ` for ${name}` : ''}. Open the resident's Medical tab to review it.`,
+      },
+      { subModule: 'Medical' },
+    );
+  } catch (error) {
+    console.error(`[Health] "${label}" notification failed (non-fatal):`, error.message);
+  }
+}
+
 async function create(req, res, next) {
   try {
     const data = req.body || {};
@@ -279,6 +319,8 @@ async function create(req, res, next) {
     const [rows] = await pool.query('SELECT * FROM healthRecords WHERE id = ?', [newId]);
     const record = mapRow('healthRecords', rows[0]);
     const documentId = await publishSafely(record, req.user);
+
+    await announceHealthWrite(req, record, 'logged a health record');
 
     res.status(201).json({
       success: true,
@@ -326,6 +368,8 @@ async function update(req, res, next) {
     const [rows] = await pool.query('SELECT * FROM healthRecords WHERE id = ?', [id]);
     const record = mapRow('healthRecords', rows[0]);
     const documentId = await publishSafely(record, req.user);
+
+    await announceHealthWrite(req, record, 'updated a health record');
 
     res.json({
       success: true,
@@ -377,9 +421,12 @@ async function markPrescriptionGiven(req, res, next) {
     );
 
     const [rows] = await pool.query('SELECT * FROM healthRecords WHERE id = ?', [id]);
+    const record = mapRow('healthRecords', rows[0]);
+    await announceHealthWrite(req, record, given ? 'marked a prescription as given' : 'cleared a prescription');
+
     res.json({
       success: true,
-      data: mapRow('healthRecords', rows[0]),
+      data: record,
       message: given ? 'Prescription marked as given.' : 'Prescription marked as not yet given.',
     });
   } catch (error) {
@@ -413,6 +460,9 @@ async function remove(req, res, next) {
     } catch (error) {
       console.error(`[Health Controller] Removing the published document for ${id} failed (non-fatal):`, error.message);
     }
+
+    // Announced from the row read before the delete — by now it is gone.
+    await announceHealthWrite(req, mapRow('healthRecords', existing[0]), 'removed a health record');
 
     res.json({ success: true, message: 'healthRecords deleted successfully' });
   } catch (error) {
