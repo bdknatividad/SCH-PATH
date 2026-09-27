@@ -144,6 +144,12 @@ const RAW_ISO_ALLOWED = new Set([
   // `summary` column) and `generatedAt` sits beside it, not inside it, so there
   // is no query this value can reach.
   'reportController.js:generatedAt',
+  // The Center Head dashboard's "read at" stamp. It is a response-only field on
+  // the dashboard payload — the browser formats it with an explicit
+  // `Asia/Manila` zone — and the controller issues no query with it. Every
+  // DATETIME this endpoint does write or compare goes through the pool's
+  // `dateStrings` handling or a `YYYY-MM-DD` calendar string.
+  'dashboardController.js:generatedAt',
 ]);
 
 /** A `toISOString()` result reduced to a DATE, or to MySQL's datetime shape. */

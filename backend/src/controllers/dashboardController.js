@@ -249,12 +249,71 @@ function countOf(rows) {
   return Number(rows?.[0]?.n ?? 0) || 0;
 }
 
-/** `{ key: count }` from a `GROUP BY` of `(key, COUNT(*) AS n)`. */
-function tallyBy(rows, key = 'label') {
+/**
+ * `{ key: count }` from a `GROUP BY` of `(<column>, COUNT(*) AS n)`.
+ *
+ * `key` is required, and deliberately has no default. It used to default to
+ * `'label'`, and three callers handed it a query that selected `status` or
+ * `severity` — so every lookup missed, `byStatus.Active` was `undefined`, and
+ * the residents tiles read **0** while the database held eight, with the
+ * violations tiles showing whichever status MySQL happened to return last. The
+ * helper is now the one place that can notice the mismatch, so it does: a
+ * missing key throws, and the section degrades loudly instead of reporting an
+ * empty facility.
+ */
+function tallyBy(rows, key) {
+  if (!key) throw new Error('tallyBy requires the column name to group by');
   const out = {};
   for (const row of rows || []) out[String(row[key] ?? '')] = Number(row.n) || 0;
   return out;
 }
+
+/**
+ * The Child Records module's own definition of an active resident — the exact
+ * predicate behind its **Active** filter (`ChildRecords.tsx`, `matchesStatus`):
+ * everything that is not Discharged and not Absconded.
+ *
+ * Written once and used by every resident breakdown on this page, so the tile,
+ * the rehabilitation-phase mix, the behavioural mix and the case-type mix are
+ * all counting the same population. Note this is deliberately *not*
+ * `status = 'Active'`: the two agree today because the column is an ENUM of
+ * exactly three values, but the module's rule is the one the Center Head can
+ * check by clicking through, so that is the one implemented here.
+ */
+const ACTIVE_RESIDENT_WHERE = "status NOT IN ('Discharged', 'Absconded')";
+
+/**
+ * The rating bands the Child Detail's Behavioral tab prints, in the order that
+ * tab ranks them. `Still Monitoring` is the tab's own word for a resident with
+ * no Finalized TRI yet; `Not Rated` is a Finalized TRI whose rating is blank.
+ * Anything else the TRI can hold is appended after these rather than dropped.
+ */
+const BEHAVIORAL_ORDER = [
+  'Very Good',
+  'Good',
+  'Fair',
+  'Needs Improvement',
+  'Not Rated',
+  'Still Monitoring',
+];
+
+/**
+ * Every kind of dated commitment that reaches the schedule feed, named once.
+ * The per-kind counts, the section's own fallback and the client's icon map all
+ * read from this list, so a new kind cannot be counted in one place and missing
+ * in another.
+ */
+const SCHEDULE_KINDS = [
+  'activity',
+  'assessment',
+  'hearing',
+  'intervention',
+  'schoolVisit',
+  'triDeadline',
+];
+
+/** The all-zero shape of `today` / `upcomingCounts` / `overdueCounts`. */
+const ZERO_SCHEDULE_COUNTS = Object.fromEntries([...SCHEDULE_KINDS, 'total'].map((kind) => [kind, 0]));
 
 /**
  * The phase names the rest of the system prints, and the short forms the
@@ -329,35 +388,78 @@ async function centerHeadOverview(req, res, next) {
 
     // ── Residents ──────────────────────────────────────────────────────────
     const residents = await safe('residents', async () => {
-      const [[statusRows], [phaseRows], [caseTypeRows]] = await Promise.all([
+      const [[statusRows], [activeRows], [phaseRows], [caseTypeRows]] = await Promise.all([
         pool.query('SELECT status, COUNT(*) AS n FROM children GROUP BY status'),
+        pool.query(`SELECT COUNT(*) AS n FROM children WHERE ${ACTIVE_RESIDENT_WHERE}`),
         pool.query(
           `SELECT COALESCE(casePhase, '') AS label, COUNT(*) AS n
-             FROM children WHERE status = 'Active' GROUP BY label`
+             FROM children WHERE ${ACTIVE_RESIDENT_WHERE} GROUP BY label`
         ),
         pool.query(
           `SELECT COALESCE(caseType, '') AS label, COUNT(*) AS n
-             FROM children WHERE status = 'Active' GROUP BY label`
+             FROM children WHERE ${ACTIVE_RESIDENT_WHERE} GROUP BY label`
         ),
       ]);
-      const byStatus = tallyBy(statusRows);
-      const byPhase = Object.entries(tallyBy(phaseRows))
+      const byStatus = tallyBy(statusRows, 'status');
+      const byPhase = Object.entries(tallyBy(phaseRows, 'label'))
         .map(([phase, count]) => ({ phase, short: PHASE_SHORT[phase] || phase || 'Unassigned', count }))
         .filter((row) => row.count > 0)
         .sort((a, b) => b.count - a.count);
-      const byCaseType = Object.entries(tallyBy(caseTypeRows))
+      const byCaseType = Object.entries(tallyBy(caseTypeRows, 'label'))
         .map(([label, count]) => ({ label: label || 'Unspecified', count }))
         .filter((row) => row.count > 0)
         .sort((a, b) => b.count - a.count);
+
+      // ── Behavioural status ───────────────────────────────────────────────
+      // The Behavioral tab on a resident's page prints `behaviorSummary.status`
+      // (ChildDetail.tsx): the rating on their newest **Finalized** TRI, or
+      // "Still Monitoring" when they have none, with a Finalized TRI whose
+      // rating is blank reading "Not Rated". Same rule here, so this breakdown
+      // and the resident's own page cannot disagree about a rating.
+      //
+      // Guarded on its own: `triRecords` has a boot migration, but a missing
+      // table would otherwise take the resident counts down with it, and a
+      // behavioural split is not worth a blank KPI row.
+      let behavioral = [];
+      try {
+        const [rows] = await pool.query(
+          `SELECT CASE WHEN t.id IS NULL THEN 'Still Monitoring'
+                       ELSE COALESCE(NULLIF(t.rating, ''), 'Not Rated') END AS label,
+                  COUNT(*) AS n
+             FROM children c
+             LEFT JOIN triRecords t
+               ON t.id = (
+                    SELECT t2.id FROM triRecords t2
+                     WHERE t2.residentId = c.id AND t2.status = 'Finalized'
+                     ORDER BY t2.reportingYear DESC, t2.reportingMonth DESC,
+                              t2.finalizedAt DESC, t2.id DESC
+                     LIMIT 1)
+            WHERE c.${ACTIVE_RESIDENT_WHERE}
+            GROUP BY label`
+        );
+        const tally = tallyBy(rows, 'label');
+        behavioral = BEHAVIORAL_ORDER.filter((label) => (tally[label] || 0) > 0)
+          .map((label) => ({ label, count: tally[label] }));
+        // A band the order does not name is still a real rating — count it.
+        for (const [label, count] of Object.entries(tally)) {
+          if (!BEHAVIORAL_ORDER.includes(label) && count > 0) behavioral.push({ label, count });
+        }
+      } catch (error) {
+        console.error('Center Head dashboard — behavioral status failed:', error.message);
+      }
+
       return {
-        active: byStatus.Active || 0,
+        active: countOf(activeRows),
         discharged: byStatus.Discharged || 0,
         absconded: byStatus.Absconded || 0,
-        total: (byStatus.Active || 0) + (byStatus.Discharged || 0) + (byStatus.Absconded || 0),
+        total: Object.values(byStatus).reduce((sum, count) => sum + count, 0),
         byPhase,
         byCaseType,
+        behavioral,
       };
-    }, { active: 0, discharged: 0, absconded: 0, total: 0, byPhase: [], byCaseType: [] });
+    }, {
+      active: 0, discharged: 0, absconded: 0, total: 0, byPhase: [], byCaseType: [], behavioral: [],
+    });
 
     // ── Admissions ─────────────────────────────────────────────────────────
     // `admissions.status` is per admission period, not per resident: a returning
@@ -479,30 +581,77 @@ async function centerHeadOverview(req, res, next) {
     }, { upcoming: 0, overdue: 0, upcomingRows: [], overdueRows: [] });
 
     // ── Violations ─────────────────────────────────────────────────────────
-    // "Open" is everything not Resolved and not Rejected — the two terminal
-    // states. `Pending Review` and `Under Investigation` are the two that still
-    // need somebody's decision.
+    // Two different questions, and the module answers both:
+    //
+    //   The **Violation List** (`filteredViolations` in Violations.tsx) is every
+    //   violation that is not `Pending Review` and not `Rejected` — the ones
+    //   that actually exist as cases. Within it the status filter offers
+    //   Reviewed / Overdue / Resolved, and `getDisplayStatus` decides which a row
+    //   is:
+    //     Resolved   `status = 'Resolved'`
+    //     Overdue    `Escalated`, or the intervention month has passed with
+    //                nobody having decided it
+    //     Reviewed   `Reviewed` or `Under Investigation`, and not yet overdue
+    //
+    //   **Open** is the wider set: everything not Resolved and not Rejected,
+    //   which additionally includes `Pending Review` — reports nobody has looked
+    //   at yet. Those are deliberately *not* in the Violation List, so they are
+    //   reported separately rather than folded into it.
+    //
+    // `active` is the Reviewed bucket, which is the number the Center Head sees
+    // after opening Violations and picking Reviewed from the status filter.
+    //
+    // The month comparison uses the facility's calendar month, which `today`
+    // already is. The module does the same comparison in the browser against
+    // `new Date().toISOString()`, so on the last eight hours of a month the two
+    // can differ by one month; the facility's own calendar is the right one to
+    // report from here.
     const violations = await safe('violations', async () => {
-      const [[statusRows], [severityRows], [resolvedThisMonth]] = await Promise.all([
-        pool.query('SELECT status, COUNT(*) AS n FROM violations GROUP BY status'),
-        pool.query(
-          `SELECT severity, COUNT(*) AS n FROM violations
-            WHERE status NOT IN ('Resolved', 'Rejected') GROUP BY severity`
-        ),
-        pool.query("SELECT COUNT(*) AS n FROM violations WHERE status = 'Resolved' AND date >= ?", [
-          monthStart,
-        ]),
-      ]);
-      const byStatus = tallyBy(statusRows);
-      const bySeverity = tallyBy(severityRows);
-      const open = Object.entries(byStatus)
-        .filter(([status]) => status !== 'Resolved' && status !== 'Rejected')
-        .reduce((sum, [, count]) => sum + count, 0);
+      const month = today.slice(0, 7);
+      const [[statusRows], [displayRows], [severityRows], [resolvedThisMonth], [listRows]] =
+        await Promise.all([
+          pool.query('SELECT status, COUNT(*) AS n FROM violations GROUP BY status'),
+          pool.query(
+            `SELECT CASE
+                      WHEN status = 'Resolved' THEN 'Resolved'
+                      WHEN status = 'Escalated' THEN 'Overdue'
+                      WHEN COALESCE(NULLIF(interventionMonth, ''), DATE_FORMAT(date, '%Y-%m')) < ?
+                           AND status NOT IN ('Pending Review', 'Rejected') THEN 'Overdue'
+                      WHEN status IN ('Reviewed', 'Under Investigation') THEN 'Reviewed'
+                      ELSE status
+                    END AS label,
+                    COUNT(*) AS n
+               FROM violations
+              GROUP BY label`,
+            [month]
+          ),
+          pool.query(
+            `SELECT severity, COUNT(*) AS n FROM violations
+              WHERE status NOT IN ('Resolved', 'Rejected') GROUP BY severity`
+          ),
+          pool.query("SELECT COUNT(*) AS n FROM violations WHERE status = 'Resolved' AND date >= ?", [
+            monthStart,
+          ]),
+          pool.query(
+            "SELECT COUNT(*) AS n FROM violations WHERE status NOT IN ('Pending Review', 'Rejected')"
+          ),
+        ]);
+      const byStatus = tallyBy(statusRows, 'status');
+      const display = tallyBy(displayRows, 'label');
+      const bySeverity = tallyBy(severityRows, 'severity');
       return {
-        open,
+        active: display.Reviewed || 0,
+        list: countOf(listRows),
+        reviewed: display.Reviewed || 0,
+        overdue: display.Overdue || 0,
+        resolved: display.Resolved || 0,
+        open: Object.entries(byStatus)
+          .filter(([status]) => status !== 'Resolved' && status !== 'Rejected')
+          .reduce((sum, [, count]) => sum + count, 0),
         pendingReview: byStatus['Pending Review'] || 0,
         underInvestigation: byStatus['Under Investigation'] || 0,
         escalated: byStatus.Escalated || 0,
+        rejected: byStatus.Rejected || 0,
         resolvedThisMonth: countOf(resolvedThisMonth),
         bySeverity: {
           Minor: bySeverity.Minor || 0,
@@ -511,7 +660,8 @@ async function centerHeadOverview(req, res, next) {
         },
       };
     }, {
-      open: 0, pendingReview: 0, underInvestigation: 0, escalated: 0, resolvedThisMonth: 0,
+      active: 0, list: 0, reviewed: 0, overdue: 0, resolved: 0, open: 0,
+      pendingReview: 0, underInvestigation: 0, escalated: 0, rejected: 0, resolvedThisMonth: 0,
       bySeverity: { Minor: 0, Major: 0, Critical: 0 },
     });
 
@@ -650,10 +800,17 @@ async function centerHeadOverview(req, res, next) {
     //   hearings      Scheduled
     //   interventions In Progress with a schedule
     //   school visits Scheduled
+    //   TRI deadlines not yet Finalized, with a submission deadline
     // The counts are the lengths of the same arrays the feed is drawn from, so
     // the number on a tile and the rows behind it cannot disagree.
     const schedules = await safe('schedules', async () => {
-      const [activityRows, assessmentRows, interventionRows, visitRows] = await Promise.all([
+      // Each element of `Promise.all` is `pool.query`'s `[rows, fields]` pair,
+      // so every binding below needs the inner destructure. Without it
+      // `activityRows` was `[rowsArray, fieldsArray]`, the loop read `.date` off
+      // two arrays, every entry was skipped for a null day, and four of the five
+      // kinds silently never reached the feed — while hearings, which come from
+      // an already-destructured section, kept working.
+      const [[activityRows], [assessmentRows], [interventionRows], [visitRows]] = await Promise.all([
         pool.query(
           `SELECT a.id, a.title, a.date, a.time, a.location, a.type, a.status
              FROM activities a
@@ -683,6 +840,24 @@ async function centerHeadOverview(req, res, next) {
             ORDER BY v.visitDate ASC`
         ),
       ]);
+
+      // TRI submission deadlines. A TRI that is still owed has a deadline; one
+      // that is already Finalized does not, so the Finalized rows are excluded
+      // rather than reported as work outstanding. Guarded on its own — a
+      // deadline is a useful extra on this feed and must not be able to empty it.
+      let deadlineRows = [];
+      try {
+        const [rows] = await pool.query(
+          `SELECT t.id, t.residentId, t.status, t.submissionDeadline, c.name AS residentName
+             FROM triRecords t
+             LEFT JOIN children c ON c.id = t.residentId
+            WHERE t.submissionDeadline IS NOT NULL AND t.status <> 'Finalized'
+            ORDER BY t.submissionDeadline ASC`
+        );
+        deadlineRows = rows;
+      } catch (error) {
+        console.error('Center Head dashboard — TRI deadlines failed:', error.message);
+      }
 
       /** One feed entry. `kind` is what the client maps to a route. */
       const entry = (kind, row) => ({ kind, ...row });
@@ -743,6 +918,16 @@ async function centerHeadOverview(req, res, next) {
         });
         (days < 0 ? overdue : upcoming).push(item);
       }
+      for (const row of deadlineRows) {
+        const days = daysBetween(today, row.submissionDeadline);
+        if (days === null) continue;
+        const item = entry('triDeadline', {
+          id: row.id, residentId: row.residentId, residentName: row.residentName,
+          title: row.residentName ? `TRI submission — ${row.residentName}` : 'TRI submission',
+          date: row.submissionDeadline, status: row.status, days,
+        });
+        (days < 0 ? overdue : upcoming).push(item);
+      }
 
       const byDate = (a, b) =>
         String(a.date || '').localeCompare(String(b.date || '')) ||
@@ -751,41 +936,29 @@ async function centerHeadOverview(req, res, next) {
       overdue.sort(byDate);
 
       const todays = upcoming.filter((item) => item.days === 0);
-      const countKind = (list, kind) => list.filter((item) => item.kind === kind).length;
+
+      // One list of kinds, counted three times. Naming them once is what keeps
+      // `today`, `upcomingCounts` and `overdueCounts` from drifting apart — a
+      // kind added to one object and forgotten in another is a tile that
+      // disagrees with the feed printed underneath it.
+      const countsOf = (list) => {
+        const out = {};
+        for (const kind of SCHEDULE_KINDS) out[kind] = list.filter((item) => item.kind === kind).length;
+        out.total = list.length;
+        return out;
+      };
 
       return {
-        today: {
-          date: today,
-          activities: countKind(todays, 'activity'),
-          assessments: countKind(todays, 'assessment'),
-          hearings: countKind(todays, 'hearing'),
-          interventions: countKind(todays, 'intervention'),
-          schoolVisits: countKind(todays, 'schoolVisit'),
-          total: todays.length,
-        },
-        upcomingCounts: {
-          activities: countKind(upcoming, 'activity'),
-          assessments: countKind(upcoming, 'assessment'),
-          hearings: countKind(upcoming, 'hearing'),
-          interventions: countKind(upcoming, 'intervention'),
-          schoolVisits: countKind(upcoming, 'schoolVisit'),
-          total: upcoming.length,
-        },
-        overdueCounts: {
-          activities: countKind(overdue, 'activity'),
-          assessments: countKind(overdue, 'assessment'),
-          hearings: countKind(overdue, 'hearing'),
-          interventions: countKind(overdue, 'intervention'),
-          schoolVisits: countKind(overdue, 'schoolVisit'),
-          total: overdue.length,
-        },
+        today: { date: today, ...countsOf(todays) },
+        upcomingCounts: countsOf(upcoming),
+        overdueCounts: countsOf(overdue),
         upcoming: upcoming.slice(0, 14),
         overdue: overdue.slice(0, 10),
       };
     }, {
-      today: { date: today, activities: 0, assessments: 0, hearings: 0, interventions: 0, schoolVisits: 0, total: 0 },
-      upcomingCounts: { activities: 0, assessments: 0, hearings: 0, interventions: 0, schoolVisits: 0, total: 0 },
-      overdueCounts: { activities: 0, assessments: 0, hearings: 0, interventions: 0, schoolVisits: 0, total: 0 },
+      today: { date: today, ...ZERO_SCHEDULE_COUNTS },
+      upcomingCounts: { ...ZERO_SCHEDULE_COUNTS },
+      overdueCounts: { ...ZERO_SCHEDULE_COUNTS },
       upcoming: [],
       overdue: [],
     });
