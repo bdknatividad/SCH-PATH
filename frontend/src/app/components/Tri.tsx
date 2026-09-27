@@ -723,7 +723,7 @@ function OfficialTriEditor({
   const currentRating = totalPoints >= 451 ? 'Very Good' : totalPoints >= 301 ? 'Good' : totalPoints >= 151 ? 'Fair' : totalPoints >= 1 ? 'Needs Improvement' : '';
   const displayFinalPoints = String(record?.finalPoints ?? totalPoints).trim().match(/^\d+(?:\.\d+)?/)?.[0] || '';
 
-  const overlayButton = 'absolute z-10 m-0 border-0 bg-transparent p-0 text-center text-[10px] font-bold leading-none text-black hover:bg-yellow-200/60 focus:bg-yellow-200/70 focus:outline focus:outline-2 focus:outline-yellow-500 disabled:pointer-events-none';
+  const overlayButton = 'pdf-overlay-cell absolute z-10 m-0 border-0 bg-transparent p-0 text-center text-[10px] font-bold leading-none text-black hover:bg-yellow-200/60 focus:bg-yellow-200/70 focus:outline focus:outline-2 focus:outline-yellow-500 disabled:pointer-events-none';
 
   return (
     <>

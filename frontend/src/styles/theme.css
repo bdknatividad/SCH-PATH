@@ -334,9 +334,9 @@
     the `ui/` wrappers. `hidden` and `range` are excluded: a hidden input has no
     box to size, and a range slider is dragged rather than tapped.
   */
-  input:not([type='checkbox']):not([type='radio']):not([type='hidden']):not([type='file']):not([type='range']),
-  select,
-  textarea {
+  input:not([type='checkbox']):not([type='radio']):not([type='hidden']):not([type='file']):not([type='range']):not(.pdf-overlay-cell),
+  select:not(.pdf-overlay-cell),
+  textarea:not(.pdf-overlay-cell) {
     min-height: 44px;
   }
 
@@ -349,9 +349,18 @@
     Tabs are excluded deliberately. A `TabsTrigger` is `h-[calc(100%-1px)]`
     inside a fixed-height `TabsList`, so forcing it taller would push it out of
     its own strip.
+
+    `.pdf-overlay-cell` is excluded for the same reason, and the cost of getting
+    it wrong was visible on every phone. The TRI score grid and the Anecdotal
+    Report's fields are absolutely-positioned boxes laid over the official PDF, a
+    row high each — about 14px at phone width. A 40px floor made every cell three
+    rows tall, so they overlapped and the X drawn in one row appeared in the one
+    below: "I checked the first item and the X goes to the second". These are not
+    standalone controls to tap in isolation; they are a grid, and their size is
+    the form's, not the theme's.
   */
-  button:not([data-slot='tabs-trigger']),
-  [role='button']:not([data-slot='tabs-trigger']) {
+  button:not([data-slot='tabs-trigger']):not(.pdf-overlay-cell),
+  [role='button']:not([data-slot='tabs-trigger']):not(.pdf-overlay-cell) {
     min-height: 40px;
   }
 

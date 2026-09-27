@@ -200,8 +200,8 @@ function AnecdotalPdfEditor({
   const dateParts = reportDate ? reportDate.slice(0, 10).split('-').map(Number) : [0,0,0];
   const monthLabel = dateParts[1] ? MONTHS[dateParts[1] - 1] : '';
 
-  const overlay = 'absolute z-10 border-0 bg-white/65 px-1 text-[clamp(7px,1vw,12px)] text-black outline-none focus:bg-yellow-100/70 disabled:bg-white/40';
-  const areaOverlay = 'absolute z-10 resize-none rounded-sm border border-transparent bg-white/55 px-1 text-[clamp(6px,0.9vw,11px)] leading-[1.35] text-black outline-none focus:border-yellow-400 focus:bg-yellow-100/80 disabled:border-transparent disabled:bg-white/35';
+  const overlay = 'pdf-overlay-cell absolute z-10 border-0 bg-white/65 px-1 text-[clamp(7px,1vw,12px)] text-black outline-none focus:bg-yellow-100/70 disabled:bg-white/40';
+  const areaOverlay = 'pdf-overlay-cell absolute z-10 resize-none rounded-sm border border-transparent bg-white/55 px-1 text-[clamp(6px,0.9vw,11px)] leading-[1.35] text-black outline-none focus:border-yellow-400 focus:bg-yellow-100/80 disabled:border-transparent disabled:bg-white/35';
 
   return (
     <div ref={hostRef} className="min-h-0 flex-1 overflow-y-auto bg-neutral-200 p-2 sm:p-4">
