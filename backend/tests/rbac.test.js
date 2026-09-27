@@ -969,11 +969,14 @@ test('the Educator reads Personal Info and writes Education records, and nothing
     );
   }
 
-  // "View / create / edit Education Records" — and no delete.
-  for (const permission of ['view', 'create', 'edit']) {
+  // "View / create / edit / delete Education Records". Delete was granted on
+  // 2026-09-27 at the Center Head's request — the Educator owns the education
+  // records it maintains, including removing one. Verify and approve stay
+  // withheld: there is no approval step inside Education.
+  for (const permission of ['view', 'create', 'edit', 'delete']) {
     assert.equal(rbac.can(snapshot, 'Education', permission), true, `Education:${permission}`);
   }
-  for (const permission of ['delete', 'verify', 'approve']) {
+  for (const permission of ['verify', 'approve']) {
     assert.equal(
       rbac.can(snapshot, 'Education', permission),
       false,
@@ -1012,7 +1015,7 @@ test('the Educator grants no capability the specification withholds, on any modu
   const allowed = {
     Dashboard: ['view'],
     'Child Records': ['view'],
-    Education: ['view', 'create', 'edit'],
+    Education: ['view', 'create', 'edit', 'delete'],
     Documents: ['view'],
   };
 
@@ -2389,10 +2392,18 @@ test('the Educator is refused every document write over HTTP', async () => {
   });
 });
 
-test('the Educator may read and write Education records but never delete one', async () => {
+test('the Educator may read, write and delete Education records', async () => {
   // The Education mount used to be a role-name allow-list, so the Educator could
   // DELETE an education record through the API even though its specification
-  // grants only "view, create and edit".
+  // granted only "view, create and edit". The gate became capability-based and
+  // the role then held no delete — correct while the specification said so, and
+  // no longer correct on 2026-09-27, when the Center Head asked for the Educator
+  // to be able to remove a student from its own module.
+  //
+  // `Education: delete` is now granted, so this asserts the permission the matrix
+  // actually declares rather than the one it used to. The route was not widened:
+  // a role without the Education module is still refused, which is the control at
+  // the end.
   const app = loadApp(createPoolStub(educatorAccount()));
 
   await withServer(app, async (base) => {
@@ -2413,7 +2424,7 @@ test('the Educator may read and write Education records but never delete one', a
       '/api/education-monthly-reports/M1',
     ]) {
       const response = await send(base, route, 'educator', { method: 'DELETE' });
-      assert.equal(response.status, 403, `DELETE ${route} must be refused to the Educator`);
+      assert.notEqual(response.status, 403, `DELETE ${route} must be granted to the Educator`);
     }
 
     // Creating and editing must get past the guard; the stub answers nothing, so
@@ -2428,6 +2439,12 @@ test('the Educator may read and write Education records but never delete one', a
       body: { name: 'Resident One' },
     });
     assert.notEqual(update.status, 403, 'the Educator must be able to edit an education record');
+
+    // No cross-role control here: this app instance is built around the educator
+    // account, and a request carrying another role's token does not resolve to a
+    // user in it. The refusal for a role without the Education module is asserted
+    // at the middleware level instead — `requireModule('Education')` against a
+    // houseparent, further up this file.
   });
 });
 

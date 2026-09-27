@@ -428,7 +428,7 @@
     "educator": {
       "label": "Educator",
       "fullAccess": false,
-      "description": "Education records and school-related documentation for residents. Holds Dashboard, Child Records (Personal Info and the Education tab, read-only), the Education module and Documents. The dashboard is education-only. Never reaches Medical records, the Health module, Violations, Incidents, Admissions or any administrative module, and holds no document create, delete or global approval: a document outside the Education categories is readable only through an approved document access request.",
+      "description": "Education records and school-related documentation for residents. Holds Dashboard, Child Records (Personal Info and the Education tab, read-only), the Education module and Documents. The dashboard is education-only. Never reaches Medical records, the Health module, Violations, Incidents, Admissions or any administrative module, and holds no document create, delete or global approval: a document outside the Education categories is readable only through an approved document access request. Delete is held on Education and on nothing else — the role owns the education records it maintains, including removing one.",
       "modules": [
         "Dashboard",
         "Child Records",
@@ -456,7 +456,8 @@
         "Education": [
           "view",
           "create",
-          "edit"
+          "edit",
+          "delete"
         ],
         "Documents": [
           "view"
