@@ -11,7 +11,7 @@ const { insertWithGeneratedId, mapRow, normalizeDatetimes } = require('../utils/
 const { ApiError } = require('../middleware/errorHandler');
 const { canAccessResident } = require('./assignmentController');
 const { DOCUMENT_ROLE_PERMISSIONS, PHASE_REQUIREMENTS, CASE_PHASES, RESOURCES } = require('../utils/constants');
-const { normalizeRole } = require('../utils/authorization');
+const { normalizeRole, isSystemWide } = require('../utils/authorization');
 const { contentDisposition } = require('../utils/contentDisposition');
 const { buildAnecdotalReportDocument, isOfficialAnecdotalPdf } = require('../utils/anecdotalReportPdf');
 const { categoryForDocument, folderForDocument, DOCUMENT_FOLDERS } = require('../utils/documentCategory');
@@ -871,23 +871,44 @@ async function submit(req, res, next) {
     const isResubmission = ['Rejected', 'Reassessment'].includes(existing.status);
     const revision = isResubmission ? (Number(existing.revision) || 1) + 1 : (Number(existing.revision) || 1);
 
+    /**
+     * A submission by a system-wide role is final on submission.
+     *
+     * The Center Head holds system-wide access and the Administrator holds every
+     * module, so there is nobody above them to verify their own paperwork. Sending
+     * it to `Under Review` left the Center Head's own document waiting on a
+     * reviewer who could only be the Center Head.
+     *
+     * Scoped to those two roles: a Social Worker's or an Educator's submission
+     * still goes to the review queue.
+     */
+    const selfApproving = isSystemWide(req.user);
+    const nextStatus = selfApproving ? 'Approved' : 'Under Review';
+
     await pool.query(
       `UPDATE documents
-          SET status = 'Under Review', submittedBy = ?, submittedAt = NOW(),
-              revision = ?, approvedBy = NULL, approvedAt = NULL,
+          SET status = ?, submittedBy = ?, submittedAt = NOW(),
+              revision = ?, approvedBy = ?, approvedAt = ${selfApproving ? 'NOW()' : 'NULL'},
               modifiedBy = ?, updatedAt = CURRENT_TIMESTAMP
         WHERE id = ?`,
-      [actor, revision, req.user?.username || actor, id]
+      [
+        nextStatus,
+        actor,
+        revision,
+        selfApproving ? (req.user?.username || actor) : null,
+        req.user?.username || actor,
+        id,
+      ]
     );
 
     const [updatedRows] = await pool.query('SELECT * FROM documents WHERE id = ? LIMIT 1', [id]);
     const updated = updatedRows[0];
 
     await recordRevision(updated, {
-      action: isResubmission ? 'Resubmitted' : 'Submitted',
+      action: selfApproving ? 'Approved' : (isResubmission ? 'Resubmitted' : 'Submitted'),
       actor: req.user,
       actorName: actor,
-      status: 'Under Review',
+      status: nextStatus,
       reason: isResubmission ? (existing.rejectionReason || null) : null,
       snapshot: revisionSnapshot(updated),
     });
@@ -901,28 +922,38 @@ async function submit(req, res, next) {
       );
     }
 
-    // Put the resubmission back in the same reviewer queue as a new submission.
-    try {
-      const reviewerUsers = await notifications.usersWithAnyRole(APPROVER_ROLES);
-      if (reviewerUsers.length) {
-        const residentName = existing.residentId ? await notifications.residentName(existing.residentId) : null;
-        await notifications.notifyUsers(reviewerUsers.map(u => u.id), {
-          type: isIncidentReport ? 'Incident Report Resubmitted' : 'Document Resubmitted',
-          title: `${isIncidentReport ? 'Incident Report' : 'Document'} Resubmitted${residentName ? ` — ${residentName}` : ''}`,
-          message: `${actor} resubmitted ${existing.title || 'the document'}${residentName ? ` for ${residentName}` : ''}. It is waiting for review again.`,
-          priority: 'High',
-          actionRequired: 'Review the resubmitted item.',
-          residentId: existing.residentId || null,
-          relatedRecordType: isIncidentReport ? 'incidentReports' : 'documents',
-          relatedRecordId: isIncidentReport ? ((await pool.query('SELECT id FROM incidentReports WHERE pdfDocumentId = ? LIMIT 1', [id]))[0][0]?.id || null) : id,
-          actorUsername: actor,
-        });
+    // Put the resubmission back in the same reviewer queue as a new submission —
+    // unless the submitter *is* the reviewer. A system-wide role has already been
+    // approved above, so alerting the approver queue would tell the Center Head
+    // about their own action, which the notification service then suppresses
+    // anyway (a notification is invisible to its own actor).
+    if (!selfApproving) {
+      try {
+        const reviewerUsers = await notifications.usersWithAnyRole(APPROVER_ROLES);
+        if (reviewerUsers.length) {
+          const residentName = existing.residentId ? await notifications.residentName(existing.residentId) : null;
+          await notifications.notifyUsers(reviewerUsers.map(u => u.id), {
+            type: isIncidentReport ? 'Incident Report Resubmitted' : 'Document Resubmitted',
+            title: `${isIncidentReport ? 'Incident Report' : 'Document'} Resubmitted${residentName ? ` — ${residentName}` : ''}`,
+            message: `${actor} resubmitted ${existing.title || 'the document'}${residentName ? ` for ${residentName}` : ''}. It is waiting for review again.`,
+            priority: 'High',
+            actionRequired: 'Review the resubmitted item.',
+            residentId: existing.residentId || null,
+            relatedRecordType: isIncidentReport ? 'incidentReports' : 'documents',
+            relatedRecordId: isIncidentReport ? ((await pool.query('SELECT id FROM incidentReports WHERE pdfDocumentId = ? LIMIT 1', [id]))[0][0]?.id || null) : id,
+            actorUsername: actor,
+          });
+        }
+      } catch (notifyErr) {
+        console.error('[DocumentController] Resubmission notification failed (non-fatal):', notifyErr.message);
       }
-    } catch (notifyErr) {
-      console.error('[DocumentController] Resubmission notification failed (non-fatal):', notifyErr.message);
     }
 
-    res.json({ success: true, data: mapRow('documents', updated), message: 'Document submitted for review' });
+    res.json({
+      success: true,
+      data: mapRow('documents', updated),
+      message: selfApproving ? 'Document approved on submission.' : 'Document submitted for review',
+    });
   } catch (error) {
     next(error);
   }
