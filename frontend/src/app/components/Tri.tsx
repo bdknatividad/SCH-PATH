@@ -637,7 +637,7 @@ function TriNameField({ label, value, placeholder, disabled, onCommit }: {
       onChange={(e) => setDraft(e.target.value)}
       onBlur={commit}
       onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); (e.target as HTMLInputElement).blur(); } }}
-      className="h-full w-full rounded-sm border border-dashed border-yellow-500/70 bg-yellow-50/70 px-0.5 font-bold leading-none text-black placeholder:font-normal placeholder:text-gray-400 focus:border-solid focus:outline-none"
+      className="pdf-overlay-cell h-full w-full rounded-sm border border-dashed border-yellow-500/70 bg-yellow-50/70 px-0.5 font-bold leading-none text-black placeholder:font-normal placeholder:text-gray-400 focus:border-solid focus:outline-none"
       style={{ fontSize: 'clamp(6px, 1vw, 11px)' }}
     />
   );
@@ -739,12 +739,12 @@ function OfficialTriEditor({
               <PdfPage pageNumber={layout.page + 1} width={pdfRenderWidth} renderTextLayer={false} renderAnnotationLayer={false} className="absolute inset-0 h-full w-full" />
               {layout.page === 0 && (
                 <>
-                  <input aria-label="Resident name" value={child?.name || form.residentId || ''} readOnly className="absolute z-10 bg-white/70 px-1 text-[clamp(7px,1.2vw,13px)] font-bold outline-none" style={{ left: pdfPercentX(72), top: '18.7%', width: pdfPercentX(120), height: '2.7%' }} />
-                  <input aria-label="Room" value={form.responses?.room || child?.room || ''} onChange={event => onRoomChange(event.target.value)} disabled={!isEditable} className="absolute z-10 bg-white/70 px-1 text-[clamp(7px,1.2vw,13px)] outline-none disabled:bg-white/50" style={{ left: pdfPercentX(272), top: '18.7%', width: pdfPercentX(100), height: '2.7%' }} />
-                  <select aria-label="Reporting month" value={form.reportingMonth} onChange={event => onPeriodChange(form.reportingYear, Number(event.target.value))} disabled={!isEditable} className="absolute z-10 appearance-none bg-white/70 px-1 text-[clamp(7px,1.2vw,13px)] outline-none disabled:bg-white/50" style={{ left: pdfPercentX(411), top: '18.7%', width: pdfPercentX(70), height: '2.7%' }}>
+                  <input aria-label="Resident name" value={child?.name || form.residentId || ''} readOnly className="pdf-overlay-cell absolute z-10 bg-white/70 px-1 text-[clamp(7px,1.2vw,13px)] font-bold outline-none" style={{ left: pdfPercentX(72), top: '18.7%', width: pdfPercentX(120), height: '2.7%' }} />
+                  <input aria-label="Room" value={form.responses?.room || child?.room || ''} onChange={event => onRoomChange(event.target.value)} disabled={!isEditable} className="pdf-overlay-cell absolute z-10 bg-white/70 px-1 text-[clamp(7px,1.2vw,13px)] outline-none disabled:bg-white/50" style={{ left: pdfPercentX(272), top: '18.7%', width: pdfPercentX(100), height: '2.7%' }} />
+                  <select aria-label="Reporting month" value={form.reportingMonth} onChange={event => onPeriodChange(form.reportingYear, Number(event.target.value))} disabled={!isEditable} className="pdf-overlay-cell absolute z-10 appearance-none bg-white/70 px-1 text-[clamp(7px,1.2vw,13px)] outline-none disabled:bg-white/50" style={{ left: pdfPercentX(411), top: '18.7%', width: pdfPercentX(70), height: '2.7%' }}>
                     {MONTHS.map((month, index) => <option key={month} value={index + 1}>{month}</option>)}
                   </select>
-                  <input aria-label="Reporting year" type="number" value={form.reportingYear} onChange={event => onPeriodChange(Number(event.target.value), form.reportingMonth)} disabled={!isEditable} className="absolute z-10 bg-white/70 px-1 text-[clamp(7px,1.2vw,13px)] outline-none disabled:bg-white/50" style={{ left: pdfPercentX(482), top: '18.7%', width: pdfPercentX(44), height: '2.7%' }} />
+                  <input aria-label="Reporting year" type="number" value={form.reportingYear} onChange={event => onPeriodChange(Number(event.target.value), form.reportingMonth)} disabled={!isEditable} className="pdf-overlay-cell absolute z-10 bg-white/70 px-1 text-[clamp(7px,1.2vw,13px)] outline-none disabled:bg-white/50" style={{ left: pdfPercentX(482), top: '18.7%', width: pdfPercentX(44), height: '2.7%' }} />
                 </>
               )}
               {layout.ids.map(id => {
@@ -784,7 +784,7 @@ function OfficialTriEditor({
               {layout.page === 5 && (
                 <span
                   aria-label="Total points earned for the period"
-                  className="absolute z-10 bg-white/70 px-1 text-center text-[clamp(7px,1.2vw,13px)] font-bold"
+                  className="pdf-overlay-cell absolute z-10 bg-white/70 px-1 text-center text-[clamp(7px,1.2vw,13px)] font-bold"
                   style={{ left: pdfPercentX(276), top: pdfPercentTop(606.75, 18), width: pdfPercentX(75) }}
                 >{String(record?.partOnePoints ?? partOnePoints)}</span>
               )}
@@ -809,7 +809,7 @@ function OfficialTriEditor({
                       value={formatDateInput(offenseDates[String(offenseIndex)] || '')}
                       onChange={e => onOffenseDateChange(offenseIndex, parseDateInput(e.target.value))}
                       disabled={!isEditable}
-                      className="absolute z-20 bg-white/90 px-0.5 text-[clamp(5px,0.85vw,9px)] text-center outline-none"
+                      className="pdf-overlay-cell absolute z-20 bg-white/90 px-0.5 text-[clamp(5px,0.85vw,9px)] text-center outline-none"
                       style={{
                         left: pdfPercentX(507),
                         top: pdfPercentTop(pos.y, 18, TRI_X_DOWN_PX - TRI_OFFENSE_UP_PX),
@@ -845,7 +845,7 @@ function OfficialTriEditor({
                     value={formatDateInput(offenseDates[String(offenseIndex)] || '')}
                     onChange={e => onOffenseDateChange(offenseIndex, parseDateInput(e.target.value))}
                     disabled={!isEditable}
-                    className="absolute z-20 bg-white/90 px-0.5 text-[clamp(5px,0.85vw,9px)] text-center outline-none"
+                    className="pdf-overlay-cell absolute z-20 bg-white/90 px-0.5 text-[clamp(5px,0.85vw,9px)] text-center outline-none"
                     style={{
                       left: pdfPercentX(507),
                       top: pdfPercentTop(pos.y, 18, TRI_X_DOWN_PX),
@@ -856,12 +856,12 @@ function OfficialTriEditor({
                 )}
               </React.Fragment>
             ))}
-            <span aria-label="Previous Points in TRI" className="absolute z-10 bg-white/70 px-1 text-[clamp(7px,1.2vw,13px)]" style={{ left: pdfPercentX(482), top: pdfPercentTop(277.27, 18) }}>{record?.previousPoints ?? ''}</span>
-            <span aria-label="Current Points in TRI" className="absolute z-10 bg-white/70 px-1 text-[clamp(7px,1.2vw,13px)]" style={{ left: pdfPercentX(482), top: pdfPercentTop(256.27, 18) }}>{record?.partOnePoints ?? partOnePoints}</span>
-            <span aria-label="Less points in Offenses" className="absolute z-10 bg-white/70 px-1 text-[clamp(7px,1.2vw,13px)]" style={{ left: pdfPercentX(482), top: pdfPercentTop(235.39, 18) }}>{record?.deductions ?? deductions}</span>
-            <span aria-label="Total Performance Points" className="absolute z-10 bg-white/70 px-1 text-[clamp(7px,1.2vw,13px)] font-bold" style={{ left: pdfPercentX(482), top: pdfPercentTop(214.39, 18) }}>{displayFinalPoints || String(totalPoints)}</span>
-            <span aria-label="Current Adjectival Rating" className="absolute z-10 bg-white/70 px-1 text-[clamp(6px,1vw,11px)] font-bold" style={{ left: pdfPercentX(482), top: pdfPercentTop(193.38, 18) }}>{record?.rating ?? currentRating}</span>
-            <span aria-label="Previous Adjectival Rating" className="absolute z-10 bg-white/70 px-1 text-[clamp(6px,1vw,11px)]" style={{ left: pdfPercentX(482), top: pdfPercentTop(172.37, 18) }}>{record?.previousRating ?? ''}</span>
+            <span aria-label="Previous Points in TRI" className="pdf-overlay-cell absolute z-10 bg-white/70 px-1 text-[clamp(7px,1.2vw,13px)]" style={{ left: pdfPercentX(482), top: pdfPercentTop(277.27, 18) }}>{record?.previousPoints ?? ''}</span>
+            <span aria-label="Current Points in TRI" className="pdf-overlay-cell absolute z-10 bg-white/70 px-1 text-[clamp(7px,1.2vw,13px)]" style={{ left: pdfPercentX(482), top: pdfPercentTop(256.27, 18) }}>{record?.partOnePoints ?? partOnePoints}</span>
+            <span aria-label="Less points in Offenses" className="pdf-overlay-cell absolute z-10 bg-white/70 px-1 text-[clamp(7px,1.2vw,13px)]" style={{ left: pdfPercentX(482), top: pdfPercentTop(235.39, 18) }}>{record?.deductions ?? deductions}</span>
+            <span aria-label="Total Performance Points" className="pdf-overlay-cell absolute z-10 bg-white/70 px-1 text-[clamp(7px,1.2vw,13px)] font-bold" style={{ left: pdfPercentX(482), top: pdfPercentTop(214.39, 18) }}>{displayFinalPoints || String(totalPoints)}</span>
+            <span aria-label="Current Adjectival Rating" className="pdf-overlay-cell absolute z-10 bg-white/70 px-1 text-[clamp(6px,1vw,11px)] font-bold" style={{ left: pdfPercentX(482), top: pdfPercentTop(193.38, 18) }}>{record?.rating ?? currentRating}</span>
+            <span aria-label="Previous Adjectival Rating" className="pdf-overlay-cell absolute z-10 bg-white/70 px-1 text-[clamp(6px,1vw,11px)]" style={{ left: pdfPercentX(482), top: pdfPercentTop(172.37, 18) }}>{record?.previousRating ?? ''}</span>
           </div>
           <div className="relative w-full overflow-hidden bg-white shadow-lg" style={{ aspectRatio: '612 / 936' }}>
             <PdfPage pageNumber={8} width={pdfRenderWidth} renderTextLayer={false} renderAnnotationLayer={false} className="absolute inset-0 h-full w-full" />
