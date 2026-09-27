@@ -15,6 +15,7 @@ import { useData, Child, Assessment, Violation } from '../state/DataContext';
 import { useAuth } from '../state/AuthContext';
 import { request } from '@/services/api';
 import { countTriStatistics } from '@/app/components/TriStatistics';
+import { CenterHeadDashboard } from '@/app/components/CenterHeadDashboard';
 import { canOpenModule } from '@/app/config/moduleAccess';
 import { formatShortDate } from '@/utils/dateFormatter';
 import { pendingReviewQueue } from '@/utils/pendingDocuments';
@@ -1904,6 +1905,22 @@ export function Dashboard() {
         onOpen={(path) => navigate(path)}
       />
     );
+  }
+
+  /**
+   * The Center Head's specification is the whole facility, so the role leaves the
+   * shared dashboard here for its own page. The shared page was built for a
+   * case-carrying role — a handful of tiles about residents plus the day's
+   * schedule — and could not answer the questions a Center Head actually asks:
+   * what is late, what is waiting on my decision, and what is booked next. That
+   * page reads its numbers from the browser's store snapshot; the command centre
+   * reads them from the database, which is the difference between a number that
+   * is right and a number that was right when the tab was opened.
+   *
+   * Every hook above has already run, so returning early is safe.
+   */
+  if (userRole === 'centerhead' || userRole === 'admin') {
+    return <CenterHeadDashboard displayRole={displayRole} />;
   }
 
   return (
