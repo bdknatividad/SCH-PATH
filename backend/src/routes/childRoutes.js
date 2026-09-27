@@ -8,7 +8,7 @@ const express = require('express');
 const router = express.Router();
 const childController = require('../controllers/childController');
 const { asyncHandler } = require('../middleware/errorHandler');
-const { requirePermission } = require('../middleware/rbac');
+const { requirePermission, requireSubModule } = require('../middleware/rbac');
 
 /**
  * GET /api/children
@@ -41,6 +41,21 @@ router.post(
   '/:id/readmit',
   requirePermission('Child Records', 'edit'),
   asyncHandler(childController.readmit),
+);
+
+/**
+ * GET /api/children/:id/education
+ * The Education module's record for one resident — the Child Records Education tab.
+ *
+ * Gated on the Child Records **Education** submodule, which is that tab's own
+ * gate, rather than on the Education module: the Social Worker may open the tab
+ * and holds no Education module, and gating on the module would render the tab
+ * empty for a role the matrix says may read it.
+ */
+router.get(
+  '/:id/education',
+  requireSubModule('Child Records', 'Education'),
+  asyncHandler(childController.educationForResident),
 );
 
 /**

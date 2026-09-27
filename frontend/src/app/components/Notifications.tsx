@@ -191,6 +191,13 @@ export function Notifications() {
       case 'healthrecords':
         target = resident ? `/health?residentId=${encodeURIComponent(resident)}` : '/health';
         break;
+      // An education change opens the resident's Education tab, which is where the
+      // whole education picture for a child is assembled. A Houseparent holds
+      // neither Child Records nor Education, so `canReach` below sends them to
+      // their own landing page instead of a route that would bounce them.
+      case 'educationrecords':
+        target = childTab('education') || '/education';
+        break;
       case 'documents':
         // A document alert names the exact file, so open it rather than the
         // folder list. `DocumentUpload` reads `docId` and opens that record's

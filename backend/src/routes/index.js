@@ -487,35 +487,96 @@ async function requireResidentInCare(req, res, next) {
   }
 }
 
+/**
+ * Tell the Center Head about an Education write — and, when a learner is added,
+ * the Houseparent assigned to that resident.
+ *
+ * Observed on `res.on('finish')` rather than wrapped around the handler: the four
+ * education resources are served by the generic CRUD controller, which writes its
+ * own response, so a wrapper would have to re-implement it to know the write
+ * succeeded. Waiting for the response also means a refused write notifies nobody —
+ * including the 409 `requireResidentInCare` raises, which is why this sits after
+ * it in the chain.
+ *
+ * Fire-and-forget, and it never fails the request: a notification that cannot be
+ * written is not a reason to lose the learner.
+ */
+function notifyEducationWrite(label, { alsoHouseparent = false } = {}) {
+  return (req, res, next) => {
+    res.on('finish', () => {
+      if (res.statusCode >= 400) return;
+      const actor = req.user?.username || null;
+      const residentId = req.body?.residentId || null;
+      void (async () => {
+        try {
+          const name = residentId ? await notifications.residentName(residentId) : null;
+          const event = {
+            type: 'Education',
+            priority: 'Medium',
+            residentId,
+            relatedRecordType: 'educationrecords',
+            relatedRecordId: req.params?.id || null,
+            actorUsername: actor,
+          };
+
+          const centerHeads = await notifications.usersWithAnyRole(['centerhead']);
+          if (centerHeads.length) {
+            await notifications.notifyUsers(centerHeads.map((user) => user.id), {
+              ...event,
+              title: `Education — ${label}${name ? `: ${name}` : ''}`,
+              message: `${actor || 'An Educator'} ${label}${name ? ` for ${name}` : ''} in the Education module.`,
+            });
+          }
+
+          if (alsoHouseparent && residentId) {
+            const houseparents = await notifications.houseparentsOf(residentId);
+            if (houseparents.length) {
+              await notifications.notifyUsers(houseparents.map((user) => user.id), {
+                ...event,
+                title: `A learner was added${name ? `: ${name}` : ''}`,
+                message: `${actor || 'An Educator'} added ${name || 'one of your residents'} to the Education roll.`,
+                actionRequired: 'Check the education details for this resident.',
+              });
+            }
+          }
+        } catch (error) {
+          console.error(`[Education] "${label}" notification failed (non-fatal):`, error.message);
+        }
+      })();
+    });
+    next();
+  };
+}
+
 const educationModule = requireModule('Education');
 
 router.use('/education-records', authenticate, educationModule);
 router.get('/education-records', educationResources.educationRecords.getAll);
 router.get('/education-records/:id', educationResources.educationRecords.getById);
-router.post('/education-records', requirePermission('Education', 'create'), requireResidentInCare, requireEducationPlacement, educationResources.educationRecords.create);
-router.put('/education-records/:id', requirePermission('Education', 'edit'), requireEducationPlacement, educationResources.educationRecords.update);
-router.delete('/education-records/:id', requirePermission('Education', 'delete'), educationResources.educationRecords.delete);
+router.post('/education-records', requirePermission('Education', 'create'), requireResidentInCare, requireEducationPlacement, notifyEducationWrite('added a learner', { alsoHouseparent: true }), educationResources.educationRecords.create);
+router.put('/education-records/:id', requirePermission('Education', 'edit'), requireEducationPlacement, notifyEducationWrite('updated a learner'), educationResources.educationRecords.update);
+router.delete('/education-records/:id', requirePermission('Education', 'delete'), notifyEducationWrite('removed a learner'), educationResources.educationRecords.delete);
 
 router.use('/education-progress-reports', authenticate, educationModule);
 router.get('/education-progress-reports', educationResources.educationProgressReports.getAll);
 router.get('/education-progress-reports/:id', educationResources.educationProgressReports.getById);
-router.post('/education-progress-reports', requirePermission('Education', 'create'), requireResidentInCare, educationResources.educationProgressReports.create);
-router.put('/education-progress-reports/:id', requirePermission('Education', 'edit'), educationResources.educationProgressReports.update);
-router.delete('/education-progress-reports/:id', requirePermission('Education', 'delete'), educationResources.educationProgressReports.delete);
+router.post('/education-progress-reports', requirePermission('Education', 'create'), requireResidentInCare, notifyEducationWrite('filed a progress report'), educationResources.educationProgressReports.create);
+router.put('/education-progress-reports/:id', requirePermission('Education', 'edit'), notifyEducationWrite('updated a progress report'), educationResources.educationProgressReports.update);
+router.delete('/education-progress-reports/:id', requirePermission('Education', 'delete'), notifyEducationWrite('removed a progress report'), educationResources.educationProgressReports.delete);
 
 router.use('/education-school-visits', authenticate, educationModule);
 router.get('/education-school-visits', educationResources.educationSchoolVisits.getAll);
 router.get('/education-school-visits/:id', educationResources.educationSchoolVisits.getById);
-router.post('/education-school-visits', requirePermission('Education', 'create'), requireResidentInCare, educationResources.educationSchoolVisits.create);
-router.put('/education-school-visits/:id', requirePermission('Education', 'edit'), educationResources.educationSchoolVisits.update);
-router.delete('/education-school-visits/:id', requirePermission('Education', 'delete'), educationResources.educationSchoolVisits.delete);
+router.post('/education-school-visits', requirePermission('Education', 'create'), requireResidentInCare, notifyEducationWrite('scheduled a school visit'), educationResources.educationSchoolVisits.create);
+router.put('/education-school-visits/:id', requirePermission('Education', 'edit'), notifyEducationWrite('updated a school visit'), educationResources.educationSchoolVisits.update);
+router.delete('/education-school-visits/:id', requirePermission('Education', 'delete'), notifyEducationWrite('removed a school visit'), educationResources.educationSchoolVisits.delete);
 
 router.use('/education-monthly-reports', authenticate, educationModule);
 router.get('/education-monthly-reports', educationResources.educationMonthlyReports.getAll);
 router.get('/education-monthly-reports/:id', educationResources.educationMonthlyReports.getById);
-router.post('/education-monthly-reports', requirePermission('Education', 'create'), requireResidentInCare, educationResources.educationMonthlyReports.create);
-router.put('/education-monthly-reports/:id', requirePermission('Education', 'edit'), educationResources.educationMonthlyReports.update);
-router.delete('/education-monthly-reports/:id', requirePermission('Education', 'delete'), educationResources.educationMonthlyReports.delete);
+router.post('/education-monthly-reports', requirePermission('Education', 'create'), requireResidentInCare, notifyEducationWrite('filed a monthly report'), educationResources.educationMonthlyReports.create);
+router.put('/education-monthly-reports/:id', requirePermission('Education', 'edit'), notifyEducationWrite('updated a monthly report'), educationResources.educationMonthlyReports.update);
+router.delete('/education-monthly-reports/:id', requirePermission('Education', 'delete'), notifyEducationWrite('removed a monthly report'), educationResources.educationMonthlyReports.delete);
 
 // Legacy generic resource endpoints.
 //

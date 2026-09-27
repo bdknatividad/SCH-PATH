@@ -1146,6 +1146,59 @@ async function abscond(req, res, next) {
   }
 }
 
+/**
+ * GET /api/children/:id/education
+ *
+ * Everything the Education module holds about one resident, in one read.
+ *
+ * The Child Records → Education tab used to assemble this from a copy of the
+ * Education list that the Education page had saved into the browser. It therefore
+ * showed "Not yet enrolled in Education Module" to anyone who had not opened
+ * Education on that device — the Center Head included — and its name fallback
+ * could match the wrong resident when two shared a name. This answers from the
+ * database, so the tab shows the same thing to everyone who may read it.
+ *
+ * Gated on the Child Records **Education** submodule rather than on the Education
+ * module, because that submodule is the tab's own gate: the Social Worker may
+ * open the tab and holds no Education module, and the alternative is a tab that
+ * renders nothing for a role the matrix says may read it.
+ *
+ * Each table is read defensively. The two secondary ones are created lazily by
+ * the Education module, and a missing table must degrade that section rather than
+ * fail the whole tab.
+ */
+async function educationForResident(req, res, next) {
+  try {
+    const residentId = String(req.params.id || '').trim();
+    if (!residentId) throw new ApiError(400, 'A resident id is required.');
+
+    const rowsFor = async (label, sql) => {
+      try {
+        const [rows] = await pool.query(sql, [residentId]);
+        return rows || [];
+      } catch (error) {
+        console.warn(`Education read for a resident — ${label} failed:`, error.message);
+        return [];
+      }
+    };
+
+    const [records, visits, progress] = await Promise.all([
+      rowsFor('records', 'SELECT * FROM education_records WHERE residentId = ? ORDER BY createdAt DESC'),
+      rowsFor('visits', 'SELECT * FROM education_school_visits WHERE residentId = ? ORDER BY visitDate DESC'),
+      rowsFor('progress', 'SELECT * FROM education_progress_reports WHERE residentId = ? ORDER BY createdAt DESC'),
+    ]);
+
+    res.json({
+      success: true,
+      data: {
+        records: records.map((row) => mapRow('education_records', row)),
+        visits: visits.map((row) => mapRow('education_school_visits', row)),
+        progress: progress.map((row) => mapRow('education_progress_reports', row)),
+      },
+    });
+  } catch (error) { next(error); }
+}
+
 module.exports = {
   abscond,
   create,
@@ -1155,6 +1208,7 @@ module.exports = {
   update,
   delete: deleteChild,
   getIncompleteDocuments,
+  educationForResident,
   readmit,
   togglePsychAssessment,
   mayReadResidentMedicalSummary,

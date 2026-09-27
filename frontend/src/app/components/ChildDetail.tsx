@@ -482,6 +482,43 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
   const child = remoteChild || contextChild;
 
   /**
+   * The Education module's record for this resident — what the Education tab
+   * renders.
+   *
+   * Read from the API, not from the copy the Education page keeps in the browser.
+   * That copy only exists on a device that has opened Education, so the tab used
+   * to tell the Center Head — and anyone else who had not — that the resident was
+   * "not yet enrolled" while the record sat in the database, and its name fallback
+   * could match the wrong resident when two shared a name.
+   *
+   * Fetched when the tab is opened rather than on mount, because most visits to
+   * this page never look at it.
+   */
+  const [education, setEducation] = useState<{ records: any[]; visits: any[]; progress: any[] } | null>(null);
+  const [educationError, setEducationError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (activeTab !== 'education' || !child?.id) return;
+    let cancelled = false;
+    setEducationError(null);
+    (async () => {
+      try {
+        const result = await request<{ success: boolean; data?: { records: any[]; visits: any[]; progress: any[] } }>(
+          `/children/${encodeURIComponent(child.id)}/education`,
+        );
+        if (!cancelled) setEducation(result?.data || { records: [], visits: [], progress: [] });
+      } catch (error) {
+        if (!cancelled) {
+          setEducation({ records: [], visits: [], progress: [] });
+          setEducationError(describeError(error, 'The education record could not be loaded.'));
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab, child?.id]);
+
+  /**
    * Save the Medical Notes onto the resident record.
    *
    * `child.notes` is the field the card has always rendered, so this keeps one
@@ -1122,28 +1159,76 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
 
         <TabsContent value="education" className="mt-4 space-y-4">
           {(() => {
-            const eduStudents: any[] = [];
-            try { const saved = localStorage.getItem('educationStudents'); if (saved) { const all = JSON.parse(saved); eduStudents.push(...all.filter((s: any) => s.name === child.name || s.residentId === child.id)); } } catch {}
-            const student = eduStudents[0] || null;
+            const records = education?.records || [];
+            const visits = education?.visits || [];
+            const progress = education?.progress || [];
+            // A resident can hold more than one record — readmission at a new
+            // grade is a new record — so the newest is the one in force.
+            const learner = records[0] || null;
 
-            // Visit reports and Pass/Fail results are sourced from the real
-            // Document Module (not browser-local storage) so counts are
-            // accurate for whoever views this record, on any device.
+            // Passed / Failed come from the Document Module, because they reflect
+            // the Center Head's review decision rather than what the Educator
+            // wrote: the report is not final until it is reviewed.
             const visitDocs = documents.filter(d => d.residentId === child.id && d.title === 'School Visit Report');
             const quarterlyDocs = documents.filter(d => d.residentId === child.id && d.title === 'Quarterly Education Report');
-            // Pass/Fail counts reflect the Center Head's actual review decision
-            // (Approve = Pass, Failed = Fail) — not just what the Educator
-            // originally wrote, since that's not final until reviewed.
             const passCount = quarterlyDocs.filter(d => d.status === 'Approved').length;
             const failCount = quarterlyDocs.filter(d => d.status === 'Rejected').length;
 
+            if (education === null) {
+              return <p className="py-8 text-center text-sm text-gray-400">Loading the education record…</p>;
+            }
+
             return (
               <div className="space-y-4">
-                <Card className="border-l-4 border-blue-400 shadow-sm"><CardContent className="p-5"><div className="flex items-center gap-4"><div className="p-3 rounded-xl bg-blue-50 shrink-0"><span className="text-2xl">🎓</span></div><div className="flex-1"><p className="text-[10px] uppercase font-bold tracking-widest text-gray-400 mb-0.5">Education Status</p>{student ? <><h3 className="text-lg font-black text-blue-700">{student.educationLevel || 'Not specified'}</h3><p className="text-xs text-gray-500 mt-0.5">Enrolled as: {student.name}</p></> : <h3 className="text-lg font-bold text-gray-400">Not yet enrolled in Education Module</h3>}</div></div></CardContent></Card>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3"><Card className="border-none shadow-sm"><CardContent className="p-4 text-center"><p className="text-2xl font-black text-blue-600">{visitDocs.length}</p><p className="text-xs text-gray-500 mt-0.5">School Visits</p></CardContent></Card><Card className="border-none shadow-sm"><CardContent className="p-4 text-center"><p className="text-2xl font-black text-green-600">{passCount}</p><p className="text-xs text-gray-500 mt-0.5">Passed</p></CardContent></Card><Card className="border-none shadow-sm"><CardContent className="p-4 text-center"><p className="text-2xl font-black text-red-500">{failCount}</p><p className="text-xs text-gray-500 mt-0.5">Failed</p></CardContent></Card></div>
+                {educationError && (
+                  <div className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-700">{educationError}</div>
+                )}
+
+                {/* The Education module's own record for this child. */}
+                <Card className="border-l-4 border-blue-400 shadow-sm">
+                  <CardContent className="p-5">
+                    <div className="flex items-center gap-4">
+                      <div className="p-3 rounded-xl bg-blue-50 shrink-0"><span className="text-2xl">🎓</span></div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-[10px] uppercase font-bold tracking-widest text-gray-400 mb-0.5">Education Status</p>
+                        {learner ? (
+                          <>
+                            <h3 className="text-lg font-black text-blue-700">{learner.educationLevel || 'Not specified'}</h3>
+                            <p className="text-xs text-gray-500 mt-0.5">
+                              Enrolled as: {learner.name}{learner.school ? ` · ${learner.school}` : ''}
+                            </p>
+                          </>
+                        ) : (
+                          <h3 className="text-lg font-bold text-gray-400">Not yet enrolled in Education Module</h3>
+                        )}
+                      </div>
+                    </div>
+
+                    {learner && (
+                      <div className="mt-4 grid grid-cols-1 gap-3 text-xs sm:grid-cols-2">
+                        <p><span className="font-medium text-gray-500">School:</span> {learner.school || '—'}</p>
+                        <p><span className="font-medium text-gray-500">Enrolment date:</span> {learner.enrollmentDate ? formatShortDate(String(learner.enrollmentDate).slice(0, 10)) : '—'}</p>
+                        <p><span className="font-medium text-gray-500">LRN:</span> {learner.lrn || '—'}</p>
+                        <p><span className="font-medium text-gray-500">Trainee number:</span> {learner.traineeNumber || '—'}</p>
+                        <p><span className="font-medium text-gray-500">Grade / section:</span> {learner.gradeSection || '—'}</p>
+                        <p><span className="font-medium text-gray-500">Status:</span> {learner.status || '—'}</p>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3"><Card className="border-none shadow-sm"><CardContent className="p-4 text-center"><p className="text-2xl font-black text-blue-600">{visits.length}</p><p className="text-xs text-gray-500 mt-0.5">School Visits</p></CardContent></Card><Card className="border-none shadow-sm"><CardContent className="p-4 text-center"><p className="text-2xl font-black text-green-600">{passCount}</p><p className="text-xs text-gray-500 mt-0.5">Passed</p></CardContent></Card><Card className="border-none shadow-sm"><CardContent className="p-4 text-center"><p className="text-2xl font-black text-red-500">{failCount}</p><p className="text-xs text-gray-500 mt-0.5">Failed</p></CardContent></Card></div>
+
+                {/* School visits, from the Education module — the scheduled ones
+                    and the findings recorded against them. */}
+                {visits.length > 0 && <Card className="border-none shadow-sm"><CardContent className="p-4"><h4 className="font-bold text-[#2F3E46] text-sm mb-3">School Visits</h4><div className="space-y-2">{visits.map((v) => (<div key={v.id} className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl"><div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center shrink-0"><span className="text-sm">🏫</span></div><div className="flex-1 min-w-0"><p className="text-xs font-semibold text-[#2F3E46]">{v.visitDate ? formatShortDate(String(v.visitDate).slice(0, 10)) : '—'}{v.school ? ` · ${v.school}` : ''}</p>{v.purpose && <p className="text-xs text-gray-600 mt-0.5">{v.purpose}</p>}{v.findings && <p className="text-[11px] text-gray-500 mt-0.5">{v.findings}</p>}<p className="text-[10px] text-gray-400 mt-0.5">{v.status || '—'}</p></div></div>))}</div></CardContent></Card>}
+
+                {/* Progress reports, from the Education module. */}
+                {progress.length > 0 && <Card className="border-none shadow-sm"><CardContent className="p-4"><h4 className="font-bold text-[#2F3E46] text-sm mb-3">Progress Reports</h4><div className="space-y-2">{progress.map((p) => (<div key={p.id} className="flex items-center justify-between gap-3 p-3 bg-gray-50 rounded-xl"><div className="min-w-0"><p className="text-xs font-semibold text-[#2F3E46] truncate">{p.subject || 'Progress report'}</p><p className="text-[10px] text-gray-400">{p.month || '—'}</p></div><span className="text-[11px] font-bold text-gray-600 shrink-0">{p.result || '—'}</span></div>))}</div></CardContent></Card>}
+
                 {quarterlyDocs.length > 0 && <Card className="border-none shadow-sm"><CardContent className="p-4"><h4 className="font-bold text-[#2F3E46] text-sm mb-3">Quarterly Reports</h4><div className="space-y-2">{quarterlyDocs.map((d) => { const firstLines = (d.description || '').split('\n').slice(0, 2).join(' '); const badge = d.status === 'Approved' ? { label: 'Pass', cls: 'bg-green-100 text-green-700' } : d.status === 'Rejected' ? { label: 'Fail', cls: 'bg-red-100 text-red-700' } : (d.status as string) === 'Reassessment' ? { label: 'Reassessment', cls: 'bg-yellow-100 text-yellow-700' } : { label: 'Pending Review', cls: 'bg-gray-100 text-gray-600' }; return (<div key={d.id} className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl"><div className="flex-1 min-w-0"><div className="flex items-center gap-2 flex-wrap"><p className="text-xs font-bold text-[#2F3E46] truncate">{firstLines}</p><span className={`px-2 py-0.5 rounded-full font-bold text-[10px] shrink-0 ${badge.cls}`}>{badge.label}</span></div><p className="text-[10px] text-gray-400 mt-0.5">Submitted {d.submittedAt ? new Date(d.submittedAt).toLocaleDateString() : '—'} by {d.uploadedBy || 'Educator'}</p></div></div>); })}</div></CardContent></Card>}
                 {visitDocs.length > 0 && <Card className="border-none shadow-sm"><CardContent className="p-4"><h4 className="font-bold text-[#2F3E46] text-sm mb-3">School Visit Reports</h4><div className="space-y-2">{visitDocs.map((d) => (<div key={d.id} className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl"><div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center shrink-0"><span className="text-sm">🏫</span></div><div className="flex-1 min-w-0"><p className="text-xs text-gray-600">{d.description}</p><p className="text-[10px] text-gray-400 mt-0.5">{d.uploadedAt ? new Date(d.uploadedAt).toLocaleDateString() : ''}</p></div></div>))}</div></CardContent></Card>}
-                {!student && <Card className="border-none shadow-sm"><CardContent className="p-8 text-center"><span className="text-4xl">📚</span><p className="text-gray-400 mt-2 text-sm">No education records found for this resident.</p>{/*
+                {!learner && <Card className="border-none shadow-sm"><CardContent className="p-8 text-center"><span className="text-4xl">📚</span><p className="text-gray-400 mt-2 text-sm">No education records found for this resident.</p>{/*
                   Only point at the Education module for someone who can open it.
                   The line used to be unconditional, so a Nurse, a Psychologist or
                   a Houseparent — none of whom hold Education — was told to go
