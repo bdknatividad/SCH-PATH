@@ -271,7 +271,11 @@ function TRIRecordsTable({
 }: { records: TriRecord[]; allChildren: Child[]; onView: (r: TriRecord) => void; onPrint: (r: TriRecord) => void; }) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-sm">
+      {/* A minimum width, so the columns keep their size and the wrapper scrolls.
+          `w-full` alone let the table shrink to the phone's width, which squeezed
+          every column to a few pixels and wrapped the headers one letter per line
+          ("R E S I D E N T"). Same fix as the TRI Monitoring table. */}
+      <table className="w-full min-w-[880px] text-sm">
         <thead>
           <tr className="border-b border-gray-200 text-left">
             <th className="pb-2 text-xs font-semibold text-gray-400 uppercase pr-4">Resident</th>
@@ -324,7 +328,7 @@ function TRIRecordsTable({
 function TRIHistoryTable({ records }: { records: TriRecord[] }) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full text-sm">
+      <table className="w-full min-w-[780px] text-sm">
         <thead>
           <tr className="border-b border-gray-200 text-left">
             <th className="pb-2 text-xs font-semibold text-gray-400 uppercase pr-4">Period</th>
@@ -577,12 +581,32 @@ const TRI_X_DOWN_PX = 12;
 // without changing the already-correct Part I positioning.
 const TRI_OFFENSE_UP_PX = 7;
 
+/**
+ * The width the overlay offsets were authored against.
+ *
+ * These offsets are small pixel nudges added to a percentage, and they were
+ * measured on a desktop-width render — `pdfRenderWidth` is capped at 900. A
+ * percentage scales with the page; a pixel does not, so on a phone (where the
+ * page renders ~2× narrower) the same 12px is a twice-as-large jump and every
+ * tick lands below its row. That is the misalignment on a phone, and no single
+ * pixel value can fix it at both widths.
+ *
+ * Converting to PDF points first makes the nudge part of the percentage, so it
+ * stays the same size *relative to the form* at any width.
+ */
+const TRI_OVERLAY_REFERENCE_PX = 900;
+const TRI_PDF_WIDTH_POINTS = 612;
+const TRI_PDF_HEIGHT_POINTS = 936;
+const overlayPoints = (px: number) => (px * TRI_PDF_WIDTH_POINTS) / TRI_OVERLAY_REFERENCE_PX;
+
 function pdfPercentX(points: number) {
-  return `${(points / 612) * 100}%`;
+  return `${(points / TRI_PDF_WIDTH_POINTS) * 100}%`;
 }
 
 function pdfPercentTop(centerY: number, height: number, offsetPx = 0) {
-  return `calc(${((936 - centerY - height / 2) / 936) * 100}% + ${offsetPx}px)`;
+  // `offsetPx` moves the field *down* the page, matching the old `calc(… + Npx)`.
+  const offset = overlayPoints(offsetPx);
+  return `${((TRI_PDF_HEIGHT_POINTS - centerY - height / 2 + offset) / TRI_PDF_HEIGHT_POINTS) * 100}%`;
 }
 
 /**
