@@ -1166,13 +1166,23 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
             // grade is a new record — so the newest is the one in force.
             const learner = records[0] || null;
 
-            // Passed / Failed come from the Document Module, because they reflect
-            // the Center Head's review decision rather than what the Educator
-            // wrote: the report is not final until it is reviewed.
+            // The reviewed reports and the filed visit reports still come from the
+            // Document Module — they are documents, and the Center Head's decision
+            // on a quarterly report lives on the document itself.
             const visitDocs = documents.filter(d => d.residentId === child.id && d.title === 'School Visit Report');
             const quarterlyDocs = documents.filter(d => d.residentId === child.id && d.title === 'Quarterly Education Report');
-            const passCount = quarterlyDocs.filter(d => d.status === 'Approved').length;
-            const failCount = quarterlyDocs.filter(d => d.status === 'Rejected').length;
+
+            // Passed / Failed count the Educator's own evaluations, which is
+            // exactly what the Progress Reports list below renders. They used to
+            // count quarterly reports the Center Head had *approved*, so a learner
+            // the Educator had just marked Passed showed "Passed 0" directly above
+            // a list containing that same Passed evaluation.
+            //
+            // The quarterly review outcome is not lost: it is the Pass / Fail
+            // badge on each row of the Quarterly Reports list, which is where a
+            // reviewed report belongs.
+            const passCount = progress.filter(p => p.result === 'Passed').length;
+            const failCount = progress.filter(p => p.result === 'Failed').length;
 
             if (education === null) {
               return <p className="py-8 text-center text-sm text-gray-400">Loading the education record…</p>;
