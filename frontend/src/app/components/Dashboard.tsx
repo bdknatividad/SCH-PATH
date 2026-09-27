@@ -32,6 +32,25 @@ const CenterHeadDashboard = lazyComponent(
   'CenterHeadDashboard',
 );
 
+/**
+ * The Social Worker's and Houseparent's own pages.
+ *
+ * Split out for the same reason as the command centre: this module is what
+ * every role loads, so a dashboard only two roles can reach must not sit in the
+ * chunk everyone downloads. Both are small (no charting library), but the rule
+ * is the rule — and a role page that grows later should not silently start
+ * costing every other role a download.
+ */
+const SocialWorkerDashboard = lazyComponent(
+  () => import('@/app/components/SocialWorkerDashboard'),
+  'SocialWorkerDashboard',
+);
+
+const HouseparentDashboard = lazyComponent(
+  () => import('@/app/components/HouseparentDashboard'),
+  'HouseparentDashboard',
+);
+
 // ── FORM CATALOGUE ──────────────────────────────────────────────────────────
 interface FormEntry {
   name: string;
@@ -1937,6 +1956,64 @@ export function Dashboard() {
     return (
       <Suspense fallback={<RouteFallback />}>
         <CenterHeadDashboard displayRole={displayRole} />
+      </Suspense>
+    );
+  }
+
+  /**
+   * The Social Worker's own page. The role carries cases across every module,
+   * so its dashboard is the case-file work queue rather than a facility
+   * overview. Every figure it prints is computed here, once, from the same
+   * predicates the rest of the page uses — see the note on that component.
+   *
+   * Every hook above has already run, so returning early is safe.
+   */
+  if (userRole === 'socialworker') {
+    return (
+      <Suspense fallback={<RouteFallback />}>
+        <SocialWorkerDashboard
+          displayRole={displayRole}
+          residents={children}
+          activeCount={activeCount}
+          pendingApprovals={pendingApprovals}
+          missingDocuments={childrenWithMissingDocs}
+          violations={violations}
+          upcomingHearings={scheduledHearings}
+          phases={phaseCounts}
+          urgency={{
+            needImprovement: needImprovementCount,
+            fair: fairCount,
+            good: goodCount,
+            veryGood: veryGoodCount,
+          }}
+          pendingAssessments={scheduledAssessments}
+          todayActivities={todayActivities}
+          todayAssessments={todayAssessments}
+          onOpen={(path: string) => navigate(path)}
+        />
+      </Suspense>
+    );
+  }
+
+  /**
+   * The Houseparent's own page: the case load and the day's paperwork, and
+   * nothing facility-wide. `children` is already scoped to their assignments by
+   * `/api/store`, so the page inherits the caseload boundary rather than
+   * re-deriving it.
+   *
+   * Every hook above has already run, so returning early is safe.
+   */
+  if (userRole === 'houseparent') {
+    return (
+      <Suspense fallback={<RouteFallback />}>
+        <HouseparentDashboard
+          displayRole={displayRole}
+          residents={children}
+          activeCount={activeCount}
+          todayActivities={todayActivities}
+          todayAssessments={todayAssessments}
+          onOpen={(path: string) => navigate(path)}
+        />
       </Suspense>
     );
   }
