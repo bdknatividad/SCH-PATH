@@ -27,7 +27,8 @@
  * Each counter reuses the definition of the module it opens, server-side, so a
  * tile cannot disagree with the screen behind it:
  *
- *   Total Active Residents   Child Records **Active** filter, evaluated over the month
+ *   Total Active Residents   Child Records **Active** filter, read at the end of the month
+ *                            (so a resident discharged during the month is not counted)
  *   Active Violations        the Violation List's **Reviewed** status bucket
  *   Discharged Residents     Child Records **Discharged** filter, closed in the month
  *   Rehabilitation phase     the same population, split by `casePhase`
@@ -377,7 +378,7 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
         <StatCard
           title="Total Active Residents"
           value={figure(data?.residents.active)}
-          caption={isCurrent ? 'In the facility now' : `In the facility during ${periodLabel(period)}`}
+          caption={isCurrent ? 'In the facility now' : `Still in the facility at the end of ${periodLabel(period)}`}
           icon={Users}
           onClick={() => open('/children?filter=Active')}
         />
@@ -405,7 +406,7 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
               <Calendar className="h-4 w-4 text-[#FFD100]" /> Residents by Rehabilitation Phase
             </CardTitle>
             <p className="mt-1 text-[11px] text-gray-500">
-              {isCurrent ? 'Residents in the facility now' : `Residents present during ${periodLabel(period)}`}.
+              {isCurrent ? 'Residents in the facility now' : `Residents still in the facility at the end of ${periodLabel(period)}`}.
             </p>
           </CardHeader>
           <CardContent className="pt-4">

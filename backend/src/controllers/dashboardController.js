@@ -313,7 +313,7 @@ function groupResidentsByLabel(rows) {
  *
  * It is not restated here as a constant, because with a period selector the
  * question is no longer "is this resident active" but "was this resident here
- * during September". `presentInPeriodWhere` below is that rule: the same
+ * during September". `activeInPeriodWhere` below is that rule: the same
  * notion of a placement, evaluated at a date instead of at `now`.
  *
  * One deliberate difference, and it is the honest reading of "here during
@@ -453,22 +453,42 @@ async function centerHeadOverview(req, res, next) {
     const periodMonth = Number(period.slice(5, 7));
 
     /**
-     * "Was this resident in the facility during the period?"
+     * "Was this resident still in the facility at the end of the period?"
      *
      * Presence is recorded as admission *periods* — `admissions.admissionDate`
-     * through `admissions.closedDate` — so the test is an overlap between that
-     * span and the month. A resident still in the facility has a NULL
-     * `closedDate` and is present in every month from their admission onward.
+     * through `admissions.closedDate` — so the test is: admitted on or before the
+     * period ended, and not closed before it did. A resident still in the
+     * facility has a NULL `closedDate` and qualifies from their admission onward.
      *
-     * For the current month this agrees with the Child Records **Active** filter
-     * on every resident except one discharged earlier in the same month.
+     * **"At the end of" is the whole point.** The first version of this asked
+     * whether the placement merely *overlapped* the month, which counted a
+     * resident discharged earlier in the same month as active: eight residents on
+     * a database holding seven, with the eighth plainly marked Discharged on the
+     * Child Records page the tile opens. The tile has to agree with that page.
+     *
+     * Asking about the period's end is also what keeps a month's figure stable —
+     * a resident discharged in September drops out of September and stays out.
      */
-    const presentInPeriodWhere = `
+    const activeInPeriodWhere = `
       EXISTS (SELECT 1 FROM admissions a
                WHERE a.residentId = c.id
                  AND a.admissionDate <= ?
                  AND (a.closedDate IS NULL OR a.closedDate >= ?))`;
-    const periodBounds = [periodEnd, periodStart];
+    /** Params for `activeInPeriodWhere`, in the order that predicate reads them. */
+    const activeInPeriodParams = [periodEnd, periodEnd];
+
+    /**
+     * The period as a date range, **start first** — the order a
+     * `col >= ? AND col <= ?` predicate reads.
+     *
+     * Deliberately a second, separately named array rather than a reuse of
+     * `activeInPeriodParams` above: the two orders are not interchangeable.
+     * Handed the wrong one, MySQL cheerfully compares
+     * `date >= '2026-09-30' AND date <= '2026-09-01'`, matches nothing, and the
+     * whole section reads **zero** instead of failing — which is exactly what
+     * happened to the violations figures when one array served both.
+     */
+    const periodRange = [periodStart, periodEnd];
 
     /** Run one section; a failure degrades that section instead of the page. */
     const safe = async (label, run, fallback) => {
@@ -487,21 +507,21 @@ async function centerHeadOverview(req, res, next) {
       const [[statusRows], [activeRows], [phaseRows], [caseTypeRows], [dischargedRows]] =
         await Promise.all([
           pool.query('SELECT status, COUNT(*) AS n FROM children GROUP BY status'),
-          pool.query(`SELECT COUNT(*) AS n FROM children c WHERE ${presentInPeriodWhere}`, periodBounds),
+          pool.query(`SELECT COUNT(*) AS n FROM children c WHERE ${activeInPeriodWhere}`, activeInPeriodParams),
           // Rows, not a GROUP BY. The residents behind each bar are the point of
           // the bar, so the query that counts them also names them, and the
           // grouping happens in JS — one query rather than a count and a list
           // that can drift apart.
           pool.query(
             `SELECT c.id, c.name, COALESCE(c.casePhase, '') AS label
-               FROM children c WHERE ${presentInPeriodWhere}
+               FROM children c WHERE ${activeInPeriodWhere}
               ORDER BY c.name ASC`,
-            periodBounds
+            activeInPeriodParams
           ),
           pool.query(
             `SELECT COALESCE(c.caseType, '') AS label, COUNT(*) AS n
-               FROM children c WHERE ${presentInPeriodWhere} GROUP BY label`,
-            periodBounds
+               FROM children c WHERE ${activeInPeriodWhere} GROUP BY label`,
+            activeInPeriodParams
           ),
           // Discharged *in the period* — the Child Records **Discharged** filter
           // cut to the month the case actually closed. The child row carries no
@@ -563,9 +583,9 @@ async function centerHeadOverview(req, res, next) {
                        AND t2.reportingYear = ? AND t2.reportingMonth = ?
                      ORDER BY t2.finalizedAt DESC, t2.id DESC
                      LIMIT 1)
-            WHERE ${presentInPeriodWhere}
+            WHERE ${activeInPeriodWhere}
             ORDER BY c.name ASC`,
-          [periodYear, periodMonth, ...periodBounds]
+          [periodYear, periodMonth, ...activeInPeriodParams]
         );
         const groups = groupResidentsByLabel(rows);
         behavioral = BEHAVIORAL_BANDS.map((label) => {
@@ -757,7 +777,7 @@ async function centerHeadOverview(req, res, next) {
         await Promise.all([
           pool.query(
             `SELECT status, COUNT(*) AS n FROM violations WHERE ${inPeriod} GROUP BY status`,
-            periodBounds
+            periodRange
           ),
           pool.query(
             `SELECT CASE
@@ -772,21 +792,21 @@ async function centerHeadOverview(req, res, next) {
                FROM violations
               WHERE ${inPeriod}
               GROUP BY label`,
-            [month, ...periodBounds]
+            [month, ...periodRange]
           ),
           pool.query(
             `SELECT severity, COUNT(*) AS n FROM violations
               WHERE status NOT IN ('Resolved', 'Rejected') AND ${inPeriod} GROUP BY severity`,
-            periodBounds
+            periodRange
           ),
           pool.query(
             `SELECT COUNT(*) AS n FROM violations WHERE status = 'Resolved' AND ${inPeriod}`,
-            periodBounds
+            periodRange
           ),
           pool.query(
             `SELECT COUNT(*) AS n FROM violations
               WHERE status NOT IN ('Pending Review', 'Rejected') AND ${inPeriod}`,
-            periodBounds
+            periodRange
           ),
         ]);
       const byStatus = tallyBy(statusRows, 'status');
