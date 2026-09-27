@@ -200,7 +200,19 @@ export function Violations() {
   const verificationSide: 'psych' | 'sw' = fixedVerificationSide ?? chosenVerificationSide;
 
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterStatus, setFilterStatus] = useState('all');
+  /**
+   * The Violation List's status filter.
+   *
+   * `?status=` is a live deep link: the Center Head's dashboard sends
+   * `/violations?tab=list&status=Reviewed`, so the number that was clicked opens
+   * the exact list it counted. Read once as the initial value — a URL that
+   * re-seeded the filter on every render would fight the dropdown. A value the
+   * filter does not offer falls back to "all" rather than emptying the table.
+   */
+  const [filterStatus, setFilterStatus] = useState(() => {
+    const requested = new URLSearchParams(window.location.search).get('status');
+    return requested && ['Reviewed', 'Resolved', 'Overdue'].includes(requested) ? requested : 'all';
+  });
   const [filterSeverity, setFilterSeverity] = useState('all');
   const [violationMonthFilter, setViolationMonthFilter] = useState('');
   const [verificationSearchTerm, setVerificationSearchTerm] = useState('');

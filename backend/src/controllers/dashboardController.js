@@ -244,6 +244,23 @@ function monthStartOf(date) {
   return `${String(date).slice(0, 7)}-01`;
 }
 
+/**
+ * `YYYY-MM-DD` of the last day of a `YYYY-MM` month.
+ *
+ * Computed from the numbers alone — `Date.UTC(year, month, 0)` is "day 0 of the
+ * next month", which is the last day of this one — so no zone-less string is
+ * ever handed to `new Date()` and read back in the server's own zone. The old
+ * `setMonth(+1); setDate(0)` shape would do the same arithmetic, but it does it
+ * through a local `Date`, which is exactly the conversion that has silently
+ * moved a boundary by a day elsewhere in this codebase.
+ */
+function monthEndOf(period) {
+  const [year, month] = String(period).split('-').map(Number);
+  if (!year || !month) return `${period}-28`;
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return `${period}-${String(lastDay).padStart(2, '0')}`;
+}
+
 /** A `COUNT(*)` result as a number. MySQL hands back a string for `BIGINT`. */
 function countOf(rows) {
   return Number(rows?.[0]?.n ?? 0) || 0;
@@ -269,32 +286,44 @@ function tallyBy(rows, key) {
 }
 
 /**
- * The Child Records module's own definition of an active resident — the exact
- * predicate behind its **Active** filter (`ChildRecords.tsx`, `matchesStatus`):
- * everything that is not Discharged and not Absconded.
+ * How "active" is decided, once, for the whole page.
  *
- * Written once and used by every resident breakdown on this page, so the tile,
- * the rehabilitation-phase mix, the behavioural mix and the case-type mix are
- * all counting the same population. Note this is deliberately *not*
- * `status = 'Active'`: the two agree today because the column is an ENUM of
- * exactly three values, but the module's rule is the one the Center Head can
- * check by clicking through, so that is the one implemented here.
+ * The Child Records module's **Active** filter is `status NOT IN ('Discharged',
+ * 'Absconded')` — everything not Discharged and not Absconded. That is the rule
+ * for *now*, and it is the one the Center Head can check by clicking through to
+ * the module, so it is the notion of "active" this page implements.
+ *
+ * It is not restated here as a constant, because with a period selector the
+ * question is no longer "is this resident active" but "was this resident here
+ * during September". `presentInPeriodWhere` below is that rule: the same
+ * notion of a placement, evaluated at a date instead of at `now`.
+ *
+ * One deliberate difference, and it is the honest reading of "here during
+ * September": a resident discharged *earlier in the selected month* is present
+ * for that month and is counted, though the module's filter — which asks about
+ * now — would not list them. Every other resident agrees, and the rule is the
+ * same for every period, so a month's figure never changes as time passes.
  */
-const ACTIVE_RESIDENT_WHERE = "status NOT IN ('Discharged', 'Absconded')";
 
 /**
- * The rating bands the Child Detail's Behavioral tab prints, in the order that
- * tab ranks them. `Still Monitoring` is the tab's own word for a resident with
- * no Finalized TRI yet; `Not Rated` is a Finalized TRI whose rating is blank.
- * Anything else the TRI can hold is appended after these rather than dropped.
+ * The behavioural bands the Center Head's dashboard draws, in the order the
+ * approved template lists them — weakest first, with the residents who have no
+ * finalised TRI for the period last.
+ *
+ * `Unscored` is the TRI module's own word (`TriStatistics.tsx`) for a resident
+ * with no finalised TRI, and it is also where a finalised TRI with a blank
+ * rating lands: both mean "no score for this period", and giving them two rows
+ * would split one population across two bars.
+ *
+ * Every band is emitted whether or not it holds anyone, so the five bars keep
+ * their places as the period changes.
  */
-const BEHAVIORAL_ORDER = [
-  'Very Good',
-  'Good',
-  'Fair',
+const BEHAVIORAL_BANDS = [
   'Needs Improvement',
-  'Not Rated',
-  'Still Monitoring',
+  'Fair',
+  'Good',
+  'Very Good',
+  'Unscored',
 ];
 
 /**
@@ -374,6 +403,55 @@ async function centerHeadOverview(req, res, next) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(today)) throw new ApiError(400, 'date must be YYYY-MM-DD');
     const monthStart = monthStartOf(today);
 
+    /**
+     * The statistics period — the month the dashboard is *about*.
+     *
+     * `?period=YYYY-MM` scopes the resident counts, the rehabilitation-phase
+     * mix, the behavioural mix and the violations to one calendar month. It
+     * deliberately does **not** move `today`: the schedule feed answers "what is
+     * coming up next", which is a question about now, and re-basing it on a past
+     * month would hide commitments that are still ahead of the facility.
+     *
+     * The two were one parameter before, which is the trap this separates: a
+     * caller asking for September would have moved "today" to September and
+     * turned the Upcoming/Overdue counts into nonsense.
+     *
+     * The boundaries are inclusive calendar days in the facility's own
+     * convention, and they are plain `YYYY-MM-DD` strings compared against
+     * `DATE` columns — no timestamp conversion, so no record is pushed out of
+     * its month by a timezone.
+     */
+    const requestedPeriod = String(req.query.period || '').trim();
+    // Months 01–12 only. `\d{2}` would accept `2026-13`, and the month-end
+    // arithmetic would then quietly answer with `2026-13-31` — a period that
+    // matches no row, so the whole dashboard would read zero rather than fail.
+    if (requestedPeriod && !/^\d{4}-(0[1-9]|1[0-2])$/.test(requestedPeriod)) {
+      throw new ApiError(400, 'period must be YYYY-MM');
+    }
+    const period = requestedPeriod || today.slice(0, 7);
+    const periodStart = `${period}-01`;
+    const periodEnd = monthEndOf(period);
+    const periodYear = Number(period.slice(0, 4));
+    const periodMonth = Number(period.slice(5, 7));
+
+    /**
+     * "Was this resident in the facility during the period?"
+     *
+     * Presence is recorded as admission *periods* — `admissions.admissionDate`
+     * through `admissions.closedDate` — so the test is an overlap between that
+     * span and the month. A resident still in the facility has a NULL
+     * `closedDate` and is present in every month from their admission onward.
+     *
+     * For the current month this agrees with the Child Records **Active** filter
+     * on every resident except one discharged earlier in the same month.
+     */
+    const presentInPeriodWhere = `
+      EXISTS (SELECT 1 FROM admissions a
+               WHERE a.residentId = c.id
+                 AND a.admissionDate <= ?
+                 AND (a.closedDate IS NULL OR a.closedDate >= ?))`;
+    const periodBounds = [periodEnd, periodStart];
+
     /** Run one section; a failure degrades that section instead of the page. */
     const safe = async (label, run, fallback) => {
       try {
@@ -388,18 +466,33 @@ async function centerHeadOverview(req, res, next) {
 
     // ── Residents ──────────────────────────────────────────────────────────
     const residents = await safe('residents', async () => {
-      const [[statusRows], [activeRows], [phaseRows], [caseTypeRows]] = await Promise.all([
-        pool.query('SELECT status, COUNT(*) AS n FROM children GROUP BY status'),
-        pool.query(`SELECT COUNT(*) AS n FROM children WHERE ${ACTIVE_RESIDENT_WHERE}`),
-        pool.query(
-          `SELECT COALESCE(casePhase, '') AS label, COUNT(*) AS n
-             FROM children WHERE ${ACTIVE_RESIDENT_WHERE} GROUP BY label`
-        ),
-        pool.query(
-          `SELECT COALESCE(caseType, '') AS label, COUNT(*) AS n
-             FROM children WHERE ${ACTIVE_RESIDENT_WHERE} GROUP BY label`
-        ),
-      ]);
+      const [[statusRows], [activeRows], [phaseRows], [caseTypeRows], [dischargedRows]] =
+        await Promise.all([
+          pool.query('SELECT status, COUNT(*) AS n FROM children GROUP BY status'),
+          pool.query(`SELECT COUNT(*) AS n FROM children c WHERE ${presentInPeriodWhere}`, periodBounds),
+          pool.query(
+            `SELECT COALESCE(c.casePhase, '') AS label, COUNT(*) AS n
+               FROM children c WHERE ${presentInPeriodWhere} GROUP BY label`,
+            periodBounds
+          ),
+          pool.query(
+            `SELECT COALESCE(c.caseType, '') AS label, COUNT(*) AS n
+               FROM children c WHERE ${presentInPeriodWhere} GROUP BY label`,
+            periodBounds
+          ),
+          // Discharged *in the period* — the Child Records **Discharged** filter
+          // cut to the month the case actually closed. The child row carries no
+          // discharge date; the system records it as the close of the admission
+          // period, so that is where the month is read from.
+          pool.query(
+            `SELECT COUNT(*) AS n FROM children c
+              WHERE c.status = 'Discharged'
+                AND EXISTS (SELECT 1 FROM admissions a
+                             WHERE a.residentId = c.id
+                               AND a.closedDate >= ? AND a.closedDate <= ?)`,
+            [periodStart, periodEnd]
+          ),
+        ]);
       const byStatus = tallyBy(statusRows, 'status');
       const byPhase = Object.entries(tallyBy(phaseRows, 'label'))
         .map(([phase, count]) => ({ phase, short: PHASE_SHORT[phase] || phase || 'Unassigned', count }))
@@ -411,11 +504,17 @@ async function centerHeadOverview(req, res, next) {
         .sort((a, b) => b.count - a.count);
 
       // ── Behavioural status ───────────────────────────────────────────────
-      // The Behavioral tab on a resident's page prints `behaviorSummary.status`
-      // (ChildDetail.tsx): the rating on their newest **Finalized** TRI, or
-      // "Still Monitoring" when they have none, with a Finalized TRI whose
-      // rating is blank reading "Not Rated". Same rule here, so this breakdown
-      // and the resident's own page cannot disagree about a rating.
+      // The rating bands the Behavioral tab ranks residents by, read from the
+      // **Finalized TRI for the selected period**. The TRI is a monthly
+      // instrument (`reportingYear` / `reportingMonth`), so "September 2026"
+      // asks for September's finalised TRI and nothing else — the newest
+      // Finalized TRI of *any* month would answer a different question and would
+      // not move when the period changed. A resident with no finalised TRI that
+      // month is **Unscored**, the same word the TRI Statistics card uses.
+      //
+      // All five bands are returned whether or not anyone is in them, so the
+      // bars keep their places month to month instead of the chart reflowing on
+      // every period change.
       //
       // Guarded on its own: `triRecords` has a boot migration, but a missing
       // table would otherwise take the resident counts down with it, and a
@@ -423,26 +522,27 @@ async function centerHeadOverview(req, res, next) {
       let behavioral = [];
       try {
         const [rows] = await pool.query(
-          `SELECT CASE WHEN t.id IS NULL THEN 'Still Monitoring'
-                       ELSE COALESCE(NULLIF(t.rating, ''), 'Not Rated') END AS label,
+          `SELECT CASE WHEN t.id IS NULL THEN 'Unscored'
+                       ELSE COALESCE(NULLIF(t.rating, ''), 'Unscored') END AS label,
                   COUNT(*) AS n
              FROM children c
              LEFT JOIN triRecords t
                ON t.id = (
                     SELECT t2.id FROM triRecords t2
-                     WHERE t2.residentId = c.id AND t2.status = 'Finalized'
-                     ORDER BY t2.reportingYear DESC, t2.reportingMonth DESC,
-                              t2.finalizedAt DESC, t2.id DESC
+                     WHERE t2.residentId = c.id
+                       AND t2.status = 'Finalized'
+                       AND t2.reportingYear = ? AND t2.reportingMonth = ?
+                     ORDER BY t2.finalizedAt DESC, t2.id DESC
                      LIMIT 1)
-            WHERE c.${ACTIVE_RESIDENT_WHERE}
-            GROUP BY label`
+            WHERE ${presentInPeriodWhere}
+            GROUP BY label`,
+          [periodYear, periodMonth, ...periodBounds]
         );
         const tally = tallyBy(rows, 'label');
-        behavioral = BEHAVIORAL_ORDER.filter((label) => (tally[label] || 0) > 0)
-          .map((label) => ({ label, count: tally[label] }));
-        // A band the order does not name is still a real rating — count it.
+        behavioral = BEHAVIORAL_BANDS.map((label) => ({ label, count: tally[label] || 0 }));
+        // A band the list does not name is still a real rating — count it.
         for (const [label, count] of Object.entries(tally)) {
-          if (!BEHAVIORAL_ORDER.includes(label) && count > 0) behavioral.push({ label, count });
+          if (!BEHAVIORAL_BANDS.includes(label) && count > 0) behavioral.push({ label, count });
         }
       } catch (error) {
         console.error('Center Head dashboard — behavioral status failed:', error.message);
@@ -450,7 +550,11 @@ async function centerHeadOverview(req, res, next) {
 
       return {
         active: countOf(activeRows),
-        discharged: byStatus.Discharged || 0,
+        // Discharged *in the period* — "how many residents left this month",
+        // which is the question the period selector asks. `total` and
+        // `absconded` stay all-time: neither is drawn on the dashboard, and a
+        // period-scoped version of them would be a number nothing reads.
+        discharged: countOf(dischargedRows),
         absconded: byStatus.Absconded || 0,
         total: Object.values(byStatus).reduce((sum, count) => sum + count, 0),
         byPhase,
@@ -607,10 +711,20 @@ async function centerHeadOverview(req, res, next) {
     // can differ by one month; the facility's own calendar is the right one to
     // report from here.
     const violations = await safe('violations', async () => {
-      const month = today.slice(0, 7);
-      const [[statusRows], [displayRows], [severityRows], [resolvedThisMonth], [listRows]] =
+      // The period, not "now". Every figure in this section is scoped to
+      // violations *dated* inside the selected month, and `month` is the period
+      // itself — so the Overdue rule (an intervention month that has passed with
+      // nobody deciding) is judged against the month being viewed rather than
+      // against today. Using today would call a July case overdue in a July
+      // view, which is the opposite of what the reader asked for.
+      const month = period;
+      const inPeriod = 'date >= ? AND date <= ?';
+      const [[statusRows], [displayRows], [severityRows], [resolvedInPeriod], [listRows]] =
         await Promise.all([
-          pool.query('SELECT status, COUNT(*) AS n FROM violations GROUP BY status'),
+          pool.query(
+            `SELECT status, COUNT(*) AS n FROM violations WHERE ${inPeriod} GROUP BY status`,
+            periodBounds
+          ),
           pool.query(
             `SELECT CASE
                       WHEN status = 'Resolved' THEN 'Resolved'
@@ -622,18 +736,23 @@ async function centerHeadOverview(req, res, next) {
                     END AS label,
                     COUNT(*) AS n
                FROM violations
+              WHERE ${inPeriod}
               GROUP BY label`,
-            [month]
+            [month, ...periodBounds]
           ),
           pool.query(
             `SELECT severity, COUNT(*) AS n FROM violations
-              WHERE status NOT IN ('Resolved', 'Rejected') GROUP BY severity`
+              WHERE status NOT IN ('Resolved', 'Rejected') AND ${inPeriod} GROUP BY severity`,
+            periodBounds
           ),
-          pool.query("SELECT COUNT(*) AS n FROM violations WHERE status = 'Resolved' AND date >= ?", [
-            monthStart,
-          ]),
           pool.query(
-            "SELECT COUNT(*) AS n FROM violations WHERE status NOT IN ('Pending Review', 'Rejected')"
+            `SELECT COUNT(*) AS n FROM violations WHERE status = 'Resolved' AND ${inPeriod}`,
+            periodBounds
+          ),
+          pool.query(
+            `SELECT COUNT(*) AS n FROM violations
+              WHERE status NOT IN ('Pending Review', 'Rejected') AND ${inPeriod}`,
+            periodBounds
           ),
         ]);
       const byStatus = tallyBy(statusRows, 'status');
@@ -652,7 +771,7 @@ async function centerHeadOverview(req, res, next) {
         underInvestigation: byStatus['Under Investigation'] || 0,
         escalated: byStatus.Escalated || 0,
         rejected: byStatus.Rejected || 0,
-        resolvedThisMonth: countOf(resolvedThisMonth),
+        resolvedInPeriod: countOf(resolvedInPeriod),
         bySeverity: {
           Minor: bySeverity.Minor || 0,
           Major: bySeverity.Major || 0,
@@ -661,7 +780,7 @@ async function centerHeadOverview(req, res, next) {
       };
     }, {
       active: 0, list: 0, reviewed: 0, overdue: 0, resolved: 0, open: 0,
-      pendingReview: 0, underInvestigation: 0, escalated: 0, rejected: 0, resolvedThisMonth: 0,
+      pendingReview: 0, underInvestigation: 0, escalated: 0, rejected: 0, resolvedInPeriod: 0,
       bySeverity: { Minor: 0, Major: 0, Critical: 0 },
     });
 
@@ -978,6 +1097,12 @@ async function centerHeadOverview(req, res, next) {
       success: true,
       data: {
         today,
+        // The statistics period, resolved — echoed back so the header can label
+        // exactly what it is showing without the client re-deriving it (and
+        // getting the month wrong across a timezone).
+        period,
+        periodStart,
+        periodEnd,
         generatedAt: new Date().toISOString(),
         residents,
         admissions,
