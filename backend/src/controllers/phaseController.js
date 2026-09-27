@@ -557,8 +557,7 @@ async function demote(req, res, next) {
     // notification must not undo a demotion that already took effect.
     try {
       const childName = (await notifications.residentName(phase.residentId)) || 'Child';
-
-      await notifications.notify({
+      const demotionEvent = {
         type: 'Phase Demotion',
         residentId: phase.residentId,
         title: `Child Demoted - ${childName}`,
@@ -567,12 +566,23 @@ async function demote(req, res, next) {
         actionRequired: 'Review demoted child and create remediation plan',
         relatedRecordType: 'phaseProgress',
         relatedRecordId: newId,
-        targetRole: 'socialworker',
         actorUsername: demotedBy,
         // One demotion is one phaseProgress row, so the row id is the natural
         // dedupe key — a retried request cannot produce a second notification.
         dedupeKey: `phase-progress:${newId}:demoted`,
-      });
+      };
+
+      await notifications.notify({ ...demotionEvent, targetRole: 'socialworker' });
+
+      // A demotion rewrites the Houseparents' task list for this resident, so they
+      // are told alongside the Case Worker rather than left to notice. Addressed
+      // by id, so the caseload rule applies and a Houseparent assigned to another
+      // child never sees it — the same shape as the phase-completion notice above.
+      const houseparents = await notifications.houseparentsOf(phase.residentId);
+      await notifications.notifyUsers(
+        houseparents.map((hp) => hp.id),
+        { ...demotionEvent, dedupeKey: `phase-progress:${newId}:demoted-houseparent` },
+      );
     } catch (alertErr) {
       console.error('[PhaseController] Demotion alert failed (non-fatal):', alertErr.message);
     }

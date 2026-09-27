@@ -1117,18 +1117,29 @@ async function abscond(req, res, next) {
     await connection.commit();
 
     try {
+      const abscondEvent = {
+        type: 'Resident Absconded',
+        title: `Resident absconded — ${child.name}`,
+        message: `${req.user?.username || 'Staff'} marked ${child.name} as absconded. The record is now view-only and the Phase Timeline is frozen.`,
+        priority: 'High',
+        residentId: child.id,
+        relatedRecordType: 'children',
+        relatedRecordId: child.id,
+        actorUsername: req.user?.username || null,
+      };
+
       const managers = await notifications.usersWithAnyRole(['centerhead', 'socialworker']);
       if (managers.length) {
-        await notifications.notifyUsers(managers.map((u) => u.id), {
-          type: 'Resident Absconded',
-          title: `Resident absconded — ${child.name}`,
-          message: `${req.user?.username || 'Staff'} marked ${child.name} as absconded. The record is now view-only and the Phase Timeline is frozen.`,
-          priority: 'High',
-          residentId: child.id,
-          relatedRecordType: 'children',
-          relatedRecordId: child.id,
-          actorUsername: req.user?.username || null,
-        });
+        await notifications.notifyUsers(managers.map((u) => u.id), abscondEvent);
+      }
+
+      // The Houseparent who runs this child's daily program is the one who has to
+      // act on it, and was the only party not told — this reached the Center Head
+      // and the Social Worker alone. Addressed by id, so the caseload rule applies
+      // and a Houseparent assigned to another child never sees it.
+      const houseparents = await notifications.houseparentsOf(child.id);
+      if (houseparents.length) {
+        await notifications.notifyUsers(houseparents.map((hp) => hp.id), abscondEvent);
       }
     } catch (notifyErr) {
       console.error('[ChildController] Abscond notification failed (non-fatal):', notifyErr.message);

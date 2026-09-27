@@ -830,21 +830,30 @@ async function create(req, res, next) {
     // Head has to know about, and nothing told them before. Addressed per
     // account (not per role) so the actor never gets their own action back.
     try {
+      const admissionEvent = {
+        type: 'Admission',
+        residentId,
+        title: `New Resident Admitted - ${resident.name}`,
+        message: `${req.user?.username || 'A staff member'} admitted ${resident.name} to the facility (admission ${admissionNumber}).`,
+        priority: 'Medium',
+        actionRequired: 'Review the intake record.',
+        relatedRecordType: 'admissions',
+        relatedRecordId: admissionId,
+        actorUsername: req.user?.username,
+        dedupeKey: `admission:${admissionId}:created`,
+      };
+
       const managers = await notifications.usersWithAnyRole(['centerhead', 'admin']);
+      await notifications.notifyUsers(managers.map((m) => m.id), admissionEvent);
+
+      // The Houseparent assigned to this resident runs their daily program from
+      // the day they arrive, so they are told too. Usually empty on a first
+      // admission — the Center Head creates the assignment afterwards — and
+      // populated on a re-admission, where one already exists.
+      const houseparents = await notifications.houseparentsOf(residentId);
       await notifications.notifyUsers(
-        managers.map((m) => m.id),
-        {
-          type: 'Admission',
-          residentId,
-          title: `New Resident Admitted - ${resident.name}`,
-          message: `${req.user?.username || 'A staff member'} admitted ${resident.name} to the facility (admission ${admissionNumber}).`,
-          priority: 'Medium',
-          actionRequired: 'Review the intake record.',
-          relatedRecordType: 'admissions',
-          relatedRecordId: admissionId,
-          actorUsername: req.user?.username,
-          dedupeKey: `admission:${admissionId}:created`,
-        }
+        houseparents.map((hp) => hp.id),
+        { ...admissionEvent, dedupeKey: `admission:${admissionId}:created-houseparent` },
       );
     } catch (notifyErr) {
       console.error('[AdmissionController] Admission notification failed (non-fatal):', notifyErr.message);
