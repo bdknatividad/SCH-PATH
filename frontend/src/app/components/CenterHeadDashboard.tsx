@@ -52,7 +52,7 @@ import {
   Users, UserPlus, UserMinus, Calendar, CalendarClock, AlertTriangle,
   FileText, ClipboardCheck, ClipboardList, Clock, Gavel, GraduationCap,
   ShieldAlert, RefreshCw, Inbox, Scale, ChevronRight, Landmark,
-  BookOpen, Stethoscope, ListChecks, Hourglass, CheckCircle2, ChartColumn,
+  BookOpen, Stethoscope, ListChecks, Hourglass, CheckCircle2, ChartColumn, Timer,
 } from 'lucide-react';
 import {
   PieChart, Pie, Cell, ResponsiveContainer, BarChart,
@@ -219,8 +219,44 @@ interface Overview {
 const INK = '#2F3E46';
 const ACCENT = '#FFD100';
 
-/** Every surface on the page. One shadow, so nothing looks a shade deeper. */
-const SURFACE = 'rounded-xl border border-gray-200 bg-white shadow-[0_1px_2px_rgba(16,24,40,0.04)]';
+/**
+ * The surface system.
+ *
+ * The first pass used `border-gray-200` (#e5e7eb) on white cards over the
+ * layout's near-white `#F0F2F5` canvas, and the page read as one continuous
+ * sheet — the borders were technically there and visually absent. Every line on
+ * this page is now `#CFD8DE`: dark enough that the eye catches it against both
+ * `#ffffff` and `#F0F2F5`, light enough that a page of them still reads as
+ * structure rather than as boxes. Nothing here is heavier than it needs to be;
+ * the contrast comes from *tint*, not from weight.
+ *
+ * Four greys, each with one job:
+ *   EDGE   every card's outline
+ *   SEAM   a divider inside a card, where an outline would be too loud
+ *   BAND   a section header, so "this is a heading" is visible at a glance
+ *   PANEL  a secondary surface inside a section, so a section is not all white
+ */
+const EDGE = 'border-[#CFD8DE]';
+const SEAM = 'border-[#E4EAEE]';
+const BAND = 'bg-[#EEF1F3]';
+const PANEL = 'bg-[#FAFBFC]';
+
+/** Every card on the page. One shadow, so nothing looks a shade deeper. */
+const SURFACE = `rounded-xl border ${EDGE} bg-white shadow-[0_1px_2px_rgba(16,24,40,0.06),0_2px_10px_-2px_rgba(16,24,40,0.07)]`;
+
+/**
+ * A section's accent. The stripe down the card's left edge and the icon chip are
+ * the only places colour is spent, which is what makes a section identifiable
+ * from across the room without turning the page into a palette.
+ */
+type Accent = 'ink' | 'danger' | 'warn' | 'info';
+
+const ACCENTS: Record<Accent, { bar: string; chip: string; icon: string }> = {
+  ink: { bar: '#2F3E46', chip: 'bg-[#2F3E46]/10', icon: 'text-[#2F3E46]' },
+  danger: { bar: '#dc2626', chip: 'bg-red-100', icon: 'text-red-600' },
+  warn: { bar: '#f59e0b', chip: 'bg-amber-100', icon: 'text-amber-600' },
+  info: { bar: '#0284c7', chip: 'bg-sky-100', icon: 'text-sky-600' },
+};
 
 /** The one tooltip shape, shared by all four charts. */
 const TOOLTIP_STYLE = {
@@ -242,19 +278,24 @@ type Tone = 'danger' | 'warn' | 'info' | 'ok' | 'muted' | 'review';
  * One place for the status colours, so "Overdue" is the same red everywhere on
  * the page. The four words the brief asks for — Pending, Upcoming, Overdue,
  * Completed — map onto these; anything else falls back to `muted`.
+ *
+ * `bar` is the same colour as a hex, for the places a Tailwind class cannot
+ * reach (a chart series, an inline stripe); `solid` is the chip without its
+ * border, for a filled icon tile. Three shapes of one colour, so a tone cannot
+ * drift between a badge and the bar beside it.
  */
-const TONE: Record<Tone, { chip: string; dot: string; text: string }> = {
-  danger: { chip: 'bg-red-50 text-red-700 border-red-200', dot: 'bg-red-500', text: 'text-red-600' },
-  warn: { chip: 'bg-amber-50 text-amber-700 border-amber-200', dot: 'bg-amber-500', text: 'text-amber-600' },
-  info: { chip: 'bg-sky-50 text-sky-700 border-sky-200', dot: 'bg-sky-500', text: 'text-sky-600' },
-  ok: { chip: 'bg-emerald-50 text-emerald-700 border-emerald-200', dot: 'bg-emerald-500', text: 'text-emerald-600' },
-  review: { chip: 'bg-violet-50 text-violet-700 border-violet-200', dot: 'bg-violet-500', text: 'text-violet-600' },
-  muted: { chip: 'bg-gray-50 text-gray-600 border-gray-200', dot: 'bg-gray-400', text: 'text-gray-500' },
+const TONE: Record<Tone, { chip: string; dot: string; text: string; bar: string; solid: string }> = {
+  danger: { chip: 'bg-red-50 text-red-700 border-red-200', dot: 'bg-red-500', text: 'text-red-600', bar: '#dc2626', solid: 'bg-red-100 text-red-600' },
+  warn: { chip: 'bg-amber-50 text-amber-700 border-amber-200', dot: 'bg-amber-500', text: 'text-amber-600', bar: '#f59e0b', solid: 'bg-amber-100 text-amber-600' },
+  info: { chip: 'bg-sky-50 text-sky-700 border-sky-200', dot: 'bg-sky-500', text: 'text-sky-600', bar: '#0284c7', solid: 'bg-sky-100 text-sky-600' },
+  ok: { chip: 'bg-emerald-50 text-emerald-700 border-emerald-200', dot: 'bg-emerald-500', text: 'text-emerald-600', bar: '#059669', solid: 'bg-emerald-100 text-emerald-600' },
+  review: { chip: 'bg-violet-50 text-violet-700 border-violet-200', dot: 'bg-violet-500', text: 'text-violet-600', bar: '#7c3aed', solid: 'bg-violet-100 text-violet-600' },
+  muted: { chip: 'bg-gray-50 text-gray-600 border-gray-200', dot: 'bg-gray-400', text: 'text-gray-500', bar: INK, solid: 'bg-[#2F3E46]/10 text-[#2F3E46]' },
 };
 
 function Pill({ tone, children, className = '' }: { tone: Tone; children: React.ReactNode; className?: string }) {
   return (
-    <span className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${TONE[tone].chip} ${className}`}>
+    <span className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${TONE[tone].chip} ${className}`}>
       {children}
     </span>
   );
@@ -368,24 +409,32 @@ function percentOf(count: number, total: number): number {
 /**
  * A section. Fewer, larger surfaces rather than a wall of small boxes: the page
  * has six sections, not sixteen cards.
+ *
+ * A section announces itself three ways at once, so it is unmistakable without
+ * any one of them being heavy: a tinted header band, a hairline under it, and a
+ * 4px accent stripe down the card's left edge. The stripe is what lets the eye
+ * sort the page at a glance — red means "this one is about what is late".
  */
 function Section({
-  icon: Icon, title, subtitle, action, children, className = '', bodyClassName = 'p-5',
+  icon: Icon, title, subtitle, action, children, accent = 'ink', className = '', bodyClassName = 'p-5',
 }: {
   icon: React.ComponentType<{ className?: string }>;
   title: string;
   subtitle?: string;
   action?: React.ReactNode;
   children: React.ReactNode;
+  accent?: Accent;
   className?: string;
   bodyClassName?: string;
 }) {
+  const tone = ACCENTS[accent];
   return (
-    <section className={`flex flex-col ${SURFACE} ${className}`}>
-      <header className="flex flex-wrap items-start justify-between gap-3 border-b border-gray-100 px-5 py-3.5">
+    <section className={`relative flex flex-col overflow-hidden ${SURFACE} ${className}`}>
+      <span aria-hidden className="absolute inset-y-0 left-0 w-1" style={{ backgroundColor: tone.bar }} />
+      <header className={`flex flex-wrap items-start justify-between gap-3 border-b ${EDGE} ${BAND} py-3.5 pl-[21px] pr-5`}>
         <div className="flex min-w-0 items-start gap-3">
-          <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg" style={{ backgroundColor: `${ACCENT}2E` }}>
-            <Icon className="h-4 w-4" />
+          <span className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${tone.chip}`}>
+            <Icon className={`h-4 w-4 ${tone.icon}`} />
           </span>
           <div className="min-w-0">
             <h3 className="truncate text-sm font-bold" style={{ color: INK }}>{title}</h3>
@@ -405,7 +454,7 @@ function SectionLink({ label, onClick }: { label: string; onClick: () => void })
     <button
       type="button"
       onClick={onClick}
-      className="shrink-0 self-center rounded-lg border border-gray-200 px-2.5 py-1 text-[11px] font-bold transition-colors hover:border-[#FFD100] hover:bg-[#FFD100]/15"
+      className={`shrink-0 self-center rounded-lg border bg-white px-2.5 py-1 text-[11px] font-bold transition-colors hover:border-[#2F3E46] hover:bg-[#FFD100]/20 ${EDGE}`}
       style={{ color: INK }}
     >
       {label}
@@ -413,14 +462,21 @@ function SectionLink({ label, onClick }: { label: string; onClick: () => void })
   );
 }
 
-/** A group heading inside a section — "Today", "Awaiting a decision". */
+/**
+ * A group heading inside a section — "Today", "Awaiting a decision".
+ *
+ * It carries a rule to the right of its label so a section's internal splits are
+ * as legible as the sections themselves. Without it the three schedule columns
+ * read as one undivided block of rows.
+ */
 function GroupHeading({ label, count, tone = 'muted', children }: { label: string; count?: number; tone?: Tone; children?: React.ReactNode }) {
   return (
-    <div className="mb-2.5 flex items-center justify-between gap-2">
-      <h4 className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+    <div className={`mb-2.5 flex items-center gap-2 border-b pb-2 ${SEAM}`}>
+      <h4 className="flex shrink-0 items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-700">
         {tone !== 'muted' && <span className={`h-1.5 w-1.5 rounded-full ${TONE[tone].dot}`} />}
         {label}
       </h4>
+      <span className={`h-px flex-1 ${tone === 'muted' ? 'bg-[#E4EAEE]' : TONE[tone].dot} ${tone === 'muted' ? '' : 'opacity-30'}`} />
       <div className="flex shrink-0 items-center gap-2">
         {children}
         {count !== undefined && (
@@ -432,13 +488,13 @@ function GroupHeading({ label, count, tone = 'muted', children }: { label: strin
 }
 
 function Empty({ children }: { children: React.ReactNode }) {
-  return <p className="py-5 text-center text-[11px] italic text-gray-400">{children}</p>;
+  return <p className={`rounded-lg border border-dashed py-5 text-center text-[11px] italic text-gray-400 ${EDGE} ${PANEL}`}>{children}</p>;
 }
 
 /** The all-clear state. Deliberately calm, never a bare zero. */
 function Clear({ children }: { children: React.ReactNode }) {
   return (
-    <p className="flex items-center gap-2 rounded-lg bg-emerald-50/70 px-3 py-2.5 text-[11px] font-medium text-emerald-700">
+    <p className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-[11px] font-medium text-emerald-800">
       <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
       {children}
     </p>
@@ -451,7 +507,7 @@ function Clear({ children }: { children: React.ReactNode }) {
 
 function Th({ children, className = '' }: { children?: React.ReactNode; className?: string }) {
   return (
-    <th scope="col" className={`whitespace-nowrap px-3 py-2 text-left text-[10px] font-bold uppercase tracking-wider text-gray-500 ${className}`}>
+    <th scope="col" className={`whitespace-nowrap px-3 py-2.5 text-left text-[10px] font-bold uppercase tracking-wider text-gray-600 ${className}`}>
       {children}
     </th>
   );
@@ -473,23 +529,45 @@ function Td({
 }
 
 /** A table row that navigates. Every list on the page is one of these. */
-function Tr({ onClick, children, title }: { onClick: () => void; children: React.ReactNode; title?: string }) {
+function Tr({ onClick, children, title, className = '' }: { onClick: () => void; children: React.ReactNode; title?: string; className?: string }) {
   return (
     <tr
       onClick={onClick}
       title={title}
-      className="cursor-pointer border-b border-gray-100 transition-colors last:border-0 hover:bg-[#FFD100]/10"
+      className={`cursor-pointer border-b border-[#E9EEF1] transition-colors last:border-0 hover:bg-[#FFD100]/15 ${className}`}
     >
       {children}
     </tr>
   );
 }
 
-/** The scroll shell every table sits in, so a narrow screen scrolls not squashes. */
-function TableShell({ minWidth, children }: { minWidth: string; children: React.ReactNode }) {
+/**
+ * The scroll shell every table sits in, so a narrow screen scrolls not squashes.
+ *
+ * `table-fixed` is load-bearing, not cosmetic. Under the default `auto` layout a
+ * cell styled `truncate` reports its *full* text as its minimum content width —
+ * `white-space: nowrap` is what `truncate` sets — so the table grew wider than
+ * its container and the trailing columns (Resident, Status, Waiting, the "when"
+ * pill) were pushed out of the scroll area and clipped. The page looked like it
+ * was missing columns. Fixed layout honours the widths declared on the cells,
+ * which is what lets `truncate` actually truncate.
+ *
+ * `bleed` pulls the table out to the card's edges, for a table directly inside a
+ * `p-5` section body. A table inside a smaller panel passes `bleed={false}`.
+ */
+function TableShell({
+  minWidth, children, bleed = true,
+}: {
+  minWidth?: string;
+  children: React.ReactNode;
+  bleed?: boolean;
+}) {
   return (
-    <div className="-mx-5 overflow-x-auto px-5">
-      <table className="w-full border-collapse text-left text-sm" style={{ minWidth }}>
+    <div className={`overflow-x-auto ${bleed ? '-mx-5 px-5' : ''}`}>
+      <table
+        className="w-full table-fixed border-collapse text-left text-sm"
+        style={minWidth ? { minWidth } : undefined}
+      >
         {children}
       </table>
     </div>
@@ -604,7 +682,15 @@ function BarList({
   );
 }
 
-/** One metric in the KPI strip. */
+/**
+ * One number in the KPI strip.
+ *
+ * Each tile carries a 3px strip along its top edge in its tone's colour, so the
+ * urgency of the row is readable before any label is. The strip is the only
+ * colour on the tile — the icon sits in a filled tile of the same tone, and the
+ * number stays the brand ink, which is what keeps six of these from looking
+ * like a paint chart.
+ */
 function Metric({
   label, value, sub, icon: Icon, onClick, tone = 'muted', loading = false, hint,
 }: {
@@ -622,21 +708,21 @@ function Metric({
       type="button"
       onClick={onClick}
       title={hint}
-      className="group flex min-w-0 flex-col items-start px-4 py-3.5 text-left transition-colors hover:bg-[#FFD100]/12 focus:outline-none focus-visible:bg-[#FFD100]/15"
+      className="group relative flex min-w-0 flex-col items-start px-4 pb-3.5 pt-4 text-left transition-colors hover:bg-[#FFD100]/15 focus:outline-none focus-visible:bg-[#FFD100]/20"
     >
-      <span className="flex w-full items-center gap-1.5">
-        <Icon className="h-3.5 w-3.5 shrink-0 text-gray-400 transition-colors group-hover:text-[#2F3E46]" />
-        <span className="truncate text-[10px] font-bold uppercase tracking-wider text-gray-500">{label}</span>
+      <span aria-hidden className="absolute inset-x-0 top-0 h-[3px]" style={{ backgroundColor: TONE[tone].bar }} />
+      <span className="flex w-full items-center gap-2">
+        <span className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md ${TONE[tone].solid}`}>
+          <Icon className="h-3.5 w-3.5" />
+        </span>
+        <span className="truncate text-[10px] font-bold uppercase tracking-wider text-gray-600">{label}</span>
       </span>
       {loading ? (
-        <span className="mt-2 h-7 w-12 animate-pulse rounded bg-gray-100" />
+        <span className="mt-2.5 h-7 w-12 animate-pulse rounded bg-gray-100" />
       ) : (
-        <span className="mt-1.5 text-[25px] font-bold leading-none tabular-nums" style={{ color: INK }}>{value}</span>
+        <span className="mt-2 text-[26px] font-bold leading-none tabular-nums" style={{ color: INK }}>{value}</span>
       )}
-      <span className="mt-1.5 flex w-full min-w-0 items-center gap-1.5 text-[10px] leading-tight text-gray-500">
-        {tone !== 'muted' && <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${TONE[tone].dot}`} />}
-        <span className="truncate">{sub}</span>
-      </span>
+      <span className="mt-2 block w-full text-[10px] leading-snug text-gray-600">{sub}</span>
     </button>
   );
 }
@@ -849,7 +935,7 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
       { key: 'discharge', label: 'Discharge recommendations', count: data.discharges.pendingRecommendations.length, tone: 'warn' as Tone, icon: UserMinus, to: RESIDENTS_ACTIVE },
       { key: 'expected', label: 'Discharge dates passed', count: data.admissions.expectedOverdue.length, tone: 'danger' as Tone, icon: Hourglass, to: RESIDENTS_ACTIVE },
       { key: 'hearings', label: 'Hearings with no outcome', count: data.hearings.overdue, tone: 'danger' as Tone, icon: Gavel, to: '/court-records?filter=Scheduled' },
-      { key: 'late', label: 'Other schedules past their date', count: overdueNonHearing, tone: 'danger' as Tone, icon: CalendarClock, to: '/activities' },
+      { key: 'late', label: 'Other schedules past due', count: overdueNonHearing, tone: 'danger' as Tone, icon: CalendarClock, to: '/activities' },
     ]).filter((chip) => chip.count > 0);
   }, [data]);
 
@@ -974,12 +1060,16 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
    * One schedule table, shared by the three timeline groups. `empty` is passed
    * in whole rather than as text so the overdue column can carry the all-clear
    * state instead of a grey sentence.
+   *
+   * Column widths are declared on the cells because the shell is
+   * `table-fixed` — without them the fixed layout would split the panel evenly
+   * and the "when" pill would be squeezed to a sliver.
    */
   const scheduleTable = (items: ScheduleItem[], limit: number, empty: React.ReactNode) => {
     if (items.length === 0) return empty;
     return (
-      <TableShell minWidth="320px">
-        <tbody className="divide-y divide-gray-100">
+      <TableShell minWidth="260px" bleed={false}>
+        <tbody className="divide-y divide-[#E9EEF1]">
           {items.slice(0, limit).map((item) => {
             const meta = KIND[item.kind] || KIND.activity;
             const Icon = meta.icon;
@@ -989,9 +1079,9 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
                 onClick={() => open(scheduleRoute(item))}
                 title={`${item.title} — ${relativeLabel(item.days)}`}
               >
-                <Td className="w-[74px] whitespace-nowrap">
+                <Td className="w-[66px] whitespace-nowrap">
                   <span className="block text-[11px] font-bold" style={{ color: INK }}>{shortDay(item.date)}</span>
-                  {item.time && <span className="block text-[10px] tabular-nums text-gray-400">{item.time}</span>}
+                  {item.time && <span className="block text-[10px] tabular-nums text-gray-500">{item.time}</span>}
                 </Td>
                 <Td className="min-w-0">
                   <span className="flex min-w-0 items-center gap-2">
@@ -1000,13 +1090,13 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-[11px] font-semibold" style={{ color: INK }}>{item.title}</span>
-                      <span className="block truncate text-[10px] text-gray-400">
+                      <span className="block truncate text-[10px] text-gray-500">
                         {[item.residentName, item.location, item.caseNumber].filter(Boolean).join(' · ') || meta.label}
                       </span>
                     </span>
                   </span>
                 </Td>
-                <Td className="w-[86px] text-right">
+                <Td className="w-[92px] text-right">
                   <Pill tone={relativeTone(item.days)}>{relativeLabel(item.days)}</Pill>
                 </Td>
               </Tr>
@@ -1074,10 +1164,17 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
         </div>
       )}
 
-      {/* 2 ── KPI strip. One band with hairline dividers instead of six
-          separate cards, so the numbers read as one picture of the home. */}
+      {/* 2 ── KPI strip. One band with visible dividers instead of six separate
+          cards, so the numbers read as one picture of the home.
+
+          Ordered by what a Center Head needs first, not by which module the
+          number comes from: who is in the facility, what is waiting on a
+          decision, what is live, what is late, then the calendar. "Current
+          Admissions" and "Discharged" used to sit here and both read 8 and 1 —
+          the same facts as "Active Residents" — so they moved down to the
+          Admissions section, which is where a reader looks for them. */}
       <div className={`overflow-hidden ${SURFACE}`}>
-        <div className="grid grid-cols-2 divide-x divide-y divide-gray-100 sm:grid-cols-3 lg:grid-cols-6 lg:divide-y-0">
+        <div className="grid grid-cols-2 divide-x divide-y divide-[#E4EAEE] sm:grid-cols-3 lg:grid-cols-6 lg:divide-y-0">
           <Metric
             label="Active Residents" icon={Users} loading={loading}
             value={data?.residents.active ?? 0}
@@ -1086,18 +1183,12 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
             hint="Residents the Child Records module counts under its Active filter."
           />
           <Metric
-            label="Current Admissions" icon={UserPlus} loading={loading}
-            value={data?.admissions.current ?? 0}
-            sub={`${data?.admissions.thisMonth ?? 0} opened this month`}
-            onClick={() => open(RESIDENTS_ACTIVE)}
-            hint="Open admission periods — one per resident currently in the facility."
-          />
-          <Metric
-            label="Discharged" icon={UserMinus} loading={loading}
-            value={data?.residents.discharged ?? 0}
-            sub={`${data?.discharges.thisMonth ?? 0} closed this month`}
-            onClick={() => open('/children?filter=Discharged')}
-            hint="Residents the Child Records module counts under its Discharged filter."
+            label="Awaiting Decision" icon={Inbox} loading={loading}
+            tone={decisionTotal > 0 ? 'review' : 'muted'}
+            value={decisionTotal}
+            sub={`${data?.documents.count ?? 0} documents · ${data?.reports.total ?? 0} reports · ${data?.accessRequests.count ?? 0} requests`}
+            onClick={() => open('/documents?tab=pending')}
+            hint="Documents, reports and access requests sitting in a review queue."
           />
           <Metric
             label="Active Violations" icon={Scale} loading={loading}
@@ -1106,6 +1197,16 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
             tone={data?.violations.overdue ? 'danger' : 'muted'}
             onClick={() => open('/violations')}
             hint="Violations in the Violation List whose status is Reviewed — the module's own filter."
+          />
+          <Metric
+            label="Overdue" icon={Timer} loading={loading}
+            value={data?.schedules.overdueCounts.total ?? 0}
+            tone={(data?.schedules.overdueCounts.total || 0) > 0 ? 'danger' : 'muted'}
+            sub={(data?.schedules.overdueCounts.total || 0) > 0
+              ? 'dated commitments with no outcome'
+              : 'nothing has been missed'}
+            onClick={() => open('/activities')}
+            hint="Activities, assessments, hearings, interventions, visits and TRI deadlines whose date has passed without being closed."
           />
           <Metric
             label="Pending Cases" icon={Gavel} loading={loading}
@@ -1125,10 +1226,12 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
         </div>
       </div>
 
-      {/* 3 ── ACTION CENTER. The queue as a table, the deadlines beside it. */}
+      {/* 3 ── NEEDS ATTENTION. The highest-priority section on the page, so it
+          comes first, spans the full width, and carries the red accent. */}
       <Section
         icon={AlertTriangle}
-        title="Action Center"
+        accent="danger"
+        title="Needs Attention"
         subtitle="Everything waiting on the Center Head, and how long it has been waiting."
       >
         {/* The summary strip. Only non-zero counts appear. */}
@@ -1147,7 +1250,7 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
                   key={chip.key}
                   type="button"
                   onClick={() => open(chip.to)}
-                  className="group flex min-w-0 items-center gap-2 rounded-lg border border-gray-200 bg-gray-50/60 px-3 py-2 text-left transition-colors hover:border-[#FFD100] hover:bg-[#FFD100]/12"
+                  className="group flex min-w-0 items-center gap-2 rounded-lg border border-[#CFD8DE] bg-white px-3 py-2 text-left transition-colors hover:border-[#2F3E46] hover:bg-[#FFD100]/20"
                 >
                   <Icon className={`h-3.5 w-3.5 shrink-0 ${TONE[chip.tone].text}`} />
                   <span className="min-w-0 flex-1 truncate text-[11px] font-semibold text-gray-600 group-hover:text-[#2F3E46]">{chip.label}</span>
@@ -1179,9 +1282,64 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
           </div>
         )}
 
-        <div className="grid gap-6 lg:grid-cols-3">
+        <div className="space-y-5">
+          {/* Deadlines first, as a full-width strip.
+              They used to sit in a third-width column beside the queue, and on
+              the live data that column held one row while the queue beside it
+              held eight — a third of the section was blank card, and the queue
+              was squeezed into two thirds and lost its trailing columns to the
+              overflow. The most urgent rows on the page now get their own band
+              and the queue gets the full width. */}
+          {deadlineGroups.length > 0 && (
+            <div>
+              <GroupHeading
+                label="Deadlines"
+                tone="danger"
+                // The number of rows actually printed below, not the two source
+                // counts: those sum to 0 on a day when nothing is past due but a
+                // discharge date is still ahead, so the heading read "0" beside
+                // a visible row.
+                count={deadlineGroups.reduce((sum, group) => sum + group.rows.length, 0)}
+              />
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {deadlineGroups.map((group) => {
+                  const Icon = group.icon;
+                  return (
+                    <div key={group.key} className="rounded-lg border border-[#E4EAEE] bg-[#FAFBFC] p-3">
+                      <h5 className="mb-2 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-600">
+                        <Icon className="h-3 w-3 shrink-0" />
+                        <span className="truncate">{group.label}</span>
+                        <span className={`ml-auto shrink-0 tabular-nums ${TONE[group.tone].text}`}>{group.rows.length}</span>
+                      </h5>
+                      <ul className="space-y-0.5">
+                        {group.rows.slice(0, 4).map((row) => (
+                          <li key={row.key}>
+                            <button
+                              type="button"
+                              onClick={() => open(`/children/${row.residentId}?tab=personal`)}
+                              className="flex w-full items-center gap-2 rounded-md px-1.5 py-1.5 text-left transition-colors hover:bg-[#FFD100]/20"
+                            >
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate text-[11px] font-semibold" style={{ color: INK }}>{row.name}</span>
+                                <span className="block truncate text-[10px] text-gray-500">{row.meta}</span>
+                              </span>
+                              <Pill tone={row.tone}>{row.badge}</Pill>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                      {group.rows.length > 4 && (
+                        <p className="px-1.5 pt-1 text-[10px] text-gray-500">+{group.rows.length - 4} more</p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* What is waiting on a decision */}
-          <div className="min-w-0 lg:col-span-2">
+          <div className="min-w-0">
             <GroupHeading label="Awaiting a decision" count={decisionTotal} tone="review" />
 
             {loading && !data ? (
@@ -1191,12 +1349,12 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
             ) : (
               <>
                 <TableShell minWidth="560px">
-                  <thead className="border-b border-gray-200 bg-gray-50/80">
+                  <thead className={`border-b ${EDGE} ${BAND}`}>
                     <tr>
-                      <Th className="w-[104px]">Source</Th>
+                      <Th className="w-[118px]">Source</Th>
                       <Th>Item</Th>
-                      <Th className="w-[22%]">Resident</Th>
-                      <Th className="w-[92px]">Status</Th>
+                      <Th className="w-[20%]">Resident</Th>
+                      <Th className="w-[128px]">Status</Th>
                       <Th className="w-[72px] text-right">Waiting</Th>
                       <Th className="w-8" />
                     </tr>
@@ -1243,70 +1401,47 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
 
             {/* Incident reports — not the Center Head's queue, but visible. */}
             {(data?.reports.incidentPending || 0) > 0 && (
-              <p className="mt-4 rounded-lg bg-gray-50 px-3 py-2 text-[11px] leading-relaxed text-gray-500">
+              <p className={`mt-4 rounded-lg border bg-[#EEF1F3] px-3 py-2 text-[11px] leading-relaxed text-gray-600 ${SEAM}`}>
                 <span className="font-bold" style={{ color: INK }}>{data!.reports.incidentPending}</span> incident report
                 {data!.reports.incidentPending === 1 ? '' : 's'} still awaiting Psychological / Social Worker verification
                 — not your queue, counted so the workload is visible.
               </p>
             )}
           </div>
-
-          {/* What is late, and the decisions attached to it */}
-          <div className="min-w-0 lg:border-l lg:border-gray-100 lg:pl-6">
-            <GroupHeading
-              label="Deadlines"
-              tone="danger"
-              count={(data?.admissions.expectedOverdue.length || 0) + (data?.discharges.pendingRecommendations.length || 0)}
-            />
-
-            {deadlineGroups.length === 0 ? (
-              <Clear>Nothing is past due, and no discharge decision is waiting.</Clear>
-            ) : (
-              <div className="space-y-4">
-                {deadlineGroups.map((group) => {
-                  const Icon = group.icon;
-                  return (
-                    <div key={group.key}>
-                      <h5 className="mb-1.5 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">
-                        <Icon className="h-3 w-3" /> {group.label}
-                      </h5>
-                      <ul className="space-y-0.5">
-                        {group.rows.slice(0, 4).map((row) => (
-                          <li key={row.key}>
-                            <button
-                              type="button"
-                              onClick={() => open(`/children/${row.residentId}?tab=personal`)}
-                              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-[#FFD100]/15"
-                            >
-                              <span className="min-w-0 flex-1">
-                                <span className="block truncate text-[11px] font-semibold" style={{ color: INK }}>{row.name}</span>
-                                <span className="block truncate text-[10px] text-gray-400">{row.meta}</span>
-                              </span>
-                              <Pill tone={row.tone}>{row.badge}</Pill>
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                      {group.rows.length > 4 && (
-                        <p className="px-2 pt-1 text-[10px] text-gray-400">+{group.rows.length - 4} more</p>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
         </div>
       </Section>
 
-      {/* 4 ── RESIDENTS. One population, three cuts: rehabilitation phase,
-          behavioural status, case type. */}
+      {/* 4 ── RESIDENT OVERVIEW. One population, its key statistics and its
+          three cuts (rehabilitation phase, behavioural status, case type) in a
+          single section rather than four cards that each restate the same
+          population size. */}
       <Section
         icon={Users}
-        title="Residents"
-        subtitle={`How the ${data?.residents.active ?? 0} residents currently in the facility are distributed. Every cut counts the same residents.`}
+        title="Resident Overview"
+        subtitle={`Every figure below counts the same ${data?.residents.active ?? 0} residents the Child Records module calls Active.`}
         action={<SectionLink label="Open Child Records" onClick={() => open(RESIDENTS_ACTIVE)} />}
       >
+        {/* The population's secondary numbers. These were KPI tiles until they
+            were read against the strip above and found to be restating it —
+            "Current Admissions" and "Active Residents" were both 8. They belong
+            beside the breakdowns, not competing with them. */}
+        {data && (
+          <div className="mb-5 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-[#CFD8DE] bg-[#E4EAEE] sm:grid-cols-3 lg:grid-cols-5">
+            {([
+              ['On record', data.residents.total, INK],
+              ['Absconded', data.residents.absconded, data.residents.absconded > 0 ? '#dc2626' : INK],
+              ['Discharged', data.residents.discharged, INK],
+              ['Admissions this month', data.admissions.thisMonth, INK],
+              ['Discharges this month', data.discharges.thisMonth, INK],
+            ] as [string, number, string][]).map(([label, count, color]) => (
+              <div key={label} className="bg-white px-4 py-3">
+                <p className="text-[10px] font-bold uppercase tracking-wider text-gray-600">{label}</p>
+                <p className="mt-1 text-xl font-bold leading-none tabular-nums" style={{ color }}>{count}</p>
+              </div>
+            ))}
+          </div>
+        )}
+
         {loading && !data ? (
           <div className="grid gap-6 lg:grid-cols-3">
             {[0, 1, 2].map((n) => <div key={n} className="h-40 animate-pulse rounded-lg bg-gray-100" />)}
@@ -1347,7 +1482,7 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
             </div>
 
             {/* Behavioural status */}
-            <div className="min-w-0 lg:border-l lg:border-gray-100 lg:pl-6">
+            <div className="min-w-0 lg:border-l lg:border-[#E4EAEE] lg:pl-6">
               <GroupHeading label="By behavioral status" count={behavioralTotal} />
               <Donut
                 rows={data?.residents.behavioral || []}
@@ -1361,7 +1496,7 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
             </div>
 
             {/* Case type — a list, because its labels are free text */}
-            <div className="min-w-0 lg:border-l lg:border-gray-100 lg:pl-6">
+            <div className="min-w-0 lg:border-l lg:border-[#E4EAEE] lg:pl-6">
               <GroupHeading label="By case type" count={caseTypeTotal} />
               {data && data.residents.byCaseType.length > 0 ? (
                 <BarList
@@ -1381,6 +1516,7 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
       {/* 5 ── SCHEDULE. Where the workload sits, then the feed itself. */}
       <Section
         icon={CalendarClock}
+        accent="info"
         title="Schedule Timeline"
         subtitle="Every dated commitment across the facility, read live — today, what is ahead, and what has been missed."
         action={
@@ -1393,7 +1529,7 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
                   <span
                     key={kind}
                     title={`${count} upcoming ${KIND[kind].label.toLowerCase()}${count === 1 ? '' : 's'}`}
-                    className={`flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-bold ${count > 0 ? `border-gray-200 ${KIND[kind].fg}` : 'border-gray-100 text-gray-300'}`}
+                    className={`flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-bold ${count > 0 ? `border-[#CFD8DE] bg-white ${KIND[kind].fg}` : 'border-[#E4EAEE] bg-white text-gray-300'}`}
                   >
                     <Icon className="h-3 w-3" />
                     {count}
@@ -1405,7 +1541,7 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
         }
       >
         {/* Workload by kind */}
-        <div className="mb-5 rounded-lg border border-gray-100 bg-gray-50/50 px-4 py-3.5">
+        <div className="mb-5 rounded-lg border border-[#CFD8DE] bg-[#FAFBFC] px-4 py-3.5">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <h4 className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-500">
               <ChartColumn className="h-3 w-3" /> Workload by kind
@@ -1444,9 +1580,15 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
           )}
         </div>
 
-        {/* The feed, split three ways */}
+        {/* The feed, split three ways.
+            Each group is its own tinted panel and the row is top-aligned, so a
+            short group does not leave a column of blank card under it with a
+            divider rule running past the content. Row caps are deliberately
+            close together for the same reason: on the live data the three
+            groups hold 2, 4 and 10 items, and letting the longest one set the
+            height left two thirds of the row empty. */}
         {loading && !data ? (
-          <div className="grid gap-5 lg:grid-cols-3">
+          <div className="grid gap-4 lg:grid-cols-3">
             {[0, 1, 2].map((n) => (
               <div key={n} className="space-y-2">
                 <div className="h-4 w-24 animate-pulse rounded bg-gray-100" />
@@ -1455,31 +1597,31 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
             ))}
           </div>
         ) : (
-          <div className="grid gap-6 lg:grid-cols-3">
+          <div className="grid items-start gap-4 lg:grid-cols-3">
             {/* Today */}
-            <div className="min-w-0">
+            <div className="min-w-0 rounded-lg border border-[#E4EAEE] bg-[#FAFBFC] p-3">
               <GroupHeading label="Today" count={data?.schedules.today.total} tone="warn" />
-              {scheduleTable(todayItems, 6, <Empty>Nothing is booked for today.</Empty>)}
+              {scheduleTable(todayItems, 5, <Empty>Nothing is booked for today.</Empty>)}
             </div>
 
             {/* Upcoming */}
-            <div className="min-w-0 lg:border-l lg:border-gray-100 lg:pl-6">
+            <div className="min-w-0 rounded-lg border border-[#E4EAEE] bg-[#FAFBFC] p-3">
               <GroupHeading label="Upcoming" count={aheadCount} tone="info" />
-              {scheduleTable(upcomingItems, 8, <Empty>Nothing is booked ahead.</Empty>)}
-              {aheadCount > Math.min(upcomingItems.length, 8) && (
-                <p className="px-3 pt-1.5 text-[10px] text-gray-400">
-                  showing {Math.min(upcomingItems.length, 8)} of {aheadCount}
+              {scheduleTable(upcomingItems, 5, <Empty>Nothing is booked ahead.</Empty>)}
+              {aheadCount > Math.min(upcomingItems.length, 5) && (
+                <p className="px-1.5 pt-1.5 text-[10px] text-gray-500">
+                  showing {Math.min(upcomingItems.length, 5)} of {aheadCount}
                 </p>
               )}
             </div>
 
             {/* Overdue */}
-            <div className="min-w-0 lg:border-l lg:border-gray-100 lg:pl-6">
+            <div className="min-w-0 rounded-lg border border-[#E4EAEE] bg-[#FAFBFC] p-3">
               <GroupHeading label="Overdue" count={data?.schedules.overdueCounts.total} tone="danger" />
-              {scheduleTable(overdueItems, 8, <Clear>Nothing has been missed.</Clear>)}
-              {data && data.schedules.overdueCounts.total > overdueItems.length && (
-                <p className="px-3 pt-1.5 text-[10px] text-gray-400">
-                  showing {Math.min(overdueItems.length, 8)} of {data.schedules.overdueCounts.total}
+              {scheduleTable(overdueItems, 6, <Clear>Nothing has been missed.</Clear>)}
+              {data && data.schedules.overdueCounts.total > Math.min(overdueItems.length, 6) && (
+                <p className="px-1.5 pt-1.5 text-[10px] text-gray-500">
+                  showing {Math.min(overdueItems.length, 6)} of {data.schedules.overdueCounts.total}
                 </p>
               )}
             </div>
@@ -1491,6 +1633,7 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
       <div className="grid gap-5 lg:grid-cols-2">
         <Section
           icon={Scale}
+          accent="warn"
           title="Violations"
           subtitle="Incidents still on the books, by severity, and where each one stands."
           action={<SectionLink label="Open Violations" onClick={() => open('/violations')} />}
@@ -1510,10 +1653,10 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
                 </p>
               </div>
 
-              <div className="border-t border-gray-100 pt-4">
+              <div className="border-t border-[#E4EAEE] pt-4">
                 <GroupHeading label="Where each case stands" />
                 <TableShell minWidth="320px">
-                  <tbody className="divide-y divide-gray-100">
+                  <tbody className="divide-y divide-[#E9EEF1]">
                     {violationBuckets.map((bucket) => (
                       <Tr key={bucket.label} onClick={() => open('/violations')}>
                         <Td className="min-w-0">
@@ -1553,7 +1696,7 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
                 <GroupHeading label="Most recent admissions" count={data.admissions.recent.length} />
                 {data.admissions.recent.length > 0 ? (
                   <TableShell minWidth="340px">
-                    <tbody className="divide-y divide-gray-100">
+                    <tbody className="divide-y divide-[#E9EEF1]">
                       {data.admissions.recent.map((row) => (
                         <Tr key={row.id} onClick={() => open(`/children/${row.residentId}?tab=personal`)}>
                           <Td className="min-w-0">
@@ -1573,7 +1716,7 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
                 )}
               </div>
 
-              <div className="border-t border-gray-100 pt-4">
+              <div className="border-t border-[#E4EAEE] pt-4">
                 <GroupHeading
                   label="Court hearings"
                   count={data.hearings.upcoming + data.hearings.overdue}
@@ -1581,7 +1724,7 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
                 />
                 {data.hearings.upcomingRows.length + data.hearings.overdueRows.length > 0 ? (
                   <TableShell minWidth="380px">
-                    <tbody className="divide-y divide-gray-100">
+                    <tbody className="divide-y divide-[#E9EEF1]">
                       {[...data.hearings.overdueRows, ...data.hearings.upcomingRows].slice(0, 5).map((row) => (
                         <Tr
                           key={row.id}
@@ -1620,18 +1763,10 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
                 )}
               </div>
 
-              <div className="grid grid-cols-3 gap-2.5 border-t border-gray-100 pt-4">
-                {([
-                  ['On record', data.residents.total],
-                  ['Discharged', data.residents.discharged],
-                  ['Absconded', data.residents.absconded],
-                ] as [string, number][]).map(([label, count]) => (
-                  <div key={label} className="rounded-lg bg-gray-50 px-3 py-2">
-                    <p className="text-[10px] font-bold uppercase tracking-wide text-gray-400">{label}</p>
-                    <p className="mt-0.5 text-lg font-bold leading-none tabular-nums" style={{ color: INK }}>{count}</p>
-                  </div>
-                ))}
-              </div>
+              {/* A three-tile "On record / Discharged / Absconded" row stood
+                  here and was removed: Resident Overview prints those same
+                  three numbers, and a figure that appears twice on one page
+                  invites the reader to wonder which is current. */}
             </div>
           ) : (
             <Empty>Reading…</Empty>
