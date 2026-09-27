@@ -258,7 +258,7 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
     ? [
         { key: 'personal', label: 'Personal Info', subModule: 'Personal Info' },
         { key: 'timeline', label: 'Phase Timeline', subModule: 'Phase Timeline' },
-        { key: 'education', label: 'Education Progress', subModule: 'Education' },
+        { key: 'education', label: 'Education', subModule: 'Education' },
         { key: 'medical', label: 'Medical', subModule: 'Medical' },
         { key: 'behavioral', label: 'Behavioral', subModule: 'Behavioral' },
       ]
@@ -1033,10 +1033,15 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
         >
           {childRecordTabs.map((tab) => (
             <TabsTrigger key={tab.key} value={tab.key} className="flex-none lg:flex-1">
-              {/* The stored label is 'Education'; the page has always shown it as
-                  'Education Progress' because the tab covers the resident's
-                  progress record rather than the school record. */}
-              {tab.key === 'Education' ? 'Education Progress' : tab.label}
+              {/* The tab's own name, as the RBAC definition declares it. There
+                  used to be a rename here ('Education' shown as 'Education
+                  Progress'), which never fired — `key` is the `?tab=` slug, so it
+                  is lowercase and the comparison was against a capitalised name.
+                  The one place it *did* take effect was the Houseparent's
+                  hand-written list, which hardcoded the other label, so a
+                  Houseparent saw a differently-named tab from everyone else. A
+                  tab's name comes from the definition, in one place. */}
+              {tab.label}
             </TabsTrigger>
           ))}
         </TabsList>
