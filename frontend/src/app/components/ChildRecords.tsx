@@ -784,9 +784,30 @@ const invisibleFieldClass =
   ].join(' ');
 
 /* ================================================================
-   PHOTO OVERLAY
+   UNANSWERED MARKER
    ================================================================ */
 
+/**
+ * The amber edge that marks a field on the slip nobody has answered yet.
+ *
+ * The same idea as the amber tick the TRI sheet puts beside an unscored item:
+ * decorative, and it clears itself the moment the field has a value. Spread into
+ * a field's own style, so it needs no geometry of its own and cannot drift from
+ * the box it belongs to.
+ *
+ * Drawn as an inset shadow rather than a border on purpose. These fields are
+ * positioned by percentage over a printed form and `border-box` is set, so a
+ * real border would steal two pixels from the text inside them and shift what
+ * the reader typed; an inset shadow paints inside the box and moves nothing.
+ * `shadow-none` on the shared class is no obstacle — an inline style outranks it.
+ */
+function unansweredEdge(answered: boolean): CSSProperties {
+  return answered ? {} : { boxShadow: 'inset 3px 0 0 0 #fbbf24' };
+}
+
+/* ================================================================
+   PHOTO OVERLAY
+   ================================================================ */
 function PdfPhotoOverlay({
   label,
   value,
@@ -1326,7 +1347,7 @@ function AdmissionSlipEditor({
                   })
                 );
               }}
-              style={pdfFieldStyle(269.433, 258.67, 125.448, 12)}
+              style={{ ...pdfFieldStyle(269.433, 258.67, 125.448, 12), ...unansweredEdge(!form.birthDate) }}
             />
 
             {/* ==================================================
@@ -1349,7 +1370,7 @@ function AdmissionSlipEditor({
               className={
                 invisibleFieldClass
               }
-              style={pdfFieldStyle(442.796, 258.67, 95.588, 12)}
+              style={{ ...pdfFieldStyle(442.796, 258.67, 95.588, 12), ...unansweredEdge(!form.religion.trim()) }}
             />
 
             {/* ==================================================
@@ -1386,6 +1407,7 @@ function AdmissionSlipEditor({
               ].join(' ')}
               style={{
                 ...pdfFieldStyle(177.909, 283.3, 261.504, 14),
+                ...unansweredEdge(!form.address.trim()),
                 fontSize:
                   '10px',
               }}
@@ -1431,7 +1453,7 @@ function AdmissionSlipEditor({
               className={
                 invisibleFieldClass
               }
-              style={pdfFieldStyle(178.281, 332.5, 214.968, 12)}
+              style={{ ...pdfFieldStyle(178.281, 332.5, 214.968, 12), ...unansweredEdge(!form.guardianName.trim()) }}
             />
 
             {/* ==================================================
@@ -1459,7 +1481,7 @@ function AdmissionSlipEditor({
               className={
                 invisibleFieldClass
               }
-              style={pdfFieldStyle(456.201, 332.5, 244.74, 12)}
+              style={{ ...pdfFieldStyle(456.201, 332.5, 244.74, 12), ...unansweredEdge(!form.guardianContact.trim()) }}
             />
 
             {/* ==================================================
@@ -1492,6 +1514,7 @@ function AdmissionSlipEditor({
               ].join(' ')}
               style={{
                 ...pdfFieldStyle(177.96, 357.33, 209.496, 14),
+                ...unansweredEdge(!form.guardianAddress.trim()),
                 fontSize:
                   '10px',
               }}
@@ -1536,7 +1559,7 @@ function AdmissionSlipEditor({
               className={
                 invisibleFieldClass
               }
-              style={pdfFieldStyle(80.425, 406.52, 208.788, 12)}
+              style={{ ...pdfFieldStyle(80.425, 406.52, 208.788, 12), ...unansweredEdge(!form.referringParty.trim()) }}
             />
 
             {/* ==================================================
@@ -1564,7 +1587,7 @@ function AdmissionSlipEditor({
               className={
                 invisibleFieldClass
               }
-              style={pdfFieldStyle(352.345, 406.52, 244.956, 12)}
+              style={{ ...pdfFieldStyle(352.345, 406.52, 244.956, 12), ...unansweredEdge(!form.referringPartyContact.trim()) }}
             />
 
             {/* ==================================================
@@ -1646,7 +1669,7 @@ function AdmissionSlipEditor({
                  * the rule, which both misaligned it and left it underneath the
                  * signature field above.
                  */
-                style={pdfFieldStyle(80.025, 463, 215.37, 12)}
+                style={{ ...pdfFieldStyle(80.025, 463, 215.37, 12), ...unansweredEdge(!form.houseparentOnDuty.trim()) }}
               >
                 <SelectValue
                   placeholder=""
