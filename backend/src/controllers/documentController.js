@@ -673,16 +673,36 @@ async function create(req, res, next) {
      * could only be themselves. `submit` already applies this rule to a Draft
      * they submit (`isSystemWide`); an upload that enters the workflow *already*
      * submitted never reaches that function, so the same rule belongs here too.
-     * That gap is what left the Admission Slip — filed by the admitting Center
-     * Head at status `Submitted` — sitting in the review queue, and the same for
-     * every required and free-form document they upload on the Phase Timeline.
+     * That gap is what left the Admission Slip sitting in the review queue, and
+     * the same for every required and free-form document they upload on the
+     * Phase Timeline.
      *
      * Scoped to a `Submitted` upload: a Draft stays a Draft until it is
      * submitted. The decision is derived from the authenticated role, never from
      * the body, so the guard above still stops a client naming itself an
      * approver.
      */
-    const selfApproving = isSystemWide(req.user) && uploadStatus === 'Submitted';
+    const systemWideApproval = isSystemWide(req.user) && uploadStatus === 'Submitted';
+
+    /**
+     * The Admission Slip is final on creation, whoever filed it.
+     *
+     * It is not paperwork anyone submits for review: the system generates it from
+     * the admission record itself (`ChildRecords` renders the official slip and
+     * posts the same PDF), so a reviewer has nothing to check that the admission
+     * does not already state. Filed at `Submitted` it sat in the Documents
+     * module's Pending Review queue waiting on a decision nobody needed to make —
+     * and it never counted towards the phase, so the admitting Social Worker's
+     * own slip looked as though it had gone missing. It belongs in the child's
+     * folder straight away.
+     *
+     * Keyed on the title, not the role: the rule is about the document, and the
+     * Center Head's slip is already covered by the system-wide rule above. The
+     * approval trail is recorded against the uploader either way.
+     */
+    const isAdmissionSlip = docTitle === 'Admission Slip';
+
+    const selfApproving = systemWideApproval || (isAdmissionSlip && uploadStatus === 'Submitted');
     if (selfApproving) uploadStatus = 'Approved';
 
     const columns = ['id'];
