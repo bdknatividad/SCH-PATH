@@ -664,6 +664,27 @@ async function create(req, res, next) {
       uploadStatus = 'Approved';
     }
 
+    /**
+     * A system-wide uploader's document is approved on upload.
+     *
+     * The Center Head holds system-wide access and the Administrator every
+     * module, so there is nobody above them to review their own paperwork — a
+     * document they upload would sit in Pending Review waiting on a reviewer who
+     * could only be themselves. `submit` already applies this rule to a Draft
+     * they submit (`isSystemWide`); an upload that enters the workflow *already*
+     * submitted never reaches that function, so the same rule belongs here too.
+     * That gap is what left the Admission Slip — filed by the admitting Center
+     * Head at status `Submitted` — sitting in the review queue, and the same for
+     * every required and free-form document they upload on the Phase Timeline.
+     *
+     * Scoped to a `Submitted` upload: a Draft stays a Draft until it is
+     * submitted. The decision is derived from the authenticated role, never from
+     * the body, so the guard above still stops a client naming itself an
+     * approver.
+     */
+    const selfApproving = isSystemWide(req.user) && uploadStatus === 'Submitted';
+    if (selfApproving) uploadStatus = 'Approved';
+
     const columns = ['id'];
     const values = [];
     const placeholders = ['?'];
@@ -746,7 +767,20 @@ async function create(req, res, next) {
       ),
     });
 
-    const [rows] = await pool.query('SELECT * FROM documents WHERE id = ?', [newId]);
+    let [rows] = await pool.query('SELECT * FROM documents WHERE id = ?', [newId]);
+
+    // Record the approval trail a system-wide uploader is entitled to. The
+    // timestamp comes from the database rather than the request, so it matches
+    // every other approval, and the row is re-read afterwards so the audit
+    // snapshot below shows the document as it actually stands.
+    if (selfApproving) {
+      await pool.query(
+        'UPDATE documents SET approvedBy = ?, approvedAt = NOW(), modifiedBy = ? WHERE id = ?',
+        [req.user?.username || null, req.user?.username || null, newId],
+      );
+      const [refreshed] = await pool.query('SELECT * FROM documents WHERE id = ?', [newId]);
+      rows = refreshed;
+    }
 
     // Start the audit trail. An upload that enters the workflow already
     // submitted records both facts, so the trail always begins with how the
@@ -757,7 +791,9 @@ async function create(req, res, next) {
       status: uploadStatus,
       snapshot: revisionSnapshot(rows[0]),
     });
-    if (uploadStatus === 'Submitted') {
+    if (selfApproving) {
+      await recordRevision(rows[0], { action: 'Approved', actor: req.user, status: uploadStatus });
+    } else if (uploadStatus === 'Submitted') {
       await recordRevision(rows[0], { action: 'Submitted', actor: req.user, status: uploadStatus });
     }
 
