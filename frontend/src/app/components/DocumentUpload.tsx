@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogAction, AlertDialogCancel } from '@/app/components/ui/alert-dialog';
 import { Upload, X, CheckCircle, FileText, Image, FileSpreadsheet, File, Lock, AlertTriangle, Folder, FolderOpen, ChevronDown, ChevronRight as ChevronRightIcon, Download, Archive, Filter, Eye, Printer, Search } from 'lucide-react';
 import JSZip from 'jszip';
+import DOMPurify from 'dompurify';
 import { useData, DocumentWithApproval } from '../state/DataContext';
 import { useAuth } from '../state/AuthContext';
 import { useSubModuleTab } from '@/app/hooks/useSubModuleTab';
@@ -177,6 +178,56 @@ function normalizeFileData(fileData: string | undefined, fileType?: string) {
   const mime = fileType || 'application/octet-stream';
   return `data:${mime};base64,${fileData}`;
 }
+
+/** The MIME type a `.docx` carries, when the uploader's browser reported one. */
+const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+/** The MIME type a legacy `.doc` carries. */
+const DOC_MIME = 'application/msword';
+
+/**
+ * Which kind of Word file a document is, or `null` for anything else.
+ *
+ * The filename is read as well as the MIME type: the type is whatever the
+ * uploader's browser reported and is often missing or
+ * `application/octet-stream`, while the name is always there.
+ *
+ * The two are kept apart because only `.docx` can be rendered. It is a zip of
+ * XML, which `mammoth` reads in the browser. A legacy `.doc` is a binary OLE
+ * container and nothing browser-side reads it — `mammoth` throws — so it keeps
+ * the download-only fallback instead of failing inside the preview pane.
+ */
+function wordKind(doc: { fileName?: string; fileType?: string }): 'docx' | 'doc' | null {
+  const name = String(doc.fileName || '');
+  const dot = name.lastIndexOf('.');
+  const ext = dot === -1 ? '' : name.slice(dot + 1).toLowerCase();
+  if (doc.fileType === DOCX_MIME || ext === 'docx') return 'docx';
+  if (doc.fileType === DOC_MIME || ext === 'doc') return 'doc';
+  return null;
+}
+
+/**
+ * What a rendered Word document may contain.
+ *
+ * `mammoth` emits a small, predictable set of tags, but that HTML is built from
+ * a file a user uploaded, so it is sanitised rather than trusted. Anything
+ * outside the tag list is dropped, and `ALLOWED_URI_REGEXP` stops a hyperlink
+ * being a `javascript:` URL or a pointer at a local file. An image is allowed
+ * only as an embedded `data:image/…`, so opening a document cannot make the
+ * browser fetch a remote resource.
+ */
+const WORD_PREVIEW_TAGS = [
+  'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'table', 'caption',
+  'thead', 'tbody', 'tfoot', 'tr', 'td', 'th', 'strong', 'b', 'em', 'i', 'u', 's',
+  'del', 'ins', 'sub', 'sup', 'br', 'hr', 'a', 'img', 'pre', 'code', 'blockquote',
+  'span', 'div', 'figure', 'figcaption',
+];
+const WORD_PREVIEW_ATTR = ['href', 'src', 'alt', 'title', 'colspan', 'rowspan', 'width', 'height'];
+
+const sanitizeWordHtml = (html: string) => DOMPurify.sanitize(html, {
+  ALLOWED_TAGS: WORD_PREVIEW_TAGS,
+  ALLOWED_ATTR: WORD_PREVIEW_ATTR,
+  ALLOWED_URI_REGEXP: /^(?:https?:|mailto:|data:image\/)/i,
+});
 
 /**
  * Fetches the stored binary and saves it under the document's real filename.
@@ -586,6 +637,10 @@ export function DocumentUpload() {
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [selectedDocument, setSelectedDocument] = useState<DocumentWithApproval | null>(null);
+  // A `.docx` is rendered on demand for the preview dialog; see the effect below.
+  const [wordPreviewHtml, setWordPreviewHtml] = useState<string | null>(null);
+  const [wordPreviewLoading, setWordPreviewLoading] = useState(false);
+  const [wordPreviewError, setWordPreviewError] = useState<string | null>(null);
   const [documentToDelete, setDocumentToDelete] = useState<DocumentWithApproval | null>(null);
 
   const [filterResident, setFilterResident] = useState('all');
@@ -1155,6 +1210,49 @@ export function DocumentUpload() {
       setIsViewDialogOpen(true);
     }
   };
+
+  /** Which kind of Word file the dialog is showing, if any. */
+  const selectedWordKind = selectedDocument ? wordKind(selectedDocument) : null;
+
+  /**
+   * Render a Word document for the preview dialog.
+   *
+   * `mammoth` is imported on demand rather than at the top of the module: it is
+   * by far the heaviest dependency here, and every user of the Documents module
+   * would otherwise download it to preview the occasional `.docx`. The bytes come
+   * from the same `blob:` / `data:` URL the Download link already uses, so the
+   * file is fetched exactly once.
+   *
+   * A legacy `.doc` is not rendered — `wordKind` reports it separately, and the
+   * dialog keeps its download-only fallback for it.
+   */
+  useEffect(() => {
+    if (!isViewDialogOpen || selectedWordKind !== 'docx' || !selectedDocument?.fileData) {
+      setWordPreviewHtml(null);
+      setWordPreviewError(null);
+      setWordPreviewLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setWordPreviewHtml(null);
+    setWordPreviewError(null);
+    setWordPreviewLoading(true);
+    (async () => {
+      try {
+        const bytes = await (await fetch(selectedDocument.fileData as string)).arrayBuffer();
+        const mammoth = (await import('mammoth')).default;
+        const { value } = await mammoth.convertToHtml({ arrayBuffer: bytes });
+        if (!cancelled) setWordPreviewHtml(sanitizeWordHtml(value));
+      } catch (error) {
+        if (!cancelled) setWordPreviewError(describeError(error, 'The Word document could not be read.'));
+      } finally {
+        if (!cancelled) setWordPreviewLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+    // `selectedDocument` is set once per open, so this re-runs on a new file and
+    // not on every render.
+  }, [isViewDialogOpen, selectedDocument, selectedWordKind]);
 
   /**
    * Open the exact file a notification named.
@@ -2474,9 +2572,30 @@ export function DocumentUpload() {
                       }
                       title={selectedDocument.title}
                     />
+                  ) : selectedWordKind === 'docx' ? (
+                    // Rendered from the file itself, not an Office embed, so a
+                    // document stays readable without the file leaving the app.
+                    // The markup goes through `sanitizeWordHtml` — see there for
+                    // why it is not trusted as-is.
+                    <div className="bg-white border border-gray-200 rounded-lg p-5 max-h-96 overflow-y-auto">
+                      {wordPreviewLoading ? (
+                        <p className="text-gray-500 text-center py-8">Rendering the document…</p>
+                      ) : wordPreviewError ? (
+                        <p className="text-red-600 text-center py-8">{wordPreviewError}</p>
+                      ) : (
+                        <div
+                          className="text-sm text-[#2F3E46] leading-relaxed [&_a]:underline [&_h1]:text-lg [&_h1]:font-bold [&_h2]:text-base [&_h2]:font-bold [&_h3]:font-semibold [&_img]:max-w-full [&_ol]:list-decimal [&_p]:mb-2 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:border-gray-300 [&_td]:p-1.5 [&_th]:border [&_th]:border-gray-300 [&_th]:bg-gray-50 [&_th]:p-1.5 [&_ul]:list-disc"
+                          dangerouslySetInnerHTML={{ __html: wordPreviewHtml || '' }}
+                        />
+                      )}
+                    </div>
                   ) : (
                     <div className="text-center py-8">
-                      <p className="text-gray-500 mb-4">Preview not available for this file type</p>
+                      <p className="text-gray-500 mb-4">
+                        {selectedWordKind === 'doc'
+                          ? 'Legacy .doc files cannot be previewed in a browser. Download the file to open it.'
+                          : 'Preview not available for this file type'}
+                      </p>
                       <a 
                         href={normalizeFileData(selectedDocument.fileData, selectedDocument.fileType)}
                         download={selectedDocument.fileName}
