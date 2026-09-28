@@ -2083,11 +2083,25 @@ export function ChildRecords() {
     canAssignHouseparent,
   ]);
 
+  /**
+   * Keep the Date of Birth text field in step with the stored date — without
+   * wiping what the reader is typing.
+   *
+   * `parseMDYDate` needs all eight digits, so a half-typed date stores '' and
+   * `form.birthDate` becomes empty. An unconditional sync then wrote that empty
+   * value straight back over the text, so backspacing one digit of a wrong year
+   * cleared the month and the day along with it — the whole field emptied, and
+   * the reader had to retype the birthday to fix the year. Adopt the stored
+   * value only when it genuinely disagrees with what the field already shows;
+   * the field's own handler sets the text and the stored date together, so a
+   * normal keystroke never lands here.
+   */
   useEffect(() => {
+    if (parseMDYDate(birthDateDisplay) === form.birthDate) return;
     setBirthDateDisplay(
       form.birthDate ? formatDateInput(form.birthDate) : ''
     );
-  }, [form.birthDate]);
+  }, [form.birthDate, birthDateDisplay]);
 
   const resetForm =
     () => {
