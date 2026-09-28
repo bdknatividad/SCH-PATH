@@ -304,8 +304,17 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
   } | null>(null);
   const [violationBlock, setViolationBlock] = useState<{ violationCount: number; demotionRecommended: boolean } | null>(null);
 
-  const loadData = useCallback(async () => {
-    setLoading(true);
+  /**
+   * Reads the phase record, history and requirements.
+   *
+   * `background` refreshes them without raising the page-wide `loading` flag.
+   * The flag makes the component render a spinner instead of the timeline, so a
+   * refresh the reader did not ask for — regaining focus on the tab — must not
+   * set it, or the page would blank every time they came back to it.
+   */
+  const loadData = useCallback(async (options?: { background?: boolean }) => {
+    const background = options?.background === true;
+    if (!background) setLoading(true);
     try {
       const [histRes, reqRes] = await Promise.all([
         request<{ success: boolean; data: PhaseRecord[] }>(`/phases/resident/${residentId}`),
@@ -354,7 +363,7 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
         }
       }
     } catch { /* silent */ }
-    setLoading(false);
+    if (!background) setLoading(false);
   }, [residentId, currentPhase]);
 
   // Sync discharged state — resets to false when child is re-admitted
@@ -443,6 +452,26 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
   }, [residentId]);
 
   useEffect(() => { loadData(); }, [loadData]);
+
+  /**
+   * Catch up when the reader returns to the tab.
+   *
+   * A document uploaded here is reviewed in the Documents module, and a phase
+   * can be advanced by another user, so this page's copy of both goes stale
+   * while it sits in the background — the uploader had to reload the page to see
+   * their own document come back approved. `refreshData()` is the same store
+   * refresh the Documents module runs on focus, and the phase record is re-read
+   * alongside it; both are background reads, so the page does not blank to a
+   * spinner every time it regains focus.
+   */
+  useEffect(() => {
+    const refreshOnFocus = () => {
+      void refreshData();
+      void loadData({ background: true });
+    };
+    window.addEventListener('focus', refreshOnFocus);
+    return () => window.removeEventListener('focus', refreshOnFocus);
+  }, [refreshData, loadData]);
 
   const handleToggleTask = async (task: string, done: boolean) => {
     // Houseparents may write checklist state only for Orientation Phase.
