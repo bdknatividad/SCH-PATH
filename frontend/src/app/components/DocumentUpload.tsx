@@ -1556,12 +1556,17 @@ export function DocumentUpload() {
           setActiveTab(value as 'folders' | 'all' | 'pending' | 'access' | 'history')
         }
       >
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          {/* Four tab labels overflow a phone; the list scrolls instead.
+        <div className="flex flex-col gap-3">
+          {/* The tabs get their own row above the search / filter controls. Side by
+              side they were squeezed, so the strip clipped its last tab ("Access
+              Request History") behind a scrollbar. From `lg` the five tabs become
+              equal columns, so the whole strip is visible at once; below that it
+              still scrolls, with the scrollbar hidden so it reads as a tab strip
+              rather than a scroll region.
               Which tabs exist is the RBAC definition's answer, not a role check
               here: the Psychological Staff holds Folders by Child / All Documents /
               Access Requests and no global review queue. */}
-          <TabsList className="max-w-full justify-start overflow-x-auto">
+          <TabsList className="w-full max-w-full items-center justify-start gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden lg:grid lg:grid-cols-5">
             {tabs.map((tab) => {
               if (tab.key === 'folders') {
                 return <TabsTrigger key={tab.key} value="folders" className="shrink-0">📁 {tab.label}</TabsTrigger>;
@@ -1608,7 +1613,7 @@ export function DocumentUpload() {
             })}
           </TabsList>
 
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
             {/* Search by document name/title — applies to the Folder and All
                 Documents views, scoped to whatever documentsForDisplay already
                 limits the logged-in user to. */}
