@@ -717,6 +717,26 @@ async function blobToDataUrl(blob: Blob): Promise<string> {
    PDF POSITION HELPERS
    ================================================================ */
 
+/**
+ * The slip's overlay text is sized against the form, not the viewport.
+ *
+ * The fields are positioned by percentage over a PDF whose canvas is rendered at
+ * the container's *measured* width (`slipContainerRef`), and that container
+ * declares `container-type: inline-size`. So `cqw` is the slip's own width, and a
+ * size expressed in it keeps the same proportion to the printed blanks at every
+ * viewport. The fixed `12px` did not: on a phone the form shrank to a third of
+ * its desktop width and the text did not, so it towered over the boxes it was
+ * meant to sit inside. TRI solved the same problem with a `clamp` on its overlay
+ * cells; this is that idea measured against the form instead of the window.
+ *
+ * The maximum is the size that was hard-coded before, so a desktop rendering the
+ * slip at 936px (`PDF_WIDTH`) or wider is pixel-for-pixel unchanged. The floor
+ * keeps a phone's text legible rather than strictly proportional to a box it
+ * would be unreadable in.
+ */
+const SLIP_FIELD_FONT = 'clamp(5px, 1.28205cqw, 12px)';   // 12px when the slip is 936px wide
+const SLIP_ADDRESS_FONT = 'clamp(4px, 1.06838cqw, 10px)'; // 10px when the slip is 936px wide
+
 function pdfFieldStyle(
   x: number,
   y: number,
@@ -736,10 +756,10 @@ function pdfFieldStyle(
     minWidth: 0,
     minHeight: 0,
     fontFamily: 'Arial, Helvetica, sans-serif',
-    fontSize: '12px',
+    fontSize: SLIP_FIELD_FONT,
     boxSizing: 'border-box',
     padding: '0',
-    lineHeight: '12px',
+    lineHeight: SLIP_FIELD_FONT,
     verticalAlign: 'baseline',
   };
 }
@@ -1403,13 +1423,12 @@ function AdmissionSlipEditor({
                 // "Sitio San Isidro" line) instead of letting it overflow.
                 'whitespace-pre-wrap',
                 'break-words',
-                'leading-[12px]',
               ].join(' ')}
               style={{
                 ...pdfFieldStyle(177.909, 283.3, 261.504, 14),
                 ...unansweredEdge(!form.address.trim()),
-                fontSize:
-                  '10px',
+                fontSize: SLIP_ADDRESS_FONT,
+                lineHeight: SLIP_ADDRESS_FONT,
               }}
             />
 
@@ -1510,13 +1529,12 @@ function AdmissionSlipEditor({
                 // "Sitio San Isidro" line) instead of letting it overflow.
                 'whitespace-pre-wrap',
                 'break-words',
-                'leading-[12px]',
               ].join(' ')}
               style={{
                 ...pdfFieldStyle(177.96, 357.33, 209.496, 14),
                 ...unansweredEdge(!form.guardianAddress.trim()),
-                fontSize:
-                  '10px',
+                fontSize: SLIP_ADDRESS_FONT,
+                lineHeight: SLIP_ADDRESS_FONT,
               }}
             />
 
