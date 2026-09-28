@@ -612,6 +612,15 @@ async function create(req, res, next) {
           closedDate: row.closedDate || admission.admissionDate,
         }));
 
+        /*
+         * The returning resident starts the programme again, so both completion
+         * flags are reset. `phaseTasksCompleted` matters most: it is what the
+         * Phase Timeline reads to draw the checkboxes, and what `phaseController`
+         * merges in as "legacy completed work" when it decides whether a phase may
+         * be advanced — so leaving it alone kept every box ticked from the last
+         * admission and let a returning resident skip phases they had not done
+         * this time. The phase row itself is replaced with an empty one below.
+         */
         await connection.query(
           `UPDATE children
               SET name = ?,
@@ -628,6 +637,7 @@ async function create(req, res, next) {
                   birthDate = ?,
                   address = ?,
                   documentsComplete = FALSE,
+                  phaseTasksCompleted = '{}',
                   guardianName = ?,
                   guardianContact = ?,
                   readmissionDate = ?,

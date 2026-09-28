@@ -537,8 +537,12 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
         const updated = { ...existing, [targetPhase]: newTasks };
         await updateChild(residentId, { phaseTasksCompleted: updated });
       }
-      // Reload history so displayRecord reflects saved state
-      await loadData();
+      // Reload history so displayRecord reflects saved state — quietly. The
+      // page-wide loading flag renders a spinner in place of the whole timeline,
+      // so a plain `loadData()` here blanked the page on every tick of a
+      // checkbox. The tick is already shown optimistically above, so this only
+      // has to catch the server up.
+      await loadData({ background: true });
     } catch (error) {
       console.error('[PhaseProgress] Failed to save checklist task:', error);
       // Revert on error
@@ -769,6 +773,13 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
       if (dischargeGenerationCancelledRef.current) return; // Cancel was clicked mid-generation
 
       const reportDate = new Date().toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' });
+      // The note typed when each phase was advanced, carried into the report.
+      // It is the reader's own text, so it is escaped rather than interpolated
+      // raw into this HTML string.
+      const escapeReportText = (value?: string) => String(value || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
       const phaseRows = history
         .filter(h => h.phaseName !== 'Admission')
         .map(h => `
@@ -776,6 +787,7 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
             <td>${h.phaseName}</td>
             <td>${h.enteredAt ? new Date(h.enteredAt).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' }) : '—'}</td>
             <td>${h.completedAt ? new Date(h.completedAt).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' }) : '<em>Current</em>'}</td>
+            <td>${h.notes ? escapeReportText(h.notes) : '—'}</td>
           </tr>`).join('');
 
       const html = `<!DOCTYPE html>
@@ -851,8 +863,8 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
   <div class="section">
     <div class="section-title">Phase Completion History</div>
     <table>
-      <thead><tr><th>Phase</th><th>Date Started</th><th>Date Completed</th></tr></thead>
-      <tbody>${phaseRows || '<tr><td colspan="3" style="text-align:center;color:#999">No phase history recorded.</td></tr>'}</tbody>
+      <thead><tr><th>Phase</th><th>Date Started</th><th>Date Completed</th><th>Notes</th></tr></thead>
+      <tbody>${phaseRows || '<tr><td colspan="4" style="text-align:center;color:#999">No phase history recorded.</td></tr>'}</tbody>
     </table>
   </div>
 
@@ -1144,8 +1156,30 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
     [admissionPeriods],
   );
 
-  const belongsToCurrentAdmission = (d: { residentId?: string; admissionId?: string; uploadedAt?: string }) => {
+  /**
+   * Documents that outlive the admission they were filed under.
+   *
+   * A returning resident starts again — the checklist is cleared and the last
+   * admission's files are hidden — with one exception: the birth / baptismal
+   * certificate never changes, so the copy already on file keeps satisfying the
+   * Admission Phase requirement however many times the resident comes back.
+   *
+   * This is also what the API already does. `phaseController` matches a required
+   * document on `residentId` + `phase`, with no admission in the query, so the
+   * backend counted the old certificate as present while this screen — which
+   * does scope by admission — showed it MISSING. The two disagreed; now they
+   * agree on the lenient reading.
+   */
+  const PERMANENT_DOCUMENT_TITLES = new Set([
+    'birth/baptismal certificate',
+    'baptismal certificate',
+  ]);
+  const isPermanentDocument = (title?: string) =>
+    PERMANENT_DOCUMENT_TITLES.has(String(title || '').trim().toLowerCase());
+
+  const belongsToCurrentAdmission = (d: { residentId?: string; admissionId?: string; uploadedAt?: string; title?: string }) => {
     if (d.residentId !== residentId) return false;
+    if (isPermanentDocument(d.title)) return true;
     if (!isReadmitted) return true; // new child — show all their docs
 
     // The document's own admission link, when it has one, decides outright — a
@@ -2383,6 +2417,12 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
                             )}
                             {hasIncomplete && !h.completedAt && (
                               <p className="text-[10px] text-red-600 font-bold mt-0.5">Incomplete</p>
+                            )}
+                            {/* The note typed when this phase was advanced. It was
+                                collected and stored from the first day but shown
+                                nowhere; the discharge report carries it as well. */}
+                            {h.notes && (
+                              <p className="text-[11px] text-gray-500 italic mt-1 max-w-md whitespace-pre-wrap">{h.notes}</p>
                             )}
                           </div>
                         </td>
