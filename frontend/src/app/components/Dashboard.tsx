@@ -952,54 +952,56 @@ function NurseDashboard({
             )}
           </CardContent>
         </Card>
-      </div>
 
-      {/* Health Document Status */}
-      <Card className="border-none shadow-sm">
-        <CardHeader className="border-b border-gray-100 pb-3">
-          <CardTitle className="flex items-center gap-2 text-[#2F3E46]">
-            <BarChart3 className="w-5 h-5 text-[#FFD100]" /> Health Document Status
-            <Badge className="bg-[#2F3E46]/10 text-[#2F3E46]">{medicalDocuments.length}</Badge>
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="pt-4">
-          {medicalDocuments.length === 0 ? (
-            <p className="text-sm text-gray-400 italic text-center py-4">No medical documents filed.</p>
-          ) : (
-            <>
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-                {documentStatus.filter((row) => row.count > 0).map((row) => (
-                  <div key={row.status} className="p-3 rounded-xl bg-gray-50 border border-gray-200">
-                    <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">{row.status}</p>
-                    <p className="text-2xl font-bold text-[#2F3E46]">{row.count}</p>
-                  </div>
-                ))}
-              </div>
-              <div className="mt-4 space-y-2">
-                {medicalDocuments.slice(0, 5).map((doc) => (
-                  <button
-                    key={String(doc.id)}
-                    onClick={() => onOpen('/documents?tab=folders')}
-                    className="w-full flex items-center justify-between gap-3 p-3 rounded-lg border border-gray-100 hover:bg-gray-50 text-left transition-colors"
-                  >
-                    <div className="min-w-0 flex items-center gap-2">
-                      <FileText className="w-4 h-4 text-[#2F3E46] shrink-0" />
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-[#2F3E46] truncate">{doc.title || doc.fileName || 'Document'}</p>
-                        <p className="text-[11px] text-gray-400 truncate">
-                          {residentName(doc.residentId, doc.residentName)}
-                          {doc.documentCategory ? ` · ${doc.documentCategory}` : ''}
-                        </p>
-                      </div>
+        {/* Health Document Status — inside the two-column grid so it sits beside
+            Medical Notes rather than spanning the page under a half-empty row. */}
+        <Card className="border-none shadow-sm">
+          <CardHeader className="border-b border-gray-100 pb-3">
+            <CardTitle className="flex items-center gap-2 text-[#2F3E46]">
+              <BarChart3 className="w-5 h-5 text-[#FFD100]" /> Health Document Status
+              <Badge className="bg-[#2F3E46]/10 text-[#2F3E46]">{medicalDocuments.length}</Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-4">
+            {medicalDocuments.length === 0 ? (
+              <p className="text-sm text-gray-400 italic text-center py-4">No medical documents filed.</p>
+            ) : (
+              <>
+                {/* Three columns, not five: this card is half-width now. */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  {documentStatus.filter((row) => row.count > 0).map((row) => (
+                    <div key={row.status} className="p-3 rounded-xl bg-gray-50 border border-gray-200">
+                      <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">{row.status}</p>
+                      <p className="text-2xl font-bold text-[#2F3E46]">{row.count}</p>
                     </div>
-                    <Badge className="bg-[#2F3E46]/10 text-[#2F3E46] shrink-0">{doc.status || 'Draft'}</Badge>
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-        </CardContent>
-      </Card>
+                  ))}
+                </div>
+                <div className="mt-4 space-y-2">
+                  {medicalDocuments.slice(0, 5).map((doc) => (
+                    <button
+                      key={String(doc.id)}
+                      onClick={() => onOpen('/documents?tab=folders')}
+                      className="w-full flex items-center justify-between gap-3 p-3 rounded-lg border border-gray-100 hover:bg-gray-50 text-left transition-colors"
+                    >
+                      <div className="min-w-0 flex items-center gap-2">
+                        <FileText className="w-4 h-4 text-[#2F3E46] shrink-0" />
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-[#2F3E46] truncate">{doc.title || doc.fileName || 'Document'}</p>
+                          <p className="text-[11px] text-gray-400 truncate">
+                            {residentName(doc.residentId, doc.residentName)}
+                            {doc.documentCategory ? ` · ${doc.documentCategory}` : ''}
+                          </p>
+                        </div>
+                      </div>
+                      <Badge className="bg-[#2F3E46]/10 text-[#2F3E46] shrink-0">{doc.status || 'Draft'}</Badge>
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }
