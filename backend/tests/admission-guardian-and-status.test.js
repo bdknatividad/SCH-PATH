@@ -121,13 +121,13 @@ test('clearing the guardian on the slip clears it on the resident too', () => {
 test('the vocabulary is exactly the three classifications', () => {
   assert.deepEqual(ADMISSION_STATUSES, [
     'New',
-    'Returning Resident (Abscon/Tumakas)',
+    'Returning Resident (Abscond/Tumakas)',
     'Relapse',
   ]);
 });
 
 test('a first admission is New whatever the caller asks for', () => {
-  for (const requested of ['Relapse', 'Returning Resident (Abscon/Tumakas)', 'New', '', null, undefined, 'nonsense']) {
+  for (const requested of ['Relapse', 'Returning Resident (Abscond/Tumakas)', 'New', '', null, undefined, 'nonsense']) {
     assert.equal(
       resolveAdmissionStatus(1, requested),
       'New',
@@ -138,16 +138,16 @@ test('a first admission is New whatever the caller asks for', () => {
 
 test('a later admission takes the caller\'s choice, and only a real one', () => {
   assert.equal(resolveAdmissionStatus(2, 'Relapse'), 'Relapse');
-  assert.equal(resolveAdmissionStatus(2, 'Returning Resident (Abscon/Tumakas)'), 'Returning Resident (Abscon/Tumakas)');
+  assert.equal(resolveAdmissionStatus(2, 'Returning Resident (Abscond/Tumakas)'), 'Returning Resident (Abscond/Tumakas)');
   assert.equal(resolveAdmissionStatus(7, 'Relapse'), 'Relapse');
 
   // "New" is not available for a later admission, and an unknown value falls
   // back rather than reaching the column.
-  assert.equal(resolveAdmissionStatus(2, 'New'), 'Returning Resident (Abscon/Tumakas)');
+  assert.equal(resolveAdmissionStatus(2, 'New'), 'Returning Resident (Abscond/Tumakas)');
   for (const junk of ['', null, undefined, 'nonsense', '  ']) {
     assert.equal(
       resolveAdmissionStatus(2, junk),
-      'Returning Resident (Abscon/Tumakas)',
+      'Returning Resident (Abscond/Tumakas)',
       `an unrecognised classification (${JSON.stringify(junk)}) reached the admission`,
     );
   }
@@ -181,23 +181,29 @@ test('the column exists on a fresh database and is backfilled on an old one', ()
   );
 });
 
-test('the form sends the classification and only asks when it can differ', () => {
+test('the form sends the classification and derives it rather than asking', () => {
   // Both write paths carry it; a create that omits it silently gets the fallback.
   const sends = RECORDS.match(/\n\s+admissionStatus,\n/g) || [];
   assert.ok(sends.length >= 3, `the classification is sent in only ${sends.length} payloads`);
 
-  // The chooser appears for a returning admission only — a first admission has
-  // no choice to make — and not at all for a resident returning from Abscond,
-  // where the classification is forced and the API overrides whatever is sent.
-  // Offering the chooser there would show a choice that cannot be honoured.
+  // Nothing is chosen by hand any more. How the last admission ended is already
+  // recorded on the resident — `Absconded` or `Discharged` — and that decides the
+  // classification, so the form derives both returning values. The backend
+  // derives the same pair and overrides whatever a request sends, so the form and
+  // the API cannot disagree about what was saved.
   assert.match(RECORDS, /const isReturningAdmission = Boolean\(/, 'the returning case is not distinguished');
-  assert.match(RECORDS, /const isReturningFromAbscond = Boolean\(/, 'the forced Abscond classification is not distinguished');
+  assert.match(RECORDS, /const isReturningFromAbscond = Boolean\(/, 'the returning-from-Abscond case is not distinguished');
+  assert.match(RECORDS, /const isReturningFromDischarge = Boolean\(/, 'the returning-from-discharge case is not distinguished');
   assert.match(
     RECORDS,
-    /\{isReturningAdmission && !isReturningFromAbscond && \(/,
-    'the chooser is not limited to a returning admission that can differ',
+    /'Returning Resident \(Abscond\/Tumakas\)'[\s\S]{0,120}'Relapse'/,
+    'the two returning classifications are not both derived',
   );
-  assert.match(RECORDS, /'Returning Resident \(Abscon\/Tumakas\)',\s*'Relapse',/, 'the two returning classifications are not offered');
+  assert.doesNotMatch(
+    RECORDS,
+    /setReturningAdmissionStatus/,
+    'the hand-picked classification is back — the resident status already decides it',
+  );
   // Editing an existing slip must not reclassify it.
   assert.match(
     RECORDS,

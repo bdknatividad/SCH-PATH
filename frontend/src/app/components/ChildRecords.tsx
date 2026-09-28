@@ -235,7 +235,7 @@ interface AdmissionRecord {
   admissionNumber: number;
 
   /*
-   * New / Returning Resident (Abscon/Tumakas) / Relapse. Stored on the admission
+   * New / Returning Resident (Abscond/Tumakas) / Relapse. Stored on the admission
    * because the two returning values cannot be derived from the data.
    */
   admissionStatus?: string | null;
@@ -1879,21 +1879,10 @@ export function ChildRecords() {
       []
     );
 
-  /**
-   * Which kind of returning admission this is.
-   *
-   * "New" is the only classification the system can work out for itself — it is
-   * the absence of an earlier admission. A resident who left without permission
-   * (Abscon/Tumakas) and a resident who returned to substance use (Relapse) are
-   * indistinguishable in the data, so the Social Worker picks one and the choice
-   * is stored on the admission rather than guessed on every render.
-   */
-  const [
-    returningAdmissionStatus,
-    setReturningAdmissionStatus,
-  ] = useState<
-    'Returning Resident (Abscon/Tumakas)' | 'Relapse'
-  >('Returning Resident (Abscon/Tumakas)');
+  // The classification of a returning admission is no longer picked here. The
+  // resident's own status says how the last admission ended — `Absconded` makes
+  // them a Returning Resident, `Discharged` makes the return a Relapse — so the
+  // form derives it (see `admissionStatus` below) instead of asking.
 
   const [
     showExistingAdmission,
@@ -4264,28 +4253,37 @@ export function ChildRecords() {
   /**
    * A returning admission is one being opened against a resident the system
    * already knows. Editing an existing slip keeps whatever it was classified as,
-   * so re-saving the form cannot silently reclassify a Relapse as an Abscon.
+   * so re-saving the form cannot silently reclassify a Relapse as a Returning
+   * Resident.
    */
   const isReturningAdmission = Boolean(
     !editingId && (duplicateChild || exactResident)
   );
 
   // A resident who is currently Absconded is definitively "Returning Resident
-  // (Abscon/Tumakas)" — there is no ambiguity to ask the Social Worker to
-  // resolve here, unlike an ordinary returning admission. The backend enforces
-  // this regardless of what is submitted; this keeps the form's own display
-  // from suggesting a choice ("Relapse") that would not actually be saved.
+  // (Abscond/Tumakas)" — they left without permission and came back. A resident
+  // who is Discharged finished the programme and returned, which is a Relapse.
+  // Between them these two cover every returning admission, because
+  // `children.status` is an ENUM of Active / Discharged / Absconded. The backend
+  // enforces the same rule regardless of what is submitted, so the form shows
+  // exactly what will be saved.
   const isReturningFromAbscond = Boolean(
     isReturningAdmission &&
       (duplicateChild || exactResident)?.status === 'Absconded'
+  );
+  const isReturningFromDischarge = Boolean(
+    isReturningAdmission &&
+      (duplicateChild || exactResident)?.status === 'Discharged'
   );
 
   const admissionStatus = editingId
     ? existingAdmission?.admissionStatus || 'New'
     : isReturningAdmission
       ? (isReturningFromAbscond
-        ? 'Returning Resident (Abscon/Tumakas)'
-        : returningAdmissionStatus)
+        ? 'Returning Resident (Abscond/Tumakas)'
+        : isReturningFromDischarge
+          ? 'Relapse'
+          : 'Returning Resident (Abscond/Tumakas)')
       : 'New';
 
   return (
@@ -4812,12 +4810,14 @@ export function ChildRecords() {
 
                       <p className="text-xs text-gray-500 mt-1">
                         {isReturningFromAbscond
-                          ? 'This resident absconded from a previous admission. This new admission is automatically classified as Returning Resident (Abscon/Tumakas).'
-                          : isReturningAdmission
-                            ? 'This resident already has an admission on record. Choose how this one is classified.'
-                            : editingId
-                              ? 'Kept from the admission on record.'
-                              : 'First admission for this resident.'}
+                          ? 'This resident absconded from a previous admission. This new admission is automatically classified as Returning Resident (Abscond/Tumakas).'
+                          : isReturningFromDischarge
+                            ? 'This resident was discharged from a previous admission. This new admission is automatically classified as Relapse.'
+                            : isReturningAdmission
+                              ? 'This resident already has an admission on record. This new admission is automatically classified.'
+                              : editingId
+                                ? 'Kept from the admission on record.'
+                                : 'First admission for this resident.'}
                       </p>
 
                     </div>
@@ -4849,40 +4849,11 @@ export function ChildRecords() {
 
                   </div>
 
-                  {/* Only a returning admission has a choice to make: the two
-                      returning classifications are indistinguishable from the
-                      data, so one of them has to be picked by hand. A resident
-                      returning from Abscond is not ambiguous — the record
-                      already says why they left — so no picker is shown and
-                      nothing here can override the forced classification. */}
-                  {isReturningAdmission && !isReturningFromAbscond && (
-                    <div className="mt-4 space-y-2">
-                      <p className="text-xs font-semibold text-gray-500">
-                        Classify this admission
-                      </p>
-                      <div className="flex flex-wrap gap-2">
-                        {([
-                          'Returning Resident (Abscon/Tumakas)',
-                          'Relapse',
-                        ] as const).map((option) => (
-                          <button
-                            key={option}
-                            type="button"
-                            onClick={() => setReturningAdmissionStatus(option)}
-                            aria-pressed={returningAdmissionStatus === option}
-                            className={[
-                              'rounded-xl border px-3 py-2 text-left text-xs font-semibold transition-colors',
-                              returningAdmissionStatus === option
-                                ? 'border-[#2F3E46] bg-[#2F3E46] text-white'
-                                : 'border-gray-300 bg-white text-[#2F3E46] hover:border-[#2F3E46]',
-                            ].join(' ')}
-                          >
-                            {option}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                  {/* Nothing to pick here any more. The resident's own status says
+                      how the last admission ended — Absconded or Discharged — and
+                      that is what decides the classification, so the form shows it
+                      rather than asking. The backend derives the same value and
+                      overrides whatever a request sends. */}
                 </div>
 
                 {/* ACTIONS */}

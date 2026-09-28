@@ -336,6 +336,9 @@ async function create(req, res, next) {
       // used to force the classification and to know the old admission was
       // deliberately closed here rather than beforehand.
       let reAdmittedFromAbscond = false;
+      // Set below when the resident is coming back after being discharged, which
+      // is what makes the new admission a Relapse.
+      let reAdmittedFromDischarge = false;
 
       /*
        * If residentId was supplied, this is a new admission
@@ -353,6 +356,10 @@ async function create(req, res, next) {
 
         existingResident = rows[0];
         reAdmittedFromAbscond = existingResident.status === ABSCONDED_STATUS;
+        // The other way a resident's record can end. `children.status` is an ENUM
+        // of Active / Discharged / Absconded, so a returning resident is one or
+        // the other, and between them they decide the classification outright.
+        reAdmittedFromDischarge = existingResident.status === 'Discharged';
 
         /*
          * Never create another admission while the latest admission is active.
@@ -467,13 +474,18 @@ async function create(req, res, next) {
       );
       const previousAdmissionId = previousAdmissionRows[0]?.id || null;
 
-      // A resident coming back from Abscond is definitively "Returning Resident
-      // (Abscon/Tumakas)" — unlike an ordinary returning admission, there is no
-      // ambiguity for the Social Worker to resolve, so this overrides whatever
-      // classification the request sent.
+      // How the previous admission ended decides the classification, so nothing
+      // here is asked of the caller. A resident coming back from Abscond is a
+      // Returning Resident — they left without permission and came back. One
+      // coming back after being discharged finished the programme and returned,
+      // which is a Relapse. Both override whatever the request sent. The fallback
+      // is only reachable if the resident's status is neither of those, which the
+      // ENUM does not allow.
       const admissionStatus = reAdmittedFromAbscond
         ? DEFAULT_RETURNING_ADMISSION_STATUS
-        : resolveAdmissionStatus(admissionNumber, admission.admissionStatus);
+        : reAdmittedFromDischarge
+          ? 'Relapse'
+          : resolveAdmissionStatus(admissionNumber, admission.admissionStatus);
 
       /*
        * Create resident master record only for first admission.

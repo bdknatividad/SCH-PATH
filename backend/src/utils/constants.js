@@ -274,24 +274,29 @@ const ASSESSMENT_TYPES = {
 /**
  * How an admission is classified on the Admission Slip.
  *
- * `New` is the only value the system can determine for itself — it is the
- * absence of any earlier admission. The two returning values cannot be derived
- * from anything stored: a resident who left without permission and a resident
- * who returned to substance use look identical in the data, so the Social Worker
- * chooses between them and the choice is stored. Both are kept as one label with
- * the local terms in brackets, because "Abscon/Tumakas" is what the staff call
- * it and the slip is read by the same people.
+ * All three are worked out, never asked for. `New` is the absence of an earlier
+ * admission, and the two returning values follow from how the previous admission
+ * ended — which `children.status` already records. `Absconded` is a resident who
+ * left without permission, so coming back makes them a Returning Resident;
+ * `Discharged` is one who completed the programme, so coming back is a Relapse.
+ *
+ * The Social Worker used to pick between the two by hand, on the reasoning that
+ * the data could not tell them apart. It could not then; it can now, because the
+ * resident's own status says why they left.
+ *
+ * The returning label keeps the local term in brackets: the slip is read by the
+ * same people who use it.
  *
  * @constant {Array<string>}
  */
 const ADMISSION_STATUSES = [
   'New',
-  'Returning Resident (Abscon/Tumakas)',
+  'Returning Resident (Abscond/Tumakas)',
   'Relapse',
 ];
 
 /** The status a returning admission gets when the caller does not choose one. */
-const DEFAULT_RETURNING_ADMISSION_STATUS = 'Returning Resident (Abscon/Tumakas)';
+const DEFAULT_RETURNING_ADMISSION_STATUS = 'Returning Resident (Abscond/Tumakas)';
 
 /**
  * User roles in the system

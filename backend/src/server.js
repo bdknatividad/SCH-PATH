@@ -610,12 +610,12 @@ async function runMigrations() {
     console.log(`Migration: admissions.${column} is now nullable.`);
   }
 
-  // How the admission is classified: New / Returning Resident (Abscon/Tumakas) /
-  // Relapse. Only "New" is derivable — it is the absence of an earlier
-  // admission — so the two returning values are chosen by the Social Worker and
-  // have to be stored rather than recomputed on each render. Existing rows are
-  // backfilled from the vocabulary the interface used before the column existed,
-  // which had exactly two values and derived them from the admission number.
+  // How the admission is classified: New / Returning Resident (Abscond/Tumakas)
+  // / Relapse. All three are worked out from the data — "New" is the absence of
+  // an earlier admission, and the two returning values follow from how the
+  // previous one ended (`children.status`). Existing rows are backfilled from the
+  // vocabulary the interface used before the column existed, which had exactly
+  // two values and derived them from the admission number.
   try {
     await ensureColumn('admissions', 'admissionStatus', 'VARCHAR(40) NULL', 'caseHistory');
     const [backfilled] = await pool.query(
@@ -625,10 +625,25 @@ async function runMigrations() {
                 ELSE 'New'
               END
         WHERE admissionStatus IS NULL`,
-      ['Returning Resident (Abscon/Tumakas)']
+      ['Returning Resident (Abscond/Tumakas)']
     );
     if (backfilled.affectedRows > 0) {
       console.log(`Migration: ${backfilled.affectedRows} admission(s) classified.`);
+    }
+
+    // "Abscon" is the spelling this value shipped with, and the classification is
+    // *stored* rather than recomputed, so admissions saved before the correction
+    // still carry the old word — renaming it in code alone would leave those
+    // records reading "Abscon" while new ones read "Abscond". Idempotent: a
+    // second boot matches nothing.
+    const [renamed] = await pool.query(
+      `UPDATE admissions
+          SET admissionStatus = ?
+        WHERE admissionStatus = ?`,
+      ['Returning Resident (Abscond/Tumakas)', 'Returning Resident (Abscon/Tumakas)']
+    );
+    if (renamed.affectedRows > 0) {
+      console.log(`Migration: ${renamed.affectedRows} admission(s) re-spelled to Abscond.`);
     }
   } catch (err) {
     console.warn('Migration warning (admissions.admissionStatus):', err.message);
