@@ -768,12 +768,18 @@ const invisibleFieldClass =
     'focus:ring-yellow-500/70',
     // A value longer than its printed blank line (e.g. a full name in a
     // one-line box) was overflowing past its own field height and visually
-    // bleeding into the row below it. Single-line fields now clip instead
-    // of wrapping/overflowing; textarea fields (which set their own
-    // whitespace handling) are unaffected since 'overflow-hidden' alone
-    // doesn't force single-line behavior on them.
+    // bleeding into the row below it. Single-line fields now clip instead of
+    // overflowing; `overflow-hidden` and `text-ellipsis` do that on their own.
+    //
+    // `whitespace-nowrap` used to sit here as well, on the reasoning that an
+    // `<input>` is single-line regardless and a `<textarea>` "sets its own
+    // whitespace handling". A textarea does not: `white-space` applies to its
+    // content, so the nowrap turned the two-line Complete Address fields into
+    // one unbroken line that ran out of its box and across the printed
+    // "Signature of Resident:" label and rule beside it. The two textareas now
+    // ask for wrapping explicitly; every other field here is an `<input>`, which
+    // never wraps either way, so nothing else changes.
     'overflow-hidden',
-    'whitespace-nowrap',
     'text-ellipsis',
   ].join(' ');
 
@@ -1371,6 +1377,11 @@ function AdmissionSlipEditor({
                 invisibleFieldClass,
                 'resize-none',
                 'overflow-hidden',
+                // Two printed lines. Ask for wrapping explicitly rather than
+                // relying on the base class, and break a long unbroken word (a
+                // "Sitio San Isidro" line) instead of letting it overflow.
+                'whitespace-pre-wrap',
+                'break-words',
                 'leading-[12px]',
               ].join(' ')}
               style={{
@@ -1472,6 +1483,11 @@ function AdmissionSlipEditor({
                 invisibleFieldClass,
                 'resize-none',
                 'overflow-hidden',
+                // Two printed lines. Ask for wrapping explicitly rather than
+                // relying on the base class, and break a long unbroken word (a
+                // "Sitio San Isidro" line) instead of letting it overflow.
+                'whitespace-pre-wrap',
+                'break-words',
                 'leading-[12px]',
               ].join(' ')}
               style={{
