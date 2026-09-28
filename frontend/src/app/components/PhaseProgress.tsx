@@ -780,7 +780,7 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;');
-      const phaseRows = history
+      const phaseRows = phaseHistory
         .filter(h => h.phaseName !== 'Admission')
         .map(h => `
           <tr>
@@ -789,6 +789,30 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
             <td>${h.completedAt ? new Date(h.completedAt).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' }) : '<em>Current</em>'}</td>
             <td>${h.notes ? escapeReportText(h.notes) : '—'}</td>
           </tr>`).join('');
+
+      /**
+       * The resident's admissions, so the report shows this is not their first
+       * stay. Printed only when there is more than one — a single-admission
+       * report has nothing to compare against.
+       */
+      const reportDateOf = (value?: string | null) => (value
+        ? new Date(value).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' })
+        : '—');
+      const admissionHistorySection = admissionPeriods.length > 1
+        ? `
+  <div class="section">
+    <div class="section-title">Admission History</div>
+    <table>
+      <thead><tr><th>Admission</th><th>Date Started</th><th>Date Ended</th></tr></thead>
+      <tbody>${admissionPeriods.map(p => `
+        <tr>
+          <td>${escapeReportText(p.label)}</td>
+          <td>${reportDateOf(p.startDate)}</td>
+          <td>${p.endDate ? reportDateOf(p.endDate) : '<em>Current</em>'}</td>
+        </tr>`).join('')}</tbody>
+    </table>
+  </div>`
+        : '';
 
       const html = `<!DOCTYPE html>
 <html>
@@ -867,6 +891,7 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
       <tbody>${phaseRows || '<tr><td colspan="4" style="text-align:center;color:#999">No phase history recorded.</td></tr>'}</tbody>
     </table>
   </div>
+${admissionHistorySection}
 
   <div class="section">
     <div class="section-title">Discharge Summary</div>
@@ -1213,6 +1238,35 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
       fileName: d.fileName,
     }));
 
+  /**
+   * The phase records belonging to the admission that is open now.
+   *
+   * A re-admission inserts a fresh Admission Phase row and keeps the previous
+   * one, so the raw list from `/phases/resident/:id` spans every admission the
+   * resident has ever had. Left unscoped, both the Phase History panel and the
+   * discharge report listed an earlier stay's phases as though they were this
+   * one's — a returning resident's report claimed work they had not done this
+   * time, and the panel showed the programme already finished the moment they
+   * were readmitted.
+   *
+   * Scoped by the same rule as documents: a row linked to an admission the
+   * closed history already names is history, and a row with no link falls back
+   * to the readmission cutoff — the row written for this admission carries the
+   * readmission date as its `enteredAt`.
+   */
+  const phaseHistory = useMemo(() => {
+    if (!isReadmitted) return history;
+    return history.filter((h) => {
+      const linked = String((h as { admissionId?: string }).admissionId ?? '').trim();
+      if (linked) return !knownAdmissionIds.has(linked);
+      const entered = String(h.enteredAt || '').slice(0, 10);
+      if (!entered) return false;
+      // `>=`, unlike the document fallback: this admission's own Admission Phase
+      // row is stamped with the readmission date itself.
+      return docCutoffDate ? entered >= docCutoffDate : true;
+    });
+  }, [history, isReadmitted, knownAdmissionIds, docCutoffDate]);
+
   // displayPhase: the phase whose content is shown — switches when user clicks a phase pill
   const displayPhase = viewingPhase || currentPhase;
 
@@ -1230,7 +1284,7 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
 
   // displayRecord: the history record for the displayed phase (not necessarily the current DB record)
   const displayRecord = viewingPhase
-    ? (history.find(h => h.phaseName === viewingPhase) || null)
+    ? (phaseHistory.find(h => h.phaseName === viewingPhase) || null)
     : currentRecord;
 
   // Requirements for the displayed phase
@@ -1287,7 +1341,7 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
   // earlier phase's history doesn't change what the Discharge dialog shows.
   const finalPhaseName = CASE_PHASES[CASE_PHASES.length - 1];
   const allPreviousPhasesComplete = CASE_PHASES.slice(0, -1).every(phase =>
-    !!history.find(h => h.phaseName === phase)?.completedAt
+    !!phaseHistory.find(h => h.phaseName === phase)?.completedAt
   );
   const finalPhaseReq = requirements[finalPhaseName] || { requiredDocuments: [], requiredTasks: [], optionalDocuments: [] };
   const finalPhaseReqFull = requirements[finalPhaseName] as PhaseReqWithOptional | undefined;
@@ -1384,7 +1438,7 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
             </h3>
             <div className="flex items-center gap-1.5 flex-wrap">
             {CASE_PHASES.map((phase, idx) => {
-              const histEntry = history.find(h => h.phaseName === phase);
+              const histEntry = phaseHistory.find(h => h.phaseName === phase);
               const isCurrent = phase === currentPhase;
               const wasVisited = !!histEntry; // has a DB record = was visited
               const isDone = !!(histEntry?.completedAt);
@@ -2374,7 +2428,7 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
       </Dialog>
 
           {/* History table */}
-          {history.length > 0 && (
+          {phaseHistory.length > 0 && (
             <div className="border-t border-gray-200 pt-6">
               <h3 className="text-xs font-bold text-gray-700 uppercase tracking-wide mb-4 flex items-center gap-2">
                 <Clock className="w-3.5 h-3.5 text-[#FFD100]" />
@@ -2390,7 +2444,7 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {history.map(h => {
+                    {phaseHistory.map(h => {
                       const hasIncomplete = h.missingRequirements &&
                         ((h.missingRequirements.documents?.length || 0) > 0 ||
                          (h.missingRequirements.tasks?.length || 0) > 0);
