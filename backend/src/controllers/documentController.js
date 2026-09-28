@@ -740,8 +740,26 @@ async function create(req, res, next) {
     // The folder is derived, so the type rule above cannot cover a document
     // whose title is generic but whose category is medical: a "Medical Note"
     // posted as `Other` would pass that check and still be filed under Medical
-    // Records. The derived folder is the authority, so it is enforced too.
-    if (documentFolder === 'Medical Records' && uploaderRole && !MEDICAL_RECORD_ROLES.has(uploaderRole)) {
+    // Records. The derived folder is the authority, so it is enforced too —
+    // except where the title itself names the role.
+    //
+    // A title with its own role list is the more specific rule, and the two
+    // disagree for exactly one document. "Medical Certificate" is declared
+    // uploadable by the Social Worker — that is the admission upload path, see
+    // the note on the map in `constants.js` — but it derives into Medical
+    // Records, whose write list is nurse/centerhead/admin. The backstop meant
+    // for generic titles therefore refused the Social Worker the upload its own
+    // declaration grants, with a 403 that contradicts the rule the UI shows.
+    // The explicit grant wins. Looked up on `docTitle`, not `permissionKey`: an
+    // `Other` document maps to 'Other', which every role may upload, and would
+    // walk a generic medical note straight past this guard.
+    const titleGrantsUploader = (DOCUMENT_ROLE_PERMISSIONS[docTitle] || []).includes(uploaderRole);
+    if (
+      documentFolder === 'Medical Records' &&
+      uploaderRole &&
+      !MEDICAL_RECORD_ROLES.has(uploaderRole) &&
+      !titleGrantsUploader
+    ) {
       throw new ApiError(
         403,
         `Your role (${uploaderRole}) is not permitted to create a medical record. Allowed roles: ${[...MEDICAL_RECORD_ROLES].join(', ')}.`,
