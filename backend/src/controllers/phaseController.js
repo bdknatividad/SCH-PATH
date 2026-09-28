@@ -687,6 +687,25 @@ async function toggleTask(req, res, next) {
       }
     }
 
+    // Every other checklist is case and group-living work — "Casework/group work",
+    // "Counseling sessions", "Family conferencing" on the Caring & Rehabilitation
+    // Phase — so it is held by the Social Worker and the Houseparent, with the
+    // Center Head and Admin overseeing.
+    //
+    // Before this the endpoint had no rule at all outside the Orientation Phase:
+    // any signed-in role could mark a case conference complete. A Nurse holds
+    // Child Records and reaches this screen, which is how it was noticed, but a
+    // Psychological Staff member or an Educator could call the endpoint directly.
+    // The Houseparent stays on the Orientation Phase only — the block above
+    // refuses them everywhere else — so this list is their ceiling too.
+    const PHASE_CHECKLIST_ROLES = ['socialworker', 'houseparent', 'centerhead', 'admin'];
+    if (!PHASE_CHECKLIST_ROLES.includes(normalizedRole)) {
+      throw new ApiError(
+        403,
+        'Only the Social Worker, the Houseparent, the Center Head or the Administrator may complete a phase checklist.',
+      );
+    }
+
     let tasksCompleted = parseJsonValue(rows[0].tasksCompleted, []);
 
     if (completed && !tasksCompleted.includes(task)) {

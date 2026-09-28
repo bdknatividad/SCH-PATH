@@ -233,6 +233,22 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
   const ORIENTATION_PHASE_ROLES = ['houseparent', 'centerhead', 'admin'];
   const normalizedRole = String(user?.role || '').toLowerCase().replace(/[\s_-]+/g, '');
   const canToggleOrientationPhase = ORIENTATION_PHASE_ROLES.includes(normalizedRole);
+
+  /**
+   * Who may tick a phase checklist other than the Orientation Phase.
+   *
+   * The remaining checklists are case and group-living work — "Casework/group
+   * work", "Counseling sessions", "Family conferencing" — which belong to the
+   * Social Worker, with the Center Head / Admin overseeing. The Nurse holds
+   * Child Records and reaches this screen, but has no part in marking a case
+   * conference complete; the API refuses it too, so the control is not offered.
+   *
+   * A Houseparent is deliberately absent. They may write the Orientation Phase
+   * checklist only — `handleToggleTask` below and the API both refuse the rest —
+   * so offering them the box on another phase would be a control that silently
+   * does nothing.
+   */
+  const PHASE_CHECKLIST_ROLES = ['socialworker', 'centerhead', 'admin'];
   const uploadRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   const [history, setHistory] = useState<PhaseRecord[]>([]);
@@ -474,11 +490,11 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
   }, [refreshData, loadData]);
 
   const handleToggleTask = async (task: string, done: boolean) => {
-    // Houseparents may write checklist state only for Orientation Phase.
-    if (isHouseparent && displayPhase !== 'Orientation Phase') return;
-    // And the Orientation Phase checklist itself is not open to every role — a
-    // Psychological Staff member toggling it must not even be attempted.
-    if (displayPhase === 'Orientation Phase' && !canToggleOrientationPhase) return;
+    // One guard, resolved in `canToggleChecklist`: a Houseparent writes the
+    // Orientation Phase checklist only, the Orientation Phase is theirs plus the
+    // Center Head / Admin, and every other checklist belongs to the Social
+    // Worker, the Center Head and the Admin. The API refuses the same roles.
+    if (!canToggleChecklist) return;
 
     // Determine which phase record we're updating
     const targetRecord = viewingPhase ? displayRecord : currentRecord;
@@ -1166,6 +1182,18 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
   // displayPhase: the phase whose content is shown — switches when user clicks a phase pill
   const displayPhase = viewingPhase || currentPhase;
 
+  /**
+   * May this account tick the checklist of the phase on screen?
+   *
+   * The Orientation Phase has its own rule (the Houseparent running it); every
+   * other checklist belongs to `PHASE_CHECKLIST_ROLES`. This is the one place the
+   * two are resolved, so the checkbox's `disabled` and `handleToggleTask`'s guard
+   * cannot disagree — and it mirrors the API, which refuses the write outright.
+   */
+  const canToggleChecklist = displayPhase === 'Orientation Phase'
+    ? canToggleOrientationPhase
+    : PHASE_CHECKLIST_ROLES.includes(normalizedRole);
+
   // displayRecord: the history record for the displayed phase (not necessarily the current DB record)
   const displayRecord = viewingPhase
     ? (history.find(h => h.phaseName === viewingPhase) || null)
@@ -1672,22 +1700,32 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
               <div>
                 <p className="text-xs font-semibold text-gray-500 uppercase mb-2 flex items-center gap-1">
                   <ClipboardList className="w-3 h-3" /> Requirements
+                  {/* Read-only for a role that does not own this checklist — the
+                      progress is still worth seeing. Same treatment as the
+                      "Social Worker / Center Head only" hint on a document row. */}
+                  {!canToggleChecklist && (
+                    <span className="ml-1 normal-case text-[10px] text-red-400 italic font-semibold">
+                      🔒 {displayPhase === 'Orientation Phase'
+                        ? 'Houseparent / Center Head only'
+                        : 'Social Worker / Center Head only'}
+                    </span>
+                  )}
                 </p>
                 <div className="space-y-1">
                   {[...tasksRequired, ...tasksOptional].map(task => {
                     const done = taskIsCompleted(task, tasksCompleted);
                     const isOptional = tasksOptional.includes(task);
                     return (
-                      <label key={task} className="flex items-start gap-2 text-sm cursor-pointer p-1.5 rounded hover:bg-gray-50 group">
+                      <label
+                        key={task}
+                        className={`flex items-start gap-2 text-sm p-1.5 rounded group ${canToggleChecklist ? 'cursor-pointer hover:bg-gray-50' : 'cursor-default'}`}
+                      >
                         <input
                           type="checkbox"
                           checked={done}
                           onChange={(e) => handleToggleTask(task, e.target.checked)}
                           className="mt-0.5 accent-green-600"
-                          disabled={
-                            (isHouseparent && displayPhase !== 'Orientation Phase') ||
-                            (displayPhase === 'Orientation Phase' && !canToggleOrientationPhase)
-                          }
+                          disabled={!canToggleChecklist}
                         />
                         <span className={done ? 'line-through text-gray-400' : 'text-gray-700'}>
                           {task} {isOptional && <span className="text-[10px] text-gray-400">(Optional)</span>}
