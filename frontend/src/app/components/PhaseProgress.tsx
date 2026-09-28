@@ -943,12 +943,20 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
       // Save through the same Documents API/state used by the Documents module.
       // The residentId is the actual child folder key, so this upload is visible
       // in Documents → Folders by Child after the server confirms it.
+      //
+      // Filed against the phase being *viewed*, not the resident's current one.
+      // The row this button sits on is matched with `d.phase === displayPhase`, so
+      // stamping `currentPhase` filed the document under whatever phase the
+      // resident had reached and the row it was uploaded from could never see it —
+      // a required document uploaded from a past phase stayed "Missing" forever,
+      // however many times it was uploaded. The free-form upload below already
+      // uses `displayPhase`, and the backend permits a past phase.
       await addDocument({
         residentId,
         residentName: child?.name || '',
-        category: `${currentPhase} - Required`,
+        category: `${displayPhase} - Required`,
         title: doc,
-        phase: currentPhase,
+        phase: displayPhase,
         fileName: file.name,
         fileSize: file.size,
         fileData: base64Data,
