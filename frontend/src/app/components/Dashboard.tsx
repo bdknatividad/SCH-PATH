@@ -681,16 +681,6 @@ interface NurseHealthRecord {
   status?: string;
 }
 
-/** A scheduled assessment as `/assessments/upcoming` returns it. */
-interface NurseAssessment {
-  id: string;
-  date?: string;
-  time?: string;
-  type?: string;
-  status?: string;
-  forResidents?: Array<string | { id?: string; name?: string }>;
-}
-
 interface NurseDashboardProps {
   displayRole: string;
   children: Child[];
@@ -709,23 +699,16 @@ interface NurseDashboardProps {
  * remember to exclude this role, and one missed check brings an unrelated
  * statistic back. So the role leaves the shared page entirely.
  *
- * Two of the five read from a source the bulk store deliberately withholds, and
- * both are handled without widening the store:
+ * The Upcoming Assessments widget is deliberately absent. The Nurse holds no
+ * Assessments module, so the schedule is not nurse-relevant data for this page;
+ * `/api/store` drops the whole `assessments` table for a role without that
+ * module, and this page no longer reaches around that via
+ * `/assessments/upcoming` to show a schedule the role cannot act on.
  *
- *  - **Upcoming assessments** come from `/assessments/upcoming`, the read-only
- *    endpoint. `/api/store` drops the whole `assessments` table for a role
- *    without the Assessments module — which is exactly the Nurse, who reads the
- *    schedule but never creates one. Fetching the one endpoint the role is meant
- *    to read is narrower than handing it the table.
- *  - **Medical notes** come from `child.notes`, which also carries the
- *    endorsement thread (`ChildDetail` appends a `[ENDORSEMENTS]` block to the
- *    same column), so only the part above the marker is a medical note.
+ * **Medical notes** come from `child.notes`, which also carries the endorsement
+ * thread (`ChildDetail` appends a `[ENDORSEMENTS]` block to the same column), so
+ * only the part above the marker is a medical note.
  */
-/**
- * The `id` of the Nurse's Upcoming Assessments card, so the tile above it can
- * scroll to the list rather than linking to a module the role cannot open.
- */
-const NURSE_UPCOMING_ANCHOR = 'nurse-upcoming-assessments';
 
 function NurseDashboard({
   displayRole, children, documents, healthRecords, onOpen,
@@ -738,23 +721,6 @@ function NurseDashboard({
   const horizonIso = isoDay(horizon);
 
   const dayOf = (value?: string) => String(value || '').slice(0, 10);
-
-  const [upcoming, setUpcoming] = useState<NurseAssessment[]>([]);
-  const [upcomingLoading, setUpcomingLoading] = useState(true);
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const result: any = await request('/assessments/upcoming');
-        if (!cancelled) setUpcoming(Array.isArray(result?.data) ? result.data : []);
-      } catch {
-        if (!cancelled) setUpcoming([]);
-      } finally {
-        if (!cancelled) setUpcomingLoading(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, []);
 
   /**
    * Every follow-up to act on: overdue first, then anything inside the horizon.
@@ -812,14 +778,11 @@ function NurseDashboard({
     children.find((child) => String(child.id) === String(id))?.name || fallback || 'Unassigned';
 
   /**
-   * The Nurse's five widgets.
+   * The Nurse's widgets — every one of them opens a page the role may open.
    *
-   * "Upcoming Assessments" carries no `path`: the Nurse reads the schedule but
-   * holds no Assessments module, so `/assessments` answers 403 and the page
-   * would bounce straight back out. The count is still worth acting on, and the
-   * list it counts is already further down this same page, so the tile carries
-   * `scrollTo` instead and jumps to that card. Each row there opens the
-   * resident's record, which the Nurse does hold.
+   * The Upcoming Assessments tile is gone: the Nurse holds no Assessments
+   * module, so the only route it could take answers 403. See the note above the
+   * component.
    */
   const tiles = [
     {
@@ -828,7 +791,6 @@ function NurseDashboard({
       caption: overdueCount ? `${overdueCount} overdue` : 'Follow-ups in 30 days',
       icon: AlertCircle,
       path: '/health',
-      scrollTo: null,
     },
     {
       title: 'Health Updates',
@@ -836,17 +798,6 @@ function NurseDashboard({
       caption: 'Records logged this week',
       icon: HeartPulse,
       path: '/health',
-      scrollTo: null,
-    },
-    {
-      title: 'Upcoming Assessments',
-      value: upcoming.length,
-      caption: 'Scheduled from today — see the list below',
-      icon: Calendar,
-      // No route: see the note above the tile list. The list this counts is on
-      // this page, so the tile scrolls to it.
-      path: null,
-      scrollTo: NURSE_UPCOMING_ANCHOR,
     },
     {
       title: 'Health Documents',
@@ -854,7 +805,6 @@ function NurseDashboard({
       caption: 'Filed under Medical Records',
       icon: FileText,
       path: '/documents?tab=folders',
-      scrollTo: null,
     },
   ];
 
@@ -868,30 +818,14 @@ function NurseDashboard({
         </p>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
         {tiles.map((tile) => {
           const Icon = tile.icon;
-          const clickable = Boolean(tile.path || tile.scrollTo);
           return (
             <Card
               key={tile.title}
-              className={`border-none shadow-sm ${clickable ? 'cursor-pointer hover:shadow-md hover:ring-2 hover:ring-[#FFD100] active:scale-95 transition-all' : ''}`}
-              onClick={
-                clickable
-                  ? () => {
-                      if (tile.path) { onOpen(tile.path as string); return; }
-                      // A tile for a module this role cannot open still has an
-                      // answer on this page. Scroll to it and hand it focus, so
-                      // the interaction works for keyboard and screen-reader
-                      // users too — a bare scroll leaves focus where it was.
-                      const target = document.getElementById(tile.scrollTo as string);
-                      if (!target) return;
-                      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                      target.setAttribute('tabindex', '-1');
-                      target.focus({ preventScroll: true });
-                    }
-                  : undefined
-              }
+              className="border-none shadow-sm cursor-pointer hover:shadow-md hover:ring-2 hover:ring-[#FFD100] active:scale-95 transition-all"
+              onClick={() => onOpen(tile.path)}
             >
               <CardContent className="p-4">
                 <div className="flex items-start justify-between">
@@ -983,55 +917,6 @@ function NurseDashboard({
                     <span className="text-[11px] text-gray-400 shrink-0">{dayOf(record.date) || '—'}</span>
                   </button>
                 ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Upcoming Assessments — the target of the tile above. `scroll-mt`
-            keeps the heading clear of the sticky top bar when scrolled to. */}
-        <Card id={NURSE_UPCOMING_ANCHOR} className="border-none shadow-sm scroll-mt-24 outline-none">
-          <CardHeader className="border-b border-gray-100 pb-3">
-            <CardTitle className="flex items-center gap-2 text-[#2F3E46]">
-              <Calendar className="w-5 h-5 text-[#FFD100]" /> Upcoming Assessments
-              <Badge className="bg-[#2F3E46]/10 text-[#2F3E46]">{upcoming.length}</Badge>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="pt-4">
-            {upcomingLoading ? (
-              <p className="text-sm text-gray-400 italic text-center py-4">Loading…</p>
-            ) : upcoming.length === 0 ? (
-              <p className="text-sm text-gray-400 italic text-center py-4">Nothing scheduled.</p>
-            ) : (
-              <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-                {upcoming.slice(0, 6).map((assessment) => {
-                  const residents = (assessment.forResidents || [])
-                    .map((entry) => (typeof entry === 'object' ? entry?.id : entry))
-                    .filter(Boolean) as string[];
-                  const firstResident = residents[0];
-                  return (
-                    <button
-                      key={assessment.id}
-                      onClick={() => firstResident && onOpen(`/children/${firstResident}`)}
-                      className="w-full flex items-center justify-between gap-3 p-3 rounded-lg border border-gray-100 hover:bg-gray-50 text-left transition-colors"
-                    >
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-[#2F3E46] truncate">
-                          {assessment.type || 'Assessment'}
-                        </p>
-                        <p className="text-[11px] text-gray-400 truncate">
-                          {residents.length
-                            ? residents.map((id) => residentName(id)).join(', ')
-                            : 'No resident linked'}
-                        </p>
-                      </div>
-                      <div className="text-right shrink-0">
-                        <p className="text-[11px] font-semibold text-[#2F3E46]">{dayOf(assessment.date) || '—'}</p>
-                        {assessment.time && <p className="text-[10px] text-gray-400">{assessment.time}</p>}
-                      </div>
-                    </button>
-                  );
-                })}
               </div>
             )}
           </CardContent>

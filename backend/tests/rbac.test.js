@@ -2905,15 +2905,18 @@ test('a medical upload is filed once, in the Documents module', () => {
   assert.match(detail, /child\.medicalRecords/, 'rows written before the fix must still be shown');
 });
 
-test('the Nurse dashboard names the five widgets the specification lists', () => {
+test('the Nurse dashboard names the widgets the specification lists', () => {
   const source = read('frontend/src/app/components/Dashboard.tsx');
   const component = source.slice(source.indexOf('function NurseDashboard('));
   const body = component.slice(0, component.indexOf('\n// ── DASHBOARD'));
 
+  // "Upcoming Assessments" was one of the five named widgets and has been
+  // removed deliberately: the Nurse holds no Assessments module, so a schedule
+  // is not nurse-relevant data to show on this page. Do not add it back without
+  // granting the module.
   for (const widget of [
     'Medical Reminders',
     'Health Updates',
-    'Upcoming Assessments',
     'Medical Notes',
     'Health Document Status',
   ]) {
@@ -2942,15 +2945,10 @@ test('the Nurse dashboard links only to pages the Nurse may open', () => {
   const component = source.slice(source.indexOf('function NurseDashboard('));
   const body = component.slice(0, component.indexOf('\n// ── DASHBOARD'));
 
-  // The Nurse reads the assessment schedule but holds no Assessments module, so
-  // the "Upcoming Assessments" tile must not navigate to /assessments.
-  assert.match(
-    body,
-    /Upcoming Assessments[\s\S]{0,400}?path:\s*null/,
-    'the Upcoming Assessments tile must not link to a module the Nurse cannot open',
-  );
-
-  // Every other destination must be a module the role holds.
+  // The Upcoming Assessments tile used to be the exception here — it carried
+  // `path: null` because the Nurse reads the schedule but holds no Assessments
+  // module, so no route was safe to give it. The tile is gone, so every
+  // remaining destination must be a module the role actually holds.
   const snapshot = rbac.buildAccessSnapshot({ role: 'nurse' });
   for (const [, path] of body.matchAll(/path:\s*'([^']+)'/g)) {
     const route = path.split('?')[0];

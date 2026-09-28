@@ -14,8 +14,9 @@
  *
  *   - `GET /violation-guide/interventions/scheduled` defaults its window to
  *     "today", and feeds the tile's **Assigned Schedules** section.
- *   - `GET /assessments/upcoming` feeds the **Nurse dashboard's** Upcoming
- *     Assessments tile, and reached a day too far back.
+ *   - `GET /assessments/upcoming` fed the **Nurse dashboard's** Upcoming
+ *     Assessments tile (since removed — the Nurse holds no Assessments module),
+ *     and reached a day too far back.
  *
  * The same expression sat in the "upcoming" endpoints for activities and
  * hearings, which are the same words the requirement names.
@@ -91,7 +92,7 @@ test('manilaToday returns the Manila day for that same instant', () => {
 const DASHBOARD_WINDOWS = [
   // file, function, what it feeds
   ['violationGuideController.js', 'getScheduledInterventions', "the tile's Assigned Schedules"],
-  ['assessmentController.js', 'getUpcoming', "the Nurse dashboard's Upcoming Assessments"],
+  ['assessmentController.js', 'getUpcoming', 'the upcoming-assessments list'],
   ['activityController.js', 'getUpcoming', 'the upcoming-activities list'],
   ['courtController.js', 'getUpcoming', 'the upcoming-hearings list'],
 ];
