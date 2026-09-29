@@ -498,7 +498,7 @@ export function Education() {
    * than gone, which is what "look back at past learners" asks for.
    */
   const [rosterView, setRosterView] = useState<'current' | 'past'>('current');
-  const { children: residents, documents, addDocument } = useData();
+  const { children: residents, documents, addDocument, refreshData } = useData();
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState('masterlist');
 
@@ -747,16 +747,29 @@ export function Education() {
     preparedBySignature: '',
   });
 
-  // Which learners an account may file a Quarterly Education Report for.
-  //
-  // An educator files for their own learners — the ones whose record they
-  // created. A record with no `createdBy` is shown to everyone: the field
-  // predates this rule, and hiding a learner from every educator would be worse
-  // than showing one to the wrong educator. Center Head, Admin and the Social
-  // Worker are not scoped and see the whole roll.
-  const quarterlyLearnerPool = user?.role === 'educator'
-    ? students.filter(s => !s.createdBy || s.createdBy === user?.username)
-    : students;
+  /**
+   * Which learners an account may file a Quarterly Education Report for.
+   *
+   * An educator files for their own learners — the ones whose record they
+   * created. A record with no `createdBy` is shown to everyone: the field
+   * predates this rule, and hiding a learner from every educator would be worse
+   * than showing one to the wrong educator. Center Head, Admin and the Social
+   * Worker are not scoped and see the whole roll.
+   *
+   * **And it fails open when the educator owns nothing.** On this deployment
+   * every learner row was created by the Center Head, so `createdBy` was the same
+   * on all of them, the pool came back empty, and the report was unreachable: a
+   * dropdown with no options and a button greyed out by a rule nobody could see.
+   * `createdBy` records who typed the row in, not who teaches the learner, so it
+   * cannot carry the scoping alone — and when it distinguishes nobody, hiding the
+   * whole roll is strictly worse than showing it.
+   */
+  const ownLearners = user?.role === 'educator'
+    ? students.filter(s => s.createdBy === user?.username)
+    : [];
+  const quarterlyLearnerPool = user?.role !== 'educator' || ownLearners.length === 0
+    ? students
+    : students.filter(s => !s.createdBy || s.createdBy === user?.username);
 
   /**
    * The learner picked for a Progress Report, resolved to the **resident** id.
@@ -769,6 +782,24 @@ export function Education() {
   const reportResidentId = reportStudent
     ? (reportStudent.residentId || residents.find((r: any) => r.name === reportStudent.name)?.id || '')
     : '';
+
+  /**
+   * The learners the form may be opened for when nothing is picked in the
+   * toolbar, resolved to resident ids — which is what the report is filed
+   * against.
+   *
+   * The toolbar dropdown and this list are the same pool, so the two cannot
+   * disagree about who is on the roll. It exists because the button used to be
+   * disabled whenever no learner had been chosen, which left an educator staring
+   * at a dead button with no explanation.
+   */
+  const reportResidentOptions = quarterlyLearnerPool
+    .filter((student) => student.status === 'Active')
+    .map((student) => ({
+      id: student.residentId || residents.find((r: any) => r.name === student.name)?.id || '',
+      name: student.name,
+    }))
+    .filter((option) => option.id);
 
   const openQuarterlyReport = () => {
     setQuarterlyError('');
@@ -1279,22 +1310,24 @@ export function Education() {
           </select>
           <button
             onClick={() => setIsProgressReportOpen(true)}
-            disabled={!reportResidentId}
             className="px-4 py-2 rounded-xl text-xs font-bold bg-white text-[#2F3E46] border border-white hover:bg-gray-100 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
             Education Quarterly Report
           </button>
         </div>
       </div>
 
-      {reportResidentId && (
-        <ProgressReportDialog
-          open={isProgressReportOpen}
-          onClose={() => setIsProgressReportOpen(false)}
-          residentId={reportResidentId}
-          residentName={reportStudent?.name || ''}
-          program={EDUCATION_PROGRESS_PROGRAM}
-        />
-      )}
+      {/* Mounted always, not only once a learner is picked: the form asks for the
+          learner itself when the toolbar dropdown has none, which is the same
+          way the Health module's Medical Quarterly Report opens. */}
+      <ProgressReportDialog
+        open={isProgressReportOpen}
+        onClose={() => setIsProgressReportOpen(false)}
+        residentId={reportResidentId || undefined}
+        residentName={reportStudent?.name || ''}
+        residents={reportResidentOptions}
+        program={EDUCATION_PROGRESS_PROGRAM}
+        onSubmitted={() => { void refreshData(); }}
+      />
 
       {/* Toolbar */}
       {uploadDocsWarning && (
@@ -2001,7 +2034,7 @@ export function Education() {
                     <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
                   ))}
                   {quarterlyLearnerPool.filter(s => s.status === 'Active' && !isPastLearner(s)).length === 0 && (
-                    <div className="px-3 py-2 text-xs text-gray-500">No active learners are assigned to you.</div>
+                    <div className="px-3 py-2 text-xs text-gray-500">No active learners on the roll.</div>
                   )}
                 </SelectContent>
               </Select>

@@ -150,15 +150,20 @@ test('a scheduled visit can be marked completed', () => {
 test('the quarterly report is scoped to an educator own learners, and fails open', () => {
   assert.match(
     EDUCATION_UI,
-    /const quarterlyLearnerPool = user\?\.role === 'educator'/,
-    'only the educator role is scoped'
+    /const quarterlyLearnerPool = user\?\.role !== 'educator' \|\| ownLearners\.length === 0/,
+    'only the educator role is scoped, and only while it owns learners'
+  );
+  assert.match(
+    EDUCATION_UI,
+    /const ownLearners = user\?\.role === 'educator'\s*\n\s*\? students\.filter\(s => s\.createdBy === user\?\.username\)/,
+    'the scope is the records the educator created'
   );
   // Failing open matters more than the filter: a record with no `createdBy`
   // predates the rule, and hiding it from every educator would be worse than
   // showing it to the wrong one.
   assert.match(
     EDUCATION_UI,
-    /\? students\.filter\(s => !s\.createdBy \|\| s\.createdBy === user\?\.username\)/,
+    /: students\.filter\(s => !s\.createdBy \|\| s\.createdBy === user\?\.username\)/,
     'a learner with no recorded creator must stay visible'
   );
   // The dropdown the report is filed from uses the pool, not the whole roll —
@@ -170,7 +175,20 @@ test('the quarterly report is scoped to an educator own learners, and fails open
     /\{quarterlyLearnerPool\.filter\(s => s\.status === 'Active' && !isPastLearner\(s\)\)\.map\(s => \(/
   );
   // An empty pool explains itself rather than showing a blank list.
-  assert.match(EDUCATION_UI, /No active learners are assigned to you\./);
+  assert.match(EDUCATION_UI, /No active learners on the roll\./);
+  // The toolbar button is never the thing that blocks the form. It was
+  // `disabled={!reportResidentId}`, so on a deployment where every learner row
+  // was created by the Center Head the educator met a greyed-out button and no
+  // explanation — the form now asks for the learner itself.
+  assert.ok(
+    !/disabled=\{!reportResidentId\}/.test(EDUCATION_UI),
+    'the report button must not be disabled on an empty selection'
+  );
+  assert.match(
+    EDUCATION_UI,
+    /residents=\{reportResidentOptions\}/,
+    'the form must be given the learners to choose from'
+  );
 });
 
 // ── Item 2: a Case Load Manager within the first month ───────────────────────
