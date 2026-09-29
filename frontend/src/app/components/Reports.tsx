@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/app/components/ui/card';
 import { Button } from '@/app/components/ui/button';
+import { admissionPeriodsFor } from '@/utils/admissionPeriods';
 import { Badge } from '@/app/components/ui/badge';
 import {
   FileText, Download, Briefcase,
@@ -607,6 +608,28 @@ async function generateResidentReport(
       ${row('Documents Complete', child.documentsComplete ? 'Yes' : 'Pending')}
     `);
 
+    /*
+     * The admissions on record for this resident, so a report on someone who has
+     * been here before shows that rather than reading as a first stay. The
+     * numbers and dates come from the admission periods the Documents module
+     * already groups a resident's files by, so the two cannot disagree about
+     * which admission a record belongs to. What the child record keeps about an
+     * earlier stay beyond that is the free-text `previousCaseDetails`, which Case
+     * Progress prints in full just above.
+     */
+    const admissionHistory = section('Admission History', (() => {
+      const periods = admissionPeriodsFor(child);
+      if (periods.length <= 1) {
+        return '<p class="empty">First admission — no earlier admissions on record.</p>';
+      }
+      return `<table>
+        <thead><tr><th>Admission</th><th>Date Admitted</th><th>Date Ended</th><th>Status</th></tr></thead>
+        <tbody>${periods.map(p =>
+          `<tr><td>Admission ${p.admissionNumber}</td><td>${p.startDate ? esc(formatDate(p.startDate)) : '—'}</td><td>${p.endDate ? esc(formatDate(p.endDate)) : '—'}</td><td>${p.isCurrent ? 'Current' : 'Closed'}</td></tr>`
+        ).join('')}</tbody>
+      </table>`;
+    })());
+
     // Medical records come from two places: the Documents module's Medical
     // category, which is where uploads land now, and the legacy
     // `children.medicalRecords` JSON that predates it. Both are shown, de-duped
@@ -722,6 +745,7 @@ async function generateResidentReport(
         </div>
         ${personalInfo}
         ${caseProgress}
+        ${admissionHistory}
         ${dischargeSection}
         ${medicalInfo}
         ${activitySection}
