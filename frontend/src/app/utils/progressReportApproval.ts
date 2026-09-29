@@ -49,6 +49,31 @@ export function progressReportSignatureField(
 }
 
 /**
+ * The stored answers, whether the server handed them over parsed or as text.
+ *
+ * **`documents.reportData` is a `jsonField` in `backend/src/utils/constants.js`,
+ * so `mapRow` parses it on the way out and the browser receives an object** —
+ * not the JSON string the form sent. Reading only the string shape is what
+ * silently cost every reviewer their signature: `JSON.parse('[object Object]')`
+ * throws, `signProgressReportPdf` returned `null`, and the approval went through
+ * on an unsigned file while the screen said it had been signed. Both shapes are
+ * accepted, because a row straight out of `POST /documents` is still a string.
+ */
+export function readProgressReportFields(value: unknown): ProgressReportFields | null {
+  if (!value) return null;
+  let fields: any = value;
+  if (typeof value === 'string') {
+    try {
+      fields = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  if (!fields || typeof fields !== 'object' || !Array.isArray(fields.rows)) return null;
+  return fields as ProgressReportFields;
+}
+
+/**
  * Draw the report again with the reviewer's signature in it.
  *
  * Returns `null` — rather than throwing — when there is nothing to sign or the
@@ -64,13 +89,8 @@ export async function signProgressReportPdf(
   const field = progressReportSignatureField(role);
   if (!field || !signature) return null;
 
-  let fields: ProgressReportFields;
-  try {
-    fields = JSON.parse(String(document?.reportData || ''));
-  } catch {
-    return null;
-  }
-  if (!fields || !Array.isArray(fields.rows)) return null;
+  const fields = readProgressReportFields(document?.reportData);
+  if (!fields) return null;
 
   return generateProgressReportPdf({ ...fields, [field]: signature });
 }

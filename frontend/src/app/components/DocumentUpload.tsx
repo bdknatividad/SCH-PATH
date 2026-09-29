@@ -9,7 +9,7 @@ import { Badge } from '@/app/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/app/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/app/components/ui/dialog';
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogAction, AlertDialogCancel } from '@/app/components/ui/alert-dialog';
-import { Upload, X, CheckCircle, FileText, Image, FileSpreadsheet, File, Lock, AlertTriangle, Folder, FolderOpen, ChevronDown, ChevronRight as ChevronRightIcon, Download, Archive, Filter, Eye, Printer, Search, Loader2 } from 'lucide-react';
+import { Upload, X, CheckCircle, FileText, Image, FileSpreadsheet, File, Lock, AlertTriangle, Folder, FolderOpen, ChevronDown, ChevronRight as ChevronRightIcon, Download, Archive, Filter, Eye, Printer, Search, Loader2, PenLine } from 'lucide-react';
 import JSZip from 'jszip';
 import DOMPurify from 'dompurify';
 import { useData, DocumentWithApproval } from '../state/DataContext';
@@ -21,6 +21,7 @@ import { useSystemDialog } from '@/app/components/SystemDialog';
 import { SignaturePadModal } from '@/app/components/SignaturePad';
 import {
   isProgressReportDocument,
+  readProgressReportFields,
   signProgressReportPdf,
   progressReportSignatureField,
 } from '@/app/utils/progressReportApproval';
@@ -651,17 +652,31 @@ function dataUrlToBlob(dataUrl: string): Blob {
 }
 
 /**
- * Can this document be signed and approved from the signing screen?
+ * Does this reviewer still owe a signature on this report?
  *
- * It has to be one of the two generated quarterly Progress Reports, it has to
- * still be waiting on a decision, and it has to carry the answers the form is
- * drawn from — `reportData` is what the reviewer's signature is added to, and a
- * report filed before that existed has no form to draw.
+ * The signing screen exists for exactly that: a generated quarterly Progress
+ * Report this account signs on the printed line its role owns, and which does
+ * not already carry it. Three conditions, each of which has to be true for the
+ * screen to be the right place to land:
+ *
+ *  - it is one of the two generated reports (`reportData` is what the form is
+ *    drawn from, and a report filed before that existed has no form to draw);
+ *  - the role owns one of the two printed lines — a role that owns neither has
+ *    nothing to add, and approving it as it stands is correct;
+ *  - the line is still blank. An **Approved** report with this reviewer's
+ *    signature already on it is finished, and re-opening the screen would only
+ *    offer to overwrite it. An Approved report *without* it is not finished —
+ *    it is what a report approved before the signature could be drawn looks
+ *    like, and the one action it is missing is this one.
  */
-function isSignableProgressReport(doc: DocumentWithApproval): boolean {
-  return isProgressReportDocument(doc)
-    && Boolean(doc.reportData)
-    && (doc.status === 'Submitted' || doc.status === 'Under Review');
+function isSignableProgressReport(doc: DocumentWithApproval, role: string): boolean {
+  if (!isProgressReportDocument(doc)) return false;
+  if (doc.status === 'Rejected' || doc.status === 'Archived') return false;
+  const field = progressReportSignatureField(role);
+  if (!field) return false;
+  const fields = readProgressReportFields(doc.reportData);
+  if (!fields) return false;
+  return !fields[field];
 }
 
 export function DocumentUpload() {
@@ -1332,7 +1347,7 @@ export function DocumentUpload() {
     const match = documents.find((doc) => String(doc.id) === String(deepLinkDocId));
     if (!match) return;
     deepLinkOpenedRef.current = true;
-    if (deepLinkSigns && can('Documents', 'approve') && isSignableProgressReport(match as DocumentWithApproval)) {
+    if (deepLinkSigns && can('Documents', 'approve') && isSignableProgressReport(match as DocumentWithApproval, user?.role || '')) {
       setSignTarget(match as DocumentWithApproval);
       setSignValue('');
       return;
@@ -1437,15 +1452,15 @@ export function DocumentUpload() {
     /*
      * A generated quarterly Progress Report is signed by the person approving
      * it, on the printed line their role owns — so approving one opens the
-     * signature pad instead of the plain confirmation. Everything else approves
+     * signing screen instead of the plain confirmation. Everything else approves
      * exactly as before.
      *
-     * The check is on `reportData`, not just the type: a report filed before
-     * this existed has no stored answers, so there is no form to sign, and
-     * offering a pad that could not draw anything would be worse than not
-     * offering it.
+     * The test is `isSignableProgressReport`, not "is it one of these types": it
+     * also requires that this reviewer's line is still blank. A report whose
+     * answers cannot be read has no form to sign, and offering a pad that could
+     * not draw anything would be worse than not offering it.
      */
-    if (isProgressReportDocument(document) && document.reportData) {
+    if (isSignableProgressReport(document, user?.role || '')) {
       setSignTarget(document);
       setSignValue('');
       return;
@@ -1488,9 +1503,21 @@ export function DocumentUpload() {
     setIsSigning(true);
     try {
       const signed = await signProgressReportPdf(document, user?.role || '', signValue);
-      if (signed) {
-        await updateDocument(document.id, { fileData: signed.dataUrl, fileSize: signed.size });
+      if (!signed) {
+        // This used to fall through to the approval instead, which is exactly
+        // how three reports were approved with only the author's name on them:
+        // a signature that cannot be drawn is a failure, not a detail to skip.
+        throw new Error('Your signature could not be drawn onto the report, so it was not approved. Please try again.');
       }
+      // The file goes on first, and through `request` rather than
+      // `updateDocument`: that one reports a failed write through the shared
+      // store and does not throw, so a write that never landed would still be
+      // followed by a successful approval — an approved report with no
+      // signature in it.
+      await request(`/documents/${document.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ fileData: signed.dataUrl, fileSize: signed.size }),
+      });
       await request(`/documents/${document.id}/approve`, { method: 'POST' });
       setSignTarget(null);
       setSignValue('');
@@ -2834,6 +2861,31 @@ export function DocumentUpload() {
                   <CheckCircle className="w-4 h-4 mr-2" /> Approve
                 </Button>
               </>
+            )}
+            {/*
+              A report that was approved before its reviewer's signature could be
+              drawn is Approved without one — the file in the child's record and
+              in the Reports module carries only the author's name. Approving it
+              again is a no-op that re-stamps the row, so what is offered here is
+              the one action that is actually missing.
+
+              This is the only place an already-decided report stays actionable,
+              and only while this reviewer's line is still blank.
+            */}
+            {selectedDocument && canApprove
+              && selectedDocument.status === 'Approved'
+              && isSignableProgressReport(selectedDocument, user?.role || '') && (
+              <Button
+                className="bg-[#2F3E46] text-white hover:bg-[#243038]"
+                onClick={() => {
+                  const doc = selectedDocument;
+                  setIsViewDialogOpen(false);
+                  setSignTarget(doc);
+                  setSignValue('');
+                }}
+              >
+                <PenLine className="w-4 h-4 mr-2" /> Sign and file
+              </Button>
             )}
             {selectedDocument?.fileData && (
               <a 
