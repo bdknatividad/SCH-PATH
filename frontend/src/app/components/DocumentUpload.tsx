@@ -633,6 +633,37 @@ function FolderDocumentRow({
   );
 }
 
+/**
+ * A `data:` URL as a Blob.
+ *
+ * Deliberately not `fetch(dataUrl).blob()`: every binary body in this app is
+ * read through `fetchBinary` so a 200 that is really the app's HTML cannot be
+ * handed on as if it were the file, and a bare `fetch` in this module is caught
+ * by `api-base-url.test.js`. The bytes here never leave the browser anyway.
+ */
+function dataUrlToBlob(dataUrl: string): Blob {
+  const [header, payload] = String(dataUrl).split(',');
+  const mime = header?.match(/data:([^;]+)/)?.[1] || 'application/octet-stream';
+  const binary = atob(payload || '');
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
+}
+
+/**
+ * Can this document be signed and approved from the signing screen?
+ *
+ * It has to be one of the two generated quarterly Progress Reports, it has to
+ * still be waiting on a decision, and it has to carry the answers the form is
+ * drawn from — `reportData` is what the reviewer's signature is added to, and a
+ * report filed before that existed has no form to draw.
+ */
+function isSignableProgressReport(doc: DocumentWithApproval): boolean {
+  return isProgressReportDocument(doc)
+    && Boolean(doc.reportData)
+    && (doc.status === 'Submitted' || doc.status === 'Under Review');
+}
+
 export function DocumentUpload() {
   const { documents, addDocument, updateDocument, deleteDocument, children, refreshData } = useData();
   const { user } = useAuth();
@@ -1283,22 +1314,34 @@ export function DocumentUpload() {
    * loading when the page first renders and the record will not be there yet.
    * A `ref` rather than state so the retry cannot reopen the preview after the
    * reader has closed it.
+   *
+   * **`&sign=1` is the same link for a report that has to be signed.** The
+   * "awaiting approval" notice for a generated quarterly Progress Report used to
+   * land on the folder list and then the file's details — neither of which is the
+   * work it names. With `sign=1` the reviewer arrives at the signing screen with
+   * the report already open. A report that is already decided, carries no stored
+   * answers to draw, or that this account may not approve falls back to the
+   * details dialog, so the link can never open a screen the reader cannot use.
    */
-  const deepLinkDocId = useMemo(
-    () => new URLSearchParams(window.location.search).get('docId'),
-    [],
-  );
+  const deepLinkParams = useMemo(() => new URLSearchParams(window.location.search), []);
+  const deepLinkDocId = deepLinkParams.get('docId');
+  const deepLinkSigns = deepLinkParams.get('sign') === '1';
   const deepLinkOpenedRef = useRef(false);
   useEffect(() => {
     if (!deepLinkDocId || deepLinkOpenedRef.current) return;
     const match = documents.find((doc) => String(doc.id) === String(deepLinkDocId));
     if (!match) return;
     deepLinkOpenedRef.current = true;
+    if (deepLinkSigns && can('Documents', 'approve') && isSignableProgressReport(match as DocumentWithApproval)) {
+      setSignTarget(match as DocumentWithApproval);
+      setSignValue('');
+      return;
+    }
     void handleView(match as DocumentWithApproval);
     // `handleView` is stable enough for this one-shot open; re-running on its
     // identity would reopen the preview on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deepLinkDocId, documents]);
+  }, [deepLinkDocId, deepLinkSigns, documents]);
 
   const handlePrint = async (doc: DocumentWithApproval) => {
     try {
@@ -1339,16 +1382,19 @@ export function DocumentUpload() {
    * `Reassessment` has no endpoint of its own, so it stays a plain update.
    */
   /**
-   * Load the report the reviewer is about to sign.
+   * The form the reviewer is about to sign — **with their signature on it**.
    *
-   * The signing screen shows the report, because a reviewer who is putting their
-   * signature on a form has to be able to read it on the same page — the screen
-   * used to be a signature pad alone, and the report was a dialog they had
-   * already closed.
+   * The signature is drawn onto the form itself rather than captured in a box
+   * beside it, so the reviewer watches their name land on the line their role
+   * owns before they commit to it. It is also literally the file that gets filed:
+   * `signProgressReportPdf` is the same call `confirmSignedApproval` makes, so
+   * what is on screen here and what is stored on approval cannot be two different
+   * documents.
    *
-   * The bytes are fetched here rather than read off the row: `/store` omits
-   * `fileData`, so the row a reviewer clicks in a list carries none, and the
-   * preview has to be the same file Download would hand over.
+   * Before the first stroke there is nothing to draw, so the report as filed is
+   * fetched instead — the bytes from `/documents/:id/file`, not `fileData` off
+   * the row, because `/store` omits it and the row a reviewer clicks in a list
+   * carries none.
    */
   useEffect(() => {
     if (!signTarget) {
@@ -1359,12 +1405,19 @@ export function DocumentUpload() {
     }
     let cancelled = false;
     let objectUrl: string | null = null;
-    setSignFileUrl(null);
     setSignFileError(null);
     setSignFileLoading(true);
     (async () => {
       try {
-        const { blob } = await fetchBinary(`/documents/${signTarget.id}/file`);
+        let blob: Blob;
+        const signed = signValue
+          ? await signProgressReportPdf(signTarget, user?.role || '', signValue)
+          : null;
+        if (signed) {
+          blob = dataUrlToBlob(signed.dataUrl);
+        } else {
+          blob = (await fetchBinary(`/documents/${signTarget.id}/file`)).blob;
+        }
         if (cancelled) return;
         objectUrl = URL.createObjectURL(blob);
         setSignFileUrl(objectUrl);
@@ -1378,7 +1431,7 @@ export function DocumentUpload() {
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [signTarget]);
+  }, [signTarget, signValue, user?.role]);
 
   const handleApprove = async (document: DocumentWithApproval) => {
     /*
@@ -3120,14 +3173,17 @@ export function DocumentUpload() {
               )}
             </div>
 
-            {/* The decision — read on the left, sign on the right. */}
+            {/* The decision — read on the left, sign on the right. The signature
+                is drawn onto the form as soon as it is made, so this panel is a
+                control rather than a place the report is read. */}
             <aside className="shrink-0 space-y-3 overflow-y-auto border-t border-gray-200 px-5 py-4 lg:w-[360px] lg:border-l lg:border-t-0">
               <p className="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600">
-                Your signature is printed on the form&apos;s{' '}
+                Your signature is drawn onto the form&rsquo;s{' '}
                 <strong>
                   {progressReportSignatureField(user?.role || '') === 'checkedBySignature' ? 'Checked by' : 'Noted by'}
                 </strong>{' '}
-                line. Approving makes the report part of the resident&apos;s official record.
+                line as you sign it — the page on the left is the report as it will be filed.
+                Approving makes it part of the resident&rsquo;s official record.
               </p>
               <SignaturePadModal
                 label="Reviewer signature"
@@ -3135,6 +3191,11 @@ export function DocumentUpload() {
                 onChange={setSignValue}
                 hint="Tap to sign"
               />
+              {signValue && (
+                <p className="text-xs text-gray-500">
+                  Your signature is on the form. Sign again to replace it.
+                </p>
+              )}
             </aside>
           </div>
 

@@ -202,8 +202,14 @@ export function Notifications() {
         // A document alert names the exact file, so open it rather than the
         // folder list. `DocumentUpload` reads `docId` and opens that record's
         // preview; without one it simply stays on the list.
+        //
+        // **A generated quarterly Progress Report is signed, not just read.** Its
+        // notice used to land on the folder list with the file's details dialog,
+        // which is not where the work is: the reviewer has to read the form and
+        // put their signature on it. `sign=1` sends them straight to that screen.
         target = relatedRecordId
           ? `/documents?tab=folders&docId=${encodeURIComponent(relatedRecordId)}`
+            + (String(alert.type || '').toLowerCase() === 'progress-report-submitted' ? '&sign=1' : '')
           : '/documents';
         break;
       // Form 08 and the intervention it belongs to both live in the Violations
