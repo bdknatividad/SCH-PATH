@@ -85,6 +85,31 @@ const RULE = rgb(0.45, 0.45, 0.45);
 const GRID = rgb(0.62, 0.62, 0.62);
 const COVER = rgb(1, 1, 1);
 
+/**
+ * Split a word that is wider than a whole line.
+ *
+ * `wrapText` breaks on spaces, so one long token — a URL, or a run of typed
+ * filler like `asdasd…` — has nothing to break on. `drawText` does not clip, so
+ * it simply runs off the right edge of the page: the first real output had the
+ * narrative ending at x=614 on a 612 pt page. Greedily take as many characters
+ * as fit and continue on the next line.
+ */
+function breakWord(word: string, font: PDFFont, size: number, maxWidth: number): string[] {
+  const pieces: string[] = [];
+  let current = '';
+  for (const char of word) {
+    const test = current + char;
+    if (current && font.widthOfTextAtSize(test, size) > maxWidth) {
+      pieces.push(current);
+      current = char;
+    } else {
+      current = test;
+    }
+  }
+  if (current) pieces.push(current);
+  return pieces;
+}
+
 function wrapText(text: string, font: PDFFont, size: number, maxWidth: number): string[] {
   const source = String(text ?? '');
   if (!source.trim()) return [''];
@@ -98,6 +123,18 @@ function wrapText(text: string, font: PDFFont, size: number, maxWidth: number): 
     }
     let current = '';
     for (const word of words) {
+      // A word that cannot fit on a line of its own is broken rather than left
+      // to overflow — there is nothing else to wrap it on.
+      if (font.widthOfTextAtSize(word, size) > maxWidth) {
+        if (current) {
+          lines.push(current);
+          current = '';
+        }
+        const pieces = breakWord(word, font, size, maxWidth);
+        lines.push(...pieces.slice(0, -1));
+        current = pieces[pieces.length - 1] || '';
+        continue;
+      }
       const test = current ? `${current} ${word}` : word;
       if (font.widthOfTextAtSize(test, size) > maxWidth && current) {
         lines.push(current);

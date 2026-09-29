@@ -57,18 +57,24 @@ export const TABLE_RIGHT_X = TABLE_COLUMN_X[TABLE_COLUMN_X.length - 1];
 /**
  * The `(PROGRAM)` line — the run of underscores the program name is written on.
  *
- * Measured at x=195.05, 12 pt, and centred on the page: the label below it sits
- * at x=271.01, which is the same centre.
+ * Measured out of the real form: the underscore run starts at x=195.05 and ends
+ * at **420.07**, and its ink box spans y 654.64 → 668.57. `y` here is the rule's
+ * own line, which is the printed baseline (657.22); the value is drawn 4 pt above
+ * it. The label below sits at x=271.01, which is the same centre.
  */
-export const PROGRAM_LINE = { x: 195.05, y: 657.22, width: 222, height: 16 } as const;
+export const PROGRAM_LINE = { x: 195.05, y: 657.22, width: 225.02, height: 16 } as const;
 
 /**
  * Where the resident's name goes on the `RESIDENT:` line.
  *
- * The printed label starts at the margin; its own width in Calibri 12 pt is
- * ≈57 pt, so the blank begins at ≈131.
+ * The printed label is not ≈57 pt wide, which is what this used to assume: it
+ * runs from the margin to **x=134.74** (`RESIDENT:`, Arial 12 pt), then a space,
+ * then the underscore run from **138.11 to 291.38**. Starting the value at 131
+ * therefore wrote the name straight through the `T:` of the label — the first
+ * real output read `RESIDENChristian Secret Victoria`. `x` is the rule's start,
+ * so it is the underscore run's own left edge.
  */
-export const RESIDENT_NAME = { x: 131, y: 605.26, width: 199, height: 16 } as const;
+export const RESIDENT_NAME = { x: 138.11, y: 605.26, width: 153.27, height: 16 } as const;
 
 /**
  * Bands to mask before writing on a printed line.
@@ -79,16 +85,21 @@ export const RESIDENT_NAME = { x: 131, y: 605.26, width: 199, height: 16 } as co
  * the first real output did exactly that. So the run is covered and a clean
  * rule is drawn in its place.
  *
- * The bands are kept clear of everything else on their line: the program line
- * has nothing but underscores on it, and the resident band starts just past the
- * printed `RESIDENT:` label so the label survives.
+ * **A band has to cover the whole ink box, not just the middle of it.** The
+ * printed text's box is 13.4 pt tall (`RESIDENT:` spans y 602.74 → 616.12), and
+ * the first version masked 15 pt starting 5 pt too low — so the top of every
+ * letter survived and the label showed through above the mask as half-height
+ * glyphs. Both bands are now the measured box plus a little clearance.
+ *
+ * And a band must not start inside the label it is meant to preserve: the
+ * resident band begins at 136, just past the printed `RESIDENT:`.
  */
-export const PROGRAM_LINE_MASK = { x: 150, y: 649, width: 410, height: 15 } as const;
-export const RESIDENT_NAME_MASK = { x: 126, y: 597, width: 434, height: 15 } as const;
+export const PROGRAM_LINE_MASK = { x: 193, y: 652, width: 230, height: 17.5 } as const;
+export const RESIDENT_NAME_MASK = { x: 136, y: 600.5, width: 170, height: 17.5 } as const;
 
 /** How far each clean rule runs — the printed underscores' own extent. */
-export const PROGRAM_LINE_RULE_WIDTH = 225;
-export const RESIDENT_NAME_RULE_WIDTH = 199;
+export const PROGRAM_LINE_RULE_WIDTH = 225.02;
+export const RESIDENT_NAME_RULE_WIDTH = 153.27;
 
 /** The names the official form prints, which the app redraws below the table. */
 export const REPORT_CHECKED_BY_NAME = 'Francis Patricio, RSW';
