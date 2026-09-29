@@ -7,9 +7,9 @@ import { Input } from '@/app/components/ui/input';
 import { Label } from '@/app/components/ui/label';
 import { Badge } from '@/app/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/app/components/ui/select';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/app/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/app/components/ui/dialog';
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogAction, AlertDialogCancel } from '@/app/components/ui/alert-dialog';
-import { Upload, X, CheckCircle, FileText, Image, FileSpreadsheet, File, Lock, AlertTriangle, Folder, FolderOpen, ChevronDown, ChevronRight as ChevronRightIcon, Download, Archive, Filter, Eye, Printer, Search } from 'lucide-react';
+import { Upload, X, CheckCircle, FileText, Image, FileSpreadsheet, File, Lock, AlertTriangle, Folder, FolderOpen, ChevronDown, ChevronRight as ChevronRightIcon, Download, Archive, Filter, Eye, Printer, Search, Loader2 } from 'lucide-react';
 import JSZip from 'jszip';
 import DOMPurify from 'dompurify';
 import { useData, DocumentWithApproval } from '../state/DataContext';
@@ -18,6 +18,12 @@ import { useSubModuleTab } from '@/app/hooks/useSubModuleTab';
 import { useSubModuleTabs } from '@/app/hooks/useSubModuleTabs';
 import { usePermissions } from '@/app/hooks/usePermissions';
 import { useSystemDialog } from '@/app/components/SystemDialog';
+import { SignaturePadModal } from '@/app/components/SignaturePad';
+import {
+  isProgressReportDocument,
+  signProgressReportPdf,
+  progressReportSignatureField,
+} from '@/app/utils/progressReportApproval';
 import { formatShortDate, formatShortDateTime } from '@/utils/dateFormatter';
 import { DOCUMENT_FOLDERS, folderForDocument } from '@/utils/documentCategory';
 import { admissionPeriodKeyFor, admissionPeriodsFor } from '@/utils/admissionPeriods';
@@ -630,6 +636,16 @@ function FolderDocumentRow({
 export function DocumentUpload() {
   const { documents, addDocument, updateDocument, deleteDocument, children, refreshData } = useData();
   const { user } = useAuth();
+  /**
+   * The Progress Report being signed, and the signature being drawn for it.
+   *
+   * Held separately from the approve confirmation because it needs a pad, not a
+   * yes/no — and because the signature is drawn *before* the approval is sent,
+   * so a failure to draw it cannot leave the document approved but unsigned.
+   */
+  const [signTarget, setSignTarget] = useState<DocumentWithApproval | null>(null);
+  const [signValue, setSignValue] = useState('');
+  const [isSigning, setIsSigning] = useState(false);
   const { can } = usePermissions();
   const dialog = useSystemDialog();
 
@@ -1319,6 +1335,23 @@ export function DocumentUpload() {
    * `Reassessment` has no endpoint of its own, so it stays a plain update.
    */
   const handleApprove = async (document: DocumentWithApproval) => {
+    /*
+     * A generated quarterly Progress Report is signed by the person approving
+     * it, on the printed line their role owns — so approving one opens the
+     * signature pad instead of the plain confirmation. Everything else approves
+     * exactly as before.
+     *
+     * The check is on `reportData`, not just the type: a report filed before
+     * this existed has no stored answers, so there is no form to sign, and
+     * offering a pad that could not draw anything would be worse than not
+     * offering it.
+     */
+    if (isProgressReportDocument(document) && document.reportData) {
+      setSignTarget(document);
+      setSignValue('');
+      return;
+    }
+
     const confirmed = await dialog.confirm({
       title: 'Approve this document?',
       description: `“${document.title}” becomes part of the resident's official record and is readable by everyone entitled to that category. This cannot be undone — reject it instead if something is wrong.`,
@@ -1332,6 +1365,48 @@ export function DocumentUpload() {
       await dialog.success('Document approved.', `“${document.title}” is approved and filed.`);
     } catch (err) {
       await dialog.failure('Could not approve the document', describeError(err, 'The document was not approved. Please try again.'));
+    }
+  };
+
+  /**
+   * Approve a Progress Report with the reviewer's signature on it.
+   *
+   * The signed form is written back to the document *first*, then the approval
+   * is sent. In that order a failed drawing leaves the report unapproved and
+   * untouched, so the reviewer can simply try again — the other order would
+   * approve a report that never got its signature and cannot be re-approved.
+   */
+  const confirmSignedApproval = async () => {
+    const document = signTarget;
+    if (!document) return;
+    if (!signValue) {
+      await dialog.validation('Sign the report', {
+        description: `Draw your signature before approving — it is printed on the form's "${progressReportSignatureField(user?.role || '') === 'checkedBySignature' ? 'Checked by' : 'Noted by'}" line.`,
+      });
+      return;
+    }
+
+    setIsSigning(true);
+    try {
+      const signed = await signProgressReportPdf(document, user?.role || '', signValue);
+      if (signed) {
+        await updateDocument(document.id, { fileData: signed.dataUrl, fileSize: signed.size });
+      }
+      await request(`/documents/${document.id}/approve`, { method: 'POST' });
+      setSignTarget(null);
+      setSignValue('');
+      await refreshData();
+      await dialog.success(
+        'Report approved and signed.',
+        `“${document.title}” is approved, and your signature is on the form.`,
+      );
+    } catch (err) {
+      await dialog.failure(
+        'Could not approve the report',
+        describeError(err, 'The report was not approved. Please try again.'),
+      );
+    } finally {
+      setIsSigning(false);
     }
   };
 
@@ -2891,6 +2966,53 @@ export function DocumentUpload() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setHistoryTarget(null)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Signing a generated quarterly Progress Report at approval. */}
+      <Dialog
+        open={Boolean(signTarget)}
+        onOpenChange={(next) => { if (!next && !isSigning) { setSignTarget(null); setSignValue(''); } }}
+      >
+        <DialogContent className="flex max-h-[92dvh] w-[94vw] max-w-xl flex-col gap-0 overflow-hidden rounded-2xl p-0">
+          <DialogHeader className="shrink-0 border-b px-5 py-3">
+            <DialogTitle className="text-[#2F3E46]">Sign and approve</DialogTitle>
+            <DialogDescription>
+              {signTarget?.title}{signTarget?.residentName ? ` — ${signTarget.residentName}` : ''}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-4">
+            <p className="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600">
+              Your signature is printed on the form&apos;s{' '}
+              <strong>
+                {progressReportSignatureField(user?.role || '') === 'checkedBySignature' ? 'Checked by' : 'Noted by'}
+              </strong>{' '}
+              line. Read the report before signing — approving makes it part of the resident&apos;s official record.
+            </p>
+            <SignaturePadModal
+              label="Reviewer signature"
+              value={signValue}
+              onChange={setSignValue}
+              hint="Tap to sign"
+            />
+          </div>
+          <DialogFooter className="shrink-0 flex-col-reverse gap-2 border-t px-5 py-3 sm:flex-row sm:justify-end">
+            <Button
+              variant="outline"
+              onClick={() => { setSignTarget(null); setSignValue(''); }}
+              disabled={isSigning}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={confirmSignedApproval}
+              disabled={isSigning}
+              className="gap-2 bg-[#2F3E46] text-white hover:bg-[#243038]"
+            >
+              {isSigning ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+              {isSigning ? 'Approving…' : 'Sign and approve'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

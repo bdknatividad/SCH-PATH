@@ -275,6 +275,12 @@ export interface DocumentWithApproval {
   fileData?: string; // Base64 encoded file data
   fileType?: string; // MIME type
   status: 'Draft' | 'Submitted' | 'Under Review' | 'Approved' | 'Rejected' | 'Archived' | 'Reassessment';
+  /**
+   * The filled-in answers behind a generated quarterly Progress Report, as JSON.
+   * Only those reports carry it. It is what lets a reviewer's signature be drawn
+   * onto the same form at approval time — see `utils/progressReportApproval`.
+   */
+  reportData?: string;
   /** Submission round. Starts at 1 and advances on every resubmission. */
   revision?: number;
   submittedBy?: string;
