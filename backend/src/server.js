@@ -1059,6 +1059,7 @@ async function runMigrations() {
       requiredFor VARCHAR(100) NULL,
       rejectionReason TEXT NULL,
       notes TEXT NULL,
+      reportData LONGTEXT NULL,
       createdBy VARCHAR(100) NULL,
       modifiedBy VARCHAR(100) NULL,
       createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -1096,6 +1097,20 @@ async function runMigrations() {
     // MariaDB allows any number of them in a unique index — so every ordinary
     // upload is untouched.
     await ensureUniqueIndex('documents', 'uq_documents_anecdotal_report', 'anecdotalReportId');
+
+    // The filled-in fields behind a generated Progress Report, as JSON.
+    //
+    // A Quarterly Progress Report is generated once and then reviewed by someone
+    // else — the Center Head or the Social Worker — who signs it at approval
+    // time. Their signature has to land on the form, and the only way to put it
+    // there is to draw the form again with one more signature in it. That needs
+    // the author's answers, which the PDF holds but cannot be read back out of.
+    // So the answers are kept here and the PDF is re-rendered from them on each
+    // decision; the stored file is always the current one.
+    //
+    // A report row carries it; every other document leaves it NULL, which is why
+    // this is additive and needs no backfill.
+    await ensureColumn('documents', 'reportData', 'LONGTEXT NULL', 'notes');
 
     // Links a Documents-module entry back to the TRI record it mirrors. Approving a
     // TRI publishes the filled official form into the resident's folder; the link is

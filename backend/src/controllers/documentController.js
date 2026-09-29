@@ -103,6 +103,22 @@ const MEDICAL_RECORD_ROLES = new Set(['nurse', 'centerhead', 'admin']);
  */
 const APPROVER_ROLES = ['centerhead', 'socialworker', 'admin'];
 
+/**
+ * The two quarterly reports the Education and Health modules generate from the
+ * one shared PROGRESS REPORT form.
+ *
+ * Kept together because they are a single workflow — the same form, the same
+ * reviewer set, the same alert — and because they are the only documents
+ * allowed past the medical folder's write backstop. See the exemption in
+ * `update()` for why that has to exist at all.
+ */
+const PROGRESS_REPORT_TYPES = new Set(['Education Quarterly Report', 'Medical Quarterly Report']);
+
+/** Is this document one of the generated quarterly Progress Reports? */
+function isProgressReport(document) {
+  return PROGRESS_REPORT_TYPES.has(String(document?.type || '').trim());
+}
+
 const DOCUMENT_READ_ROLES_BY_CATEGORY = {
   // A Houseparent reviews the medical record of a resident on their own case
   // load — the "medical record filed" notification tells them to, and the
@@ -149,6 +165,14 @@ const DOCUMENT_READ_ROLES_BY_CATEGORY = {
   // resident. Same set again: it is assembled entirely from the resident's own
   // record, and every one of these roles contributed a section of it.
   'resident comprehensive report': ['houseparent', 'nurse', 'psychologist', 'educator', 'socialworker', 'centerhead', 'admin'],
+  // The generated quarterly Progress Reports. Their reviewer is the Center Head
+  // *or* the Social Worker, and the medical one derives into Medical Records —
+  // whose category admits neither a social worker nor, for that matter, an
+  // educator. Without these two entries the reviewer the report is addressed to
+  // cannot open the report it is asking them to sign. Granted by the document's
+  // own category, and still narrowed per resident by `residentInScope`.
+  'education quarterly report': ['educator', 'centerhead', 'admin', 'socialworker'],
+  'medical quarterly report': ['nurse', 'centerhead', 'admin', 'socialworker'],
 };
 
 const DOCUMENT_READ_ROLE_KEYWORDS = [
@@ -916,6 +940,38 @@ async function create(req, res, next) {
       }
     }
 
+    // Tell the reviewers a generated quarterly Progress Report is waiting.
+    //
+    // `create` sends no generic "document submitted" alert — only the two
+    // special cases above — so without this the report an educator or nurse
+    // submitted would sit in the folder with nobody told, which defeats the
+    // form: the whole point of it is that a second person reads and signs it.
+    // Addressed one row per user against `APPROVER_ROLES`, the same constant
+    // `update()` consults to decide who may approve, so the recipients and the
+    // permitted reviewers cannot drift apart.
+    if (isProgressReport(rows[0]) && rows[0].status === 'Submitted') {
+      try {
+        const reviewers = await notifications.usersWithAnyRole(APPROVER_ROLES);
+        const childName = rows[0].residentId ? await notifications.residentName(rows[0].residentId) : null;
+        const program = String(rows[0].type || 'Progress Report');
+        await notifications.notifyUsers(reviewers.map((reviewer) => reviewer.id), {
+          type: 'progress-report-submitted',
+          residentId: rows[0].residentId || null,
+          title: `${program} awaiting approval${childName ? ` — ${childName}` : ''}`,
+          message: `${req.user?.fullName || req.user?.username || 'Staff'} submitted the ${program}${childName ? ` for ${childName}` : ''}. Open it to read the report and sign it.`,
+          priority: 'High',
+          actionRequired: 'Review, sign and approve the report.',
+          relatedRecordType: 'documents',
+          relatedRecordId: newId,
+          actorUsername: req.user?.username || null,
+          dedupeKey: `document:${newId}:progress-report-submitted`,
+        });
+      } catch (alertErr) {
+        // The report is already filed; a failed alert must not undo it.
+        console.error('[DocumentController] Progress report alert failed (non-fatal):', alertErr.message);
+      }
+    }
+
     res.status(201).json({ success: true, data: mapRow('documents', rows[0]) });
   } catch (error) {
     next(error);
@@ -1458,7 +1514,15 @@ async function update(req, res, next) {
     // closes the manage path. Without it a PUT with a medical id would let a
     // role rewrite a record it cannot even read — a social worker holds no
     // medical read, so it must hold no medical write either.
-    if (before.documentCategory === 'Medical Records') {
+    //
+    // A generated quarterly Progress Report is the exception, and it has to be:
+    // it derives into this folder, and its reviewer is the Center Head *or* the
+    // Social Worker, whose signature is recorded by approving it — which is a
+    // PUT. Without the exemption the Social Worker is addressed a report the
+    // guard then refuses to let them open, let alone sign. Keyed on the
+    // document's own `type`, which only the Education and Health generators
+    // write, so no ordinary medical record is affected.
+    if (before.documentCategory === 'Medical Records' && !isProgressReport(before)) {
       const editorRole = normalizeRole(req.user?.role);
       if (editorRole && !MEDICAL_RECORD_ROLES.has(editorRole)) {
         throw new ApiError(

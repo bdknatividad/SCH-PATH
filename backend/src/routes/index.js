@@ -284,12 +284,14 @@ router.get('/store', authenticate, async (req, res, next) => {
           // had just closed and the current admission read as empty.
           // `backend/tests/admission-period-folders.test.js` now asserts this list
           // covers the declared schema, so the next column cannot be dropped in
-          // silence.
+          // silence. `reportData` is small JSON (the Progress Report's answers),
+          // not a blob, so unlike `fileData` it belongs here — the reviewer's
+          // approval dialog renders the filled-in form from it.
           [rows] = await pool.query(
             `SELECT id, residentId, admissionId, residentName, staffId, assessmentId, title, type, category, documentCategory, description,
                     fileName, fileSize, filePath, fileType, uploaderRole, status, revision, phase, requiredFor,
                     submittedBy, submittedAt, uploadedBy, uploadedAt, reviewedBy, reviewedAt,
-                    approvedBy, approvedAt, rejectedBy, rejectedAt, rejectionReason, notes,
+                    approvedBy, approvedAt, rejectedBy, rejectedAt, rejectionReason, notes, reportData,
                     healthRecordId, triRecordId, quarterlyReportId, anecdotalReportId,
                     createdBy, modifiedBy, createdAt, updatedAt
              FROM documents ORDER BY createdAt DESC`
