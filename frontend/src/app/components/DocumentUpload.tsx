@@ -2685,10 +2685,51 @@ export function DocumentUpload() {
               )}
             </div>
           )}
-          <DialogFooter>
+          <DialogFooter className="flex-wrap">
             <Button variant="outline" onClick={() => setIsViewDialogOpen(false)}>
               Close
             </Button>
+            {/*
+              Decide the document from the preview, not only from its row.
+
+              A notification deep-links straight to this dialog (`?docId=…`), so
+              the reviewer arrives here having read the file — and then had to
+              close it and hunt for the row to act on it. The buttons belong
+              where the reading happened.
+
+              Both close this dialog *before* opening the next one: Radix
+              inlines `pointer-events: none` on a layer that opens while another
+              is still mounted, which leaves the confirm dialog's OK button dead.
+            */}
+            {selectedDocument && canApprove
+              && (selectedDocument.status === 'Submitted' || selectedDocument.status === 'Under Review') && (
+              <>
+                <Button
+                  variant="outline"
+                  className="border-red-200 text-red-600 hover:bg-red-50"
+                  onClick={() => {
+                    const doc = selectedDocument;
+                    setIsViewDialogOpen(false);
+                    setReviewTarget(doc);
+                    setReviewDecision('Failed');
+                    setReviewNotes('');
+                    setIsReviewDialogOpen(true);
+                  }}
+                >
+                  <X className="w-4 h-4 mr-2" /> Reject
+                </Button>
+                <Button
+                  className="bg-[#2F3E46] text-white hover:bg-[#243038]"
+                  onClick={() => {
+                    const doc = selectedDocument;
+                    setIsViewDialogOpen(false);
+                    void handleApprove(doc);
+                  }}
+                >
+                  <CheckCircle className="w-4 h-4 mr-2" /> Approve
+                </Button>
+              </>
+            )}
             {selectedDocument?.fileData && (
               <a 
                 href={selectedDocument.fileData}

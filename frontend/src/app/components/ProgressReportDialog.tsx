@@ -317,7 +317,7 @@ export function ProgressReportDialog({
 
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next && !submitting) onClose(); }}>
-      <DialogContent className="flex h-[94dvh] w-[97vw] max-w-5xl flex-col gap-0 overflow-hidden rounded-2xl p-0">
+      <DialogContent className="!top-0 !left-0 !flex !h-[100dvh] !w-screen !max-h-none !max-w-none !translate-x-0 !translate-y-0 flex-col gap-0 overflow-hidden rounded-none bg-white p-0">
         <DialogHeader className="shrink-0 border-b px-5 py-3">
           <DialogTitle className="text-[#2F3E46]">{program}</DialogTitle>
           <DialogDescription>
