@@ -646,6 +646,10 @@ export function DocumentUpload() {
   const [signTarget, setSignTarget] = useState<DocumentWithApproval | null>(null);
   const [signValue, setSignValue] = useState('');
   const [isSigning, setIsSigning] = useState(false);
+  /** The report being signed, as an object URL — see the loader below. */
+  const [signFileUrl, setSignFileUrl] = useState<string | null>(null);
+  const [signFileError, setSignFileError] = useState<string | null>(null);
+  const [signFileLoading, setSignFileLoading] = useState(false);
   const { can } = usePermissions();
   const dialog = useSystemDialog();
 
@@ -1334,6 +1338,48 @@ export function DocumentUpload() {
    *
    * `Reassessment` has no endpoint of its own, so it stays a plain update.
    */
+  /**
+   * Load the report the reviewer is about to sign.
+   *
+   * The signing screen shows the report, because a reviewer who is putting their
+   * signature on a form has to be able to read it on the same page — the screen
+   * used to be a signature pad alone, and the report was a dialog they had
+   * already closed.
+   *
+   * The bytes are fetched here rather than read off the row: `/store` omits
+   * `fileData`, so the row a reviewer clicks in a list carries none, and the
+   * preview has to be the same file Download would hand over.
+   */
+  useEffect(() => {
+    if (!signTarget) {
+      setSignFileUrl(null);
+      setSignFileError(null);
+      setSignFileLoading(false);
+      return;
+    }
+    let cancelled = false;
+    let objectUrl: string | null = null;
+    setSignFileUrl(null);
+    setSignFileError(null);
+    setSignFileLoading(true);
+    (async () => {
+      try {
+        const { blob } = await fetchBinary(`/documents/${signTarget.id}/file`);
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(blob);
+        setSignFileUrl(objectUrl);
+      } catch (error: any) {
+        if (!cancelled) setSignFileError(error?.message || 'The report could not be loaded.');
+      } finally {
+        if (!cancelled) setSignFileLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [signTarget]);
+
   const handleApprove = async (document: DocumentWithApproval) => {
     /*
      * A generated quarterly Progress Report is signed by the person approving
@@ -2572,7 +2618,9 @@ export function DocumentUpload() {
       <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
         <DialogContent
           className={`max-h-[90vh] overflow-y-auto ${
-            selectedDocument?.category === 'Admission' ? 'max-w-5xl' : 'max-w-3xl'
+            selectedDocument?.category === 'Admission' || isProgressReportDocument(selectedDocument)
+              ? 'max-w-5xl'
+              : 'max-w-3xl'
           }`}
         >
           <DialogHeader>
@@ -2641,7 +2689,11 @@ export function DocumentUpload() {
                     <iframe
                       src={normalizeFileData(selectedDocument.fileData, selectedDocument.fileType)}
                       className={
-                        selectedDocument.category === 'Admission'
+                        // A quarterly Progress Report is the same Letter-size
+                        // form as the Admission Slip and is read in full before
+                        // it is signed, so it gets the same tall frame rather
+                        // than the thumbnail the other PDFs get.
+                        selectedDocument.category === 'Admission' || isProgressReportDocument(selectedDocument)
                           ? 'w-full h-[85vh] min-h-[650px]'
                           : 'w-full h-96'
                       }
@@ -3011,33 +3063,81 @@ export function DocumentUpload() {
         </DialogContent>
       </Dialog>
 
-      {/* Signing a generated quarterly Progress Report at approval. */}
+      {/*
+        Signing a generated quarterly Progress Report at approval.
+
+        Full screen, with the report itself beside the pad. It used to be a
+        `max-w-xl` dialog holding nothing but the signature box, which meant a
+        reviewer signed a form they had to close a different dialog to read —
+        the one thing a signature must not be given without. The report is the
+        same rendered PDF the author filed; the signature is drawn onto a fresh
+        render of it by `signProgressReportPdf` when this is confirmed.
+      */}
       <Dialog
         open={Boolean(signTarget)}
         onOpenChange={(next) => { if (!next && !isSigning) { setSignTarget(null); setSignValue(''); } }}
       >
-        <DialogContent className="flex max-h-[92dvh] w-[94vw] max-w-xl flex-col gap-0 overflow-hidden rounded-2xl p-0">
+        <DialogContent className="!top-0 !left-0 !flex !h-[100dvh] !w-screen !max-h-none !max-w-none !translate-x-0 !translate-y-0 flex-col gap-0 overflow-hidden rounded-none bg-white p-0">
           <DialogHeader className="shrink-0 border-b px-5 py-3">
             <DialogTitle className="text-[#2F3E46]">Sign and approve</DialogTitle>
             <DialogDescription>
               {signTarget?.title}{signTarget?.residentName ? ` — ${signTarget.residentName}` : ''}
+              {signTarget?.uploadedBy ? ` · filed by ${signTarget.uploadedBy}` : ''}
             </DialogDescription>
           </DialogHeader>
-          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-4">
-            <p className="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600">
-              Your signature is printed on the form&apos;s{' '}
-              <strong>
-                {progressReportSignatureField(user?.role || '') === 'checkedBySignature' ? 'Checked by' : 'Noted by'}
-              </strong>{' '}
-              line. Read the report before signing — approving makes it part of the resident&apos;s official record.
-            </p>
-            <SignaturePadModal
-              label="Reviewer signature"
-              value={signValue}
-              onChange={setSignValue}
-              hint="Tap to sign"
-            />
+
+          <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+            {/* The report — the thing being signed. */}
+            <div className="min-h-0 flex-1 bg-neutral-200 p-2 sm:p-3">
+              {signFileLoading ? (
+                <div className="flex h-full min-h-[240px] items-center justify-center">
+                  <Loader2 className="mr-2 h-5 w-5 animate-spin text-[#2F3E46]" />
+                  <span className="text-sm text-gray-600">Loading the report…</span>
+                </div>
+              ) : signFileUrl ? (
+                <iframe
+                  src={signFileUrl}
+                  title={signTarget?.title || 'Report'}
+                  className="h-full min-h-[240px] w-full rounded-lg border bg-white"
+                />
+              ) : (
+                <div className="flex h-full min-h-[240px] flex-col items-center justify-center gap-3 px-6 text-center">
+                  <p className="text-sm text-gray-600">
+                    {signFileError || 'This report has no stored file to show.'}
+                  </p>
+                  {signTarget && (
+                    <Button
+                      variant="outline"
+                      className="gap-2"
+                      onClick={() => void downloadDocumentFile(signTarget, (message) => {
+                        void dialog.failure('Could not download the document', message);
+                      })}
+                    >
+                      <Download className="h-4 w-4" /> Download it instead
+                    </Button>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* The decision — read on the left, sign on the right. */}
+            <aside className="shrink-0 space-y-3 overflow-y-auto border-t border-gray-200 px-5 py-4 lg:w-[360px] lg:border-l lg:border-t-0">
+              <p className="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600">
+                Your signature is printed on the form&apos;s{' '}
+                <strong>
+                  {progressReportSignatureField(user?.role || '') === 'checkedBySignature' ? 'Checked by' : 'Noted by'}
+                </strong>{' '}
+                line. Approving makes the report part of the resident&apos;s official record.
+              </p>
+              <SignaturePadModal
+                label="Reviewer signature"
+                value={signValue}
+                onChange={setSignValue}
+                hint="Tap to sign"
+              />
+            </aside>
           </div>
+
           <DialogFooter className="shrink-0 flex-col-reverse gap-2 border-t px-5 py-3 sm:flex-row sm:justify-end">
             <Button
               variant="outline"
