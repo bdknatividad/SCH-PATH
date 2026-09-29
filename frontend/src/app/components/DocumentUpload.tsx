@@ -1514,9 +1514,26 @@ export function DocumentUpload() {
       // store and does not throw, so a write that never landed would still be
       // followed by a successful approval — an approved report with no
       // signature in it.
+      //
+      // **The answers carry the signature too.** `reportData` is what the form is
+      // drawn from, so a signature that lives only in the file is lost the next
+      // time anybody re-renders it: the Center Head signing the "Noted by" line
+      // after the Social Worker had signed "Checked by" drew the form again from
+      // the answers as filed and silently dropped the Social Worker's signature.
+      // Writing it into `reportData` means every later render starts from a form
+      // that already has it.
+      const signedField = progressReportSignatureField(user?.role || '');
+      const signedFields = readProgressReportFields(document.reportData);
+      const nextReportData = signedField && signedFields
+        ? { ...signedFields, [signedField]: signValue }
+        : null;
       await request(`/documents/${document.id}`, {
         method: 'PUT',
-        body: JSON.stringify({ fileData: signed.dataUrl, fileSize: signed.size }),
+        body: JSON.stringify({
+          fileData: signed.dataUrl,
+          fileSize: signed.size,
+          ...(nextReportData ? { reportData: nextReportData } : {}),
+        }),
       });
       await request(`/documents/${document.id}/approve`, { method: 'POST' });
       setSignTarget(null);
