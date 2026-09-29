@@ -14,6 +14,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/app/components/ui/ta
 import { Label } from '@/app/components/ui/label';
 import { Textarea } from '@/app/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/app/components/ui/select';
+import { ProgressReportDialog, EDUCATION_PROGRESS_PROGRAM } from './ProgressReportDialog';
 import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
 } from '@/app/components/ui/dialog';
@@ -674,6 +675,16 @@ export function Education() {
   });
 
   const [isQuarterlyOpen, setIsQuarterlyOpen] = useState(false);
+  /**
+   * The learner the shared PROGRESS REPORT form would be filed for.
+   *
+   * The form itself is `ProgressReportDialog`, shared with the Health module —
+   * the old education-only quarterly form was replaced by it. The learner has to
+   * be chosen up front because the report is per resident and the once-a-quarter
+   * rule is per resident.
+   */
+  const [reportStudentId, setReportStudentId] = useState('');
+  const [isProgressReportOpen, setIsProgressReportOpen] = useState(false);
   const [quarterlySubmitting, setQuarterlySubmitting] = useState(false);
   const [quarterlyError, setQuarterlyError] = useState('');
   const QUARTER_PERIODS = [
@@ -746,6 +757,18 @@ export function Education() {
   const quarterlyLearnerPool = user?.role === 'educator'
     ? students.filter(s => !s.createdBy || s.createdBy === user?.username)
     : students;
+
+  /**
+   * The learner picked for a Progress Report, resolved to the **resident** id.
+   *
+   * A learner row and a resident row are different keys, and the report is filed
+   * against the resident — the same resolution `submittedQuarterKeysForResident`
+   * uses, including the name fallback for a learner whose row predates the link.
+   */
+  const reportStudent = quarterlyLearnerPool.find((student) => student.id === reportStudentId) || null;
+  const reportResidentId = reportStudent
+    ? (reportStudent.residentId || residents.find((r: any) => r.name === reportStudent.name)?.id || '')
+    : '';
 
   const openQuarterlyReport = () => {
     setQuarterlyError('');
@@ -1238,14 +1261,40 @@ export function Education() {
             <p className="text-[10px] text-gray-400">Failed evaluations</p>
           </div>
         </div>
-        <div className="flex gap-2 mt-4 flex-wrap">
+        <div className="flex gap-2 mt-4 flex-wrap items-center">
+          <select
+            value={reportStudentId}
+            onChange={(event) => setReportStudentId(event.target.value)}
+            aria-label="Learner"
+            className="rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-xs font-bold text-white outline-none focus:border-white/50"
+          >
+            <option value="" className="text-[#2F3E46]">Select a learner…</option>
+            {quarterlyLearnerPool
+              .filter((student) => student.status === 'Active')
+              .map((student) => (
+                <option key={student.id} value={student.id} className="text-[#2F3E46]">
+                  {student.name}
+                </option>
+              ))}
+          </select>
           <button
-            onClick={openQuarterlyReport}
-            className="px-4 py-2 rounded-xl text-xs font-bold bg-white text-[#2F3E46] border border-white hover:bg-gray-100 transition-all">
-            Quarterly Report
+            onClick={() => setIsProgressReportOpen(true)}
+            disabled={!reportResidentId}
+            className="px-4 py-2 rounded-xl text-xs font-bold bg-white text-[#2F3E46] border border-white hover:bg-gray-100 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+            Education Quarterly Report
           </button>
         </div>
       </div>
+
+      {reportResidentId && (
+        <ProgressReportDialog
+          open={isProgressReportOpen}
+          onClose={() => setIsProgressReportOpen(false)}
+          residentId={reportResidentId}
+          residentName={reportStudent?.name || ''}
+          program={EDUCATION_PROGRESS_PROGRAM}
+        />
+      )}
 
       {/* Toolbar */}
       {uploadDocsWarning && (

@@ -22,6 +22,7 @@ import { useSystemDialog } from './SystemDialog';
 import { downloadDocumentFile } from '@/utils/documentFile';
 import { formatShortDate } from '@/utils/dateFormatter';
 import { PrescriptionList } from './PrescriptionList';
+import { ProgressReportDialog, MEDICAL_PROGRESS_PROGRAM } from './ProgressReportDialog';
 
 // ── CONSTANTS ──────────────────────────────────────────────────────────────
 const ALLERGIES = ['None', 'Penicillin', 'Aspirin', 'Sulfa drugs', 'Food allergies', 'Others'];
@@ -332,6 +333,17 @@ export function Health() {
 
   const [searchTerm, setSearchTerm] = useState('');
   const [filterResident, setFilterResident] = useState('all');
+  /**
+   * The resident the quarterly report would be filed for.
+   *
+   * A Progress Report is per resident, so the button that opens it needs one
+   * chosen — it reads the same filter the record list does, rather than adding a
+   * second resident picker that could disagree with it.
+   */
+  const reportResident = filterResident !== 'all'
+    ? children.find((child: any) => child.id === filterResident) || null
+    : null;
+  const [isProgressReportOpen, setIsProgressReportOpen] = useState(false);
   // Resident status — Active by default, so residents who have left do not
   // crowd the working list. Their records are kept, not deleted.
   const [residentStatusFilter, setResidentStatusFilter] = useState<'Active' | 'Discharged' | 'all'>('Active');
@@ -725,6 +737,18 @@ export function Health() {
         </div>
         {/* Creating a health record is a `create` capability on Health, which the
             specification grants to the Nurse and the Center Head only. */}
+        <div className="flex flex-wrap gap-2">
+        {can('Health', 'create') && (
+          <Button
+            variant="outline"
+            className="gap-2 font-bold"
+            disabled={!reportResident}
+            title={reportResident ? undefined : 'Choose a resident in the filter below first'}
+            onClick={() => setIsProgressReportOpen(true)}
+          >
+            <FileText className="w-4 h-4" /> Medical Quarterly Report
+          </Button>
+        )}
         {can('Health', 'create') && (
           <Button
             style={{ backgroundColor: '#FFD100', color: '#2F3E46' }}
@@ -734,7 +758,19 @@ export function Health() {
             <Plus className="w-4 h-4" /> Log Health Record
           </Button>
         )}
+        </div>
       </div>
+
+      {reportResident && (
+        <ProgressReportDialog
+          open={isProgressReportOpen}
+          onClose={() => setIsProgressReportOpen(false)}
+          residentId={reportResident.id}
+          residentName={reportResident.name}
+          program={MEDICAL_PROGRESS_PROGRAM}
+          onSubmitted={() => { void refreshData(); }}
+        />
+      )}
       {saveMessage && <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm font-semibold text-green-700">{saveMessage}</div>}
 
       {/* FILTERS */}
