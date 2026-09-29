@@ -140,6 +140,11 @@ const DOCUMENT_READ_ROLES_BY_CATEGORY = {
   // module: the six aspects can be written by six different people, and every
   // one of them needs to be able to read the document they contributed to.
   'progress report': ['houseparent', 'nurse', 'psychologist', 'educator', 'socialworker', 'centerhead', 'admin'],
+  // The discharge report the Phase Timeline files. Same set as the progress
+  // report: it is generated from the resident's own record, every one of those
+  // roles contributed to it, and withholding it would only put a "Request
+  // Access" button in front of a document they can already read the source of.
+  'resident discharge report': ['houseparent', 'nurse', 'psychologist', 'educator', 'socialworker', 'centerhead', 'admin'],
 };
 
 const DOCUMENT_READ_ROLE_KEYWORDS = [

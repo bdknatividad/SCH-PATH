@@ -11,6 +11,7 @@
     "Violation Records",
     "Intervention Records",
     "Quarterly Reports",
+    "Resident Discharge Report",
     "Other Documents"
   ],
   "defaultFolder": "Other Documents",
@@ -32,6 +33,13 @@
       "types": ["Quarterly Progress Report"],
       "categories": ["Progress Report"],
       "keywords": ["quarterly progress report"]
+    },
+    {
+      "$note": "The discharge report the Phase Timeline files when a resident is discharged. Matched on `type` alone, deliberately: a loose \"discharge\" keyword would also claim the Pre-integration Phase's \"Discharge Form\", which is a required document and belongs with the admission paperwork.",
+      "folder": "Resident Discharge Report",
+      "types": ["Resident Discharge Report"],
+      "categories": [],
+      "keywords": []
     },
     {
       "folder": "Intervention Records",

@@ -144,6 +144,71 @@ function readFileAsDataUrl(file: File): Promise<string> {
   });
 }
 
+/**
+ * Render the discharge report to a PDF blob, for filing into the child's folder.
+ *
+ * `html2canvas` and `jspdf` are imported on demand — together they outweigh
+ * everything else this module carries, and a discharge report is generated
+ * rarely, so nobody should download them to open a phase checklist.
+ *
+ * The report is drawn into a hidden same-origin iframe rather than into this
+ * document. Its stylesheet uses bare selectors — `body`, `table`, `th`, `.section`,
+ * `.header` — so mounting the markup here would restyle the entire application
+ * the moment the report was generated. An iframe gets its own document, and the
+ * styles stay inside it.
+ */
+async function renderReportPdf(html: string): Promise<Blob> {
+  const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
+    import('html2canvas'),
+    import('jspdf'),
+  ]);
+
+  // The report prints itself on load. That must not fire inside a hidden frame.
+  const printable = html.replace(/<script>window\.onload[\s\S]*?<\/script>/i, '');
+
+  const frame = document.createElement('iframe');
+  frame.setAttribute('aria-hidden', 'true');
+  frame.style.cssText = 'position:fixed;left:-10000px;top:0;width:210mm;height:297mm;border:0;';
+  document.body.appendChild(frame);
+  try {
+    const frameDoc = frame.contentDocument;
+    if (!frameDoc) throw new Error('The report frame could not be created.');
+    frameDoc.open();
+    frameDoc.write(printable);
+    frameDoc.close();
+
+    // One turn for the written document to lay out before it is measured.
+    await new Promise(resolve => window.setTimeout(resolve, 250));
+
+    const canvas = await html2canvas(frameDoc.body, {
+      scale: 2,
+      backgroundColor: '#ffffff',
+      windowWidth: frameDoc.body.scrollWidth,
+    });
+
+    const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const imageHeight = (canvas.height * pageWidth) / canvas.width;
+    const image = canvas.toDataURL('image/jpeg', 0.92);
+
+    // A4 is shorter than the report, so the whole image is drawn once per page
+    // with the overflow pushed above the top edge. A row can straddle a page
+    // break; keeping whole sections together would mean paginating the report
+    // itself rather than slicing one tall image.
+    let drawn = 0;
+    while (drawn < imageHeight) {
+      pdf.addImage(image, 'JPEG', 0, -drawn, pageWidth, imageHeight);
+      drawn += pageHeight;
+      if (drawn < imageHeight) pdf.addPage();
+    }
+
+    return pdf.output('blob');
+  } finally {
+    frame.remove();
+  }
+}
+
 interface PhaseRecord {
   id: string;
   residentId: string;
@@ -942,6 +1007,44 @@ ${admissionHistorySection}
         `Discharge Report — ${child.name} (${child.id}) — ${reportDate}`,
         user?.username || 'System'
       );
+
+      /*
+       * File the report into the child's Documents folder — its own "Resident
+       * Discharge Report" folder — so it can be reopened later instead of
+       * existing only as the print-out opened above. A failure here must not lose
+       * the report: it is already built and on its way to the printer, so this
+       * reports and carries on, the way the Admission Slip's filing does.
+       */
+      try {
+        const reportBlob = await renderReportPdf(html);
+        const reportFileName = `Resident Discharge Report - ${child.name} - ${new Date().toISOString().slice(0, 10)}.pdf`;
+        await addDocument({
+          residentId,
+          residentName: child.name,
+          title: 'Resident Discharge Report',
+          type: 'Resident Discharge Report',
+          category: 'Resident Discharge Report',
+          description: `Discharge report generated for ${child.name}.`,
+          fileName: reportFileName,
+          fileSize: reportBlob.size,
+          fileData: await readFileAsDataUrl(new File([reportBlob], reportFileName, { type: 'application/pdf' })),
+          fileType: 'application/pdf',
+          // `Submitted`, not `Approved`: the report carries the signing officers'
+          // names, and a discharge is the Center Head's to clear. Posting
+          // `Approved` here would be normalised to `Draft` by the API anyway —
+          // only a system-wide uploader or the Admission Slip is final on upload.
+          status: 'Submitted',
+          uploaderRole: user?.role || 'socialworker',
+          uploadedBy: user?.username || 'System',
+          uploadedAt: new Date().toISOString(),
+        });
+      } catch (filingError) {
+        console.error('Discharge report could not be filed:', filingError);
+        void systemDialog.failure(
+          'Report generated, but not filed',
+          describeError(filingError, 'The report opened for printing, but it could not be saved into the child\'s Documents folder.'),
+        );
+      }
       if (dischargeGenerationCancelledRef.current) return; // Cancel was clicked mid-generation
       // Only close the signing dialog once the report actually finished —
       // Cancel closes it (and resets the draft) on its own.

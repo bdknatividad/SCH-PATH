@@ -177,7 +177,7 @@ test('the backend and the frontend read the same folder definition', () => {
   assert.deepEqual(JSON.parse(backend.toString()), JSON.parse(frontend.toString()));
 });
 
-test('the folder list is the eleven canonical folders, in order', () => {
+test('the folder list is the twelve canonical folders, in order', () => {
   assert.deepEqual(DOCUMENT_FOLDERS, [
     'Admission Files',
     'TRI Records',
@@ -189,6 +189,7 @@ test('the folder list is the eleven canonical folders, in order', () => {
     'Violation Records',
     'Intervention Records',
     'Quarterly Reports',
+    'Resident Discharge Report',
     'Other Documents',
   ]);
 });
