@@ -29,6 +29,10 @@ import {
   TABLE_HEADINGS,
   PROGRAM_LINE,
   RESIDENT_NAME,
+  PROGRAM_LINE_MASK,
+  RESIDENT_NAME_MASK,
+  PROGRAM_LINE_RULE_WIDTH,
+  RESIDENT_NAME_RULE_WIDTH,
 } from '@/app/utils/progressReportLayout';
 
 export interface ProgressReportRow {
@@ -71,9 +75,9 @@ const LABEL_FONT_SIZE = 11;
 const NARRATIVE_FONT_SIZE = 10;
 const NARRATIVE_LEADING = 13;
 const CELL_PADDING = 4;
-const MIN_ROW_HEIGHT = 34;
+const MIN_ROW_HEIGHT = 30;
 const SIGNATURE_RULE_WIDTH = 190;
-const SIGNATURE_HEIGHT = 30;
+const SIGNATURE_HEIGHT = 28;
 
 const INK = rgb(0.05, 0.05, 0.05);
 const BODY_INK = rgb(0.12, 0.12, 0.12);
@@ -124,20 +128,27 @@ export async function buildProgressReportPdf(
   let page: PDFPage = pdf.getPage(0);
 
   // ── The two fields that live on the untouched part of the form ────────────
-  page.drawText(String(fields.program || ''), {
-    x: PROGRAM_LINE.x,
-    y: PROGRAM_LINE.y + 3,
-    size: 11,
-    font: bold,
-    color: INK,
-  });
-  page.drawText(String(fields.residentName || ''), {
-    x: RESIDENT_NAME.x,
-    y: RESIDENT_NAME.y,
-    size: 11,
-    font: bold,
-    color: INK,
-  });
+  // Each printed blank is a run of underscore glyphs, so it is masked first and
+  // a clean rule drawn in its place — otherwise the underscores cut through the
+  // value like a strikethrough. See `progressReportLayout`.
+  const writeOnLine = (
+    value: string,
+    line: { x: number; y: number },
+    mask: { x: number; y: number; width: number; height: number },
+    ruleWidth: number,
+  ) => {
+    page.drawRectangle({ x: mask.x, y: mask.y, width: mask.width, height: mask.height, color: COVER });
+    page.drawLine({
+      start: { x: line.x, y: line.y },
+      end: { x: line.x + ruleWidth, y: line.y },
+      thickness: 0.75,
+      color: RULE,
+    });
+    page.drawText(value, { x: line.x + 2, y: line.y + 4, size: 11, font: bold, color: INK });
+  };
+
+  writeOnLine(String(fields.program || ''), PROGRAM_LINE, PROGRAM_LINE_MASK, PROGRAM_LINE_RULE_WIDTH);
+  writeOnLine(String(fields.residentName || ''), RESIDENT_NAME, RESIDENT_NAME_MASK, RESIDENT_NAME_RULE_WIDTH);
 
   // ── Cover everything from the table down ─────────────────────────────────
   // The printed rows are one line tall and the blocks below them are fixed, so
@@ -271,13 +282,18 @@ export async function buildProgressReportPdf(
     name: string;
     title?: string;
   }) => {
-    const blockHeight = 18 + 10 + SIGNATURE_HEIGHT + 13 + (options.title ? 13 : 0) + 13;
+    // The rhythm the printed form uses, widened just enough to hold a drawn
+    // signature: 14 pt from the rule to the name and from the name to the role,
+    // and a clearly larger 30 pt between one block and the next. The first
+    // output had the block gap *smaller* than the label-to-rule gap, which read
+    // as the blocks running into each other.
+    const blockHeight = 22 + 12 + SIGNATURE_HEIGHT + 13 + (options.title ? 13 : 0) + 10;
     ensure(blockHeight);
-    y -= 18;
+    y -= 22;
 
     page.drawText(options.label, { x: REPORT_MARGIN, y, size: LABEL_FONT_SIZE, font: bold, color: INK });
 
-    const ruleY = y - 10 - SIGNATURE_HEIGHT;
+    const ruleY = y - 12 - SIGNATURE_HEIGHT;
     if (options.signature) {
       await drawSignatureImageOnPage(pdf, page, options.signature, {
         x: REPORT_MARGIN,

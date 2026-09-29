@@ -66,9 +66,29 @@ export const PROGRAM_LINE = { x: 195.05, y: 657.22, width: 222, height: 16 } as 
  * Where the resident's name goes on the `RESIDENT:` line.
  *
  * The printed label starts at the margin; its own width in Calibri 12 pt is
- * ≈57 pt, so the blank begins at ≈129.
+ * ≈57 pt, so the blank begins at ≈131.
  */
-export const RESIDENT_NAME = { x: 129, y: 605.26, width: 200, height: 16 } as const;
+export const RESIDENT_NAME = { x: 131, y: 605.26, width: 199, height: 16 } as const;
+
+/**
+ * Bands to mask before writing on a printed line.
+ *
+ * Both blanks on the untouched part of the form are runs of **underscore
+ * glyphs**, not rules. Drawing a value on top of one leaves the underscores
+ * running through the middle of the words, which reads as a strikethrough —
+ * the first real output did exactly that. So the run is covered and a clean
+ * rule is drawn in its place.
+ *
+ * The bands are kept clear of everything else on their line: the program line
+ * has nothing but underscores on it, and the resident band starts just past the
+ * printed `RESIDENT:` label so the label survives.
+ */
+export const PROGRAM_LINE_MASK = { x: 150, y: 649, width: 410, height: 15 } as const;
+export const RESIDENT_NAME_MASK = { x: 126, y: 597, width: 434, height: 15 } as const;
+
+/** How far each clean rule runs — the printed underscores' own extent. */
+export const PROGRAM_LINE_RULE_WIDTH = 225;
+export const RESIDENT_NAME_RULE_WIDTH = 199;
 
 /** The names the official form prints, which the app redraws below the table. */
 export const REPORT_CHECKED_BY_NAME = 'Francis Patricio, RSW';
