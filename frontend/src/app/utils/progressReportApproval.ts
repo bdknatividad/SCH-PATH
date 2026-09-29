@@ -16,13 +16,16 @@
  */
 
 import { generateProgressReportPdf, type ProgressReportFields } from '@/app/utils/progressReportPdf';
+import { PROGRESS_REPORT_TYPES, isProgressReportDocument } from '@/app/utils/progressReportTypes';
 
-/** The document types the shared PROGRESS REPORT form produces. */
-export const PROGRESS_REPORT_TYPES = ['Education Quarterly Report', 'Medical Quarterly Report'];
-
-export function isProgressReportDocument(document: any): boolean {
-  return PROGRESS_REPORT_TYPES.includes(String(document?.type || '').trim());
-}
+/**
+ * Which documents are these reports, and which quarter one covers, come from
+ * `utils/progressReportTypes` — a module with no PDF dependency. They are
+ * re-exported here because this is where the Documents module has always read
+ * them from, and re-exporting keeps that import working while letting the
+ * Reports module list the reports without pulling pdf-lib in to do it.
+ */
+export { PROGRESS_REPORT_TYPES, isProgressReportDocument };
 
 /**
  * Which printed line this role signs, or `null` if it owns neither.

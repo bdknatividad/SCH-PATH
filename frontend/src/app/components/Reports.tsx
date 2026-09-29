@@ -31,6 +31,7 @@ import {
   QuarterlyProgressReportsCard,
   QuarterlyProgressReportEditor,
 } from './QuarterlyProgressReport';
+import { ProgramQuarterlyReports } from './ProgramQuarterlyReports';
 
 // ── DATE HELPER ─────────────────────────────────────────────────────────────
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -1687,6 +1688,17 @@ export function Reports() {
                 its own, so the six aspects sit alongside the other facility
                 reports the same staff already come here to produce. */}
             <QuarterlyProgressReportsCard onOpenReport={setOpenQuarterlyId} />
+          </section>
+
+          <section className="space-y-3">
+            <ReportsSectionHeading
+              title="Quarterly Progress Reports Per Program"
+              description="The Education and Health quarterly reports, gathered by program so a quarter can be taken as one package."
+            />
+            {/* The other half of the loop the Quarterly Reports card above starts:
+                the programs file their reports from their own modules, and this
+                is where they are collected back up for the quarter. */}
+            <ProgramQuarterlyReports />
           </section>
 
           <section className="space-y-3">

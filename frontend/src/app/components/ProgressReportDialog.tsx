@@ -29,12 +29,30 @@ import {
   REPORT_NOTED_BY_NAME,
   REPORT_NOTED_BY_TITLE,
 } from '@/app/utils/progressReportLayout';
+import {
+  EDUCATION_PROGRESS_PROGRAM,
+  MEDICAL_PROGRESS_PROGRAM,
+  calendarQuarter,
+  reportQuarterOf,
+} from '@/app/utils/progressReportTypes';
 
 pdfjs.GlobalWorkerOptions.workerSrc = `/pdf.worker.mjs?v=${pdfjs.version}`;
 
-/** The two documents this form produces. The wording goes on the `(PROGRAM)` line. */
-export const EDUCATION_PROGRESS_PROGRAM = 'Education Quarterly Report';
-export const MEDICAL_PROGRESS_PROGRAM = 'Medical Quarterly Report';
+/**
+ * The two documents this form produces, the quarter helper and the reader that
+ * tells which quarter a filed report covers.
+ *
+ * They live in `utils/progressReportTypes` — a module with no PDF dependency —
+ * so the Reports module can list these reports without downloading react-pdf,
+ * and they are re-exported here because that is where the form's callers have
+ * always imported them from.
+ */
+export {
+  EDUCATION_PROGRESS_PROGRAM,
+  MEDICAL_PROGRESS_PROGRAM,
+  calendarQuarter,
+  reportQuarterOf,
+};
 
 /** The printed column widths, derived once from the measured boundaries. */
 const COLUMN_WIDTHS = TABLE_COLUMN_X.slice(1).map((x, i) => x - TABLE_COLUMN_X[i]);
@@ -48,26 +66,6 @@ const TABLE_CELLS: Array<[keyof ProgressReportRow, string, number]> = [
 ];
 /** How much of the printed page survives above the table — the part that is not redrawn. */
 const KEPT_HEIGHT = REPORT_PAGE.height - TABLE_TOP_Y;
-
-export function calendarQuarter(date = new Date()): string {
-  return `Q${Math.floor(date.getMonth() / 3) + 1}`;
-}
-
-/**
- * The quarter a filed report covers, read back out of the document.
- *
- * Read from `description` first and the file name second, matching how the
- * education module has always recorded it — the quarter has to survive on the
- * stored row or the once-a-quarter rule cannot see that a quarter is taken.
- */
-export function reportQuarterOf(doc: any, program: string): string | null {
-  if (String(doc?.title || '') !== program) return null;
-  const text = `${doc?.description || ''} ${doc?.fileName || ''}`;
-  const explicit = text.match(/REPORT\s+QUARTER\s*:\s*(Q[1-4])\s+REPORT\s+YEAR\s*:\s*(\d{4})/i);
-  if (explicit) return `${explicit[1].toUpperCase()} ${explicit[2]}`;
-  const fromFile = String(doc?.fileName || '').match(/Progress_Report_(Q[1-4])_(\d{4})_/i);
-  return fromFile ? `${fromFile[1].toUpperCase()} ${fromFile[2]}` : null;
-}
 
 const emptyRow = (): ProgressReportRow => ({
   areaOfConcern: '',
