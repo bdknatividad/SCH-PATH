@@ -53,8 +53,16 @@ const emptyRow = (): ProgressReportRow => ({
 interface ProgressReportDialogProps {
   open: boolean;
   onClose: () => void;
-  residentId: string;
-  residentName: string;
+  /**
+   * The resident the report is for. Optional on purpose: a module that has no
+   * resident selected yet passes `residents` instead and the dialog asks, so the
+   * form is never reachable-but-unusable behind a disabled button whose only
+   * explanation is a tooltip.
+   */
+  residentId?: string;
+  residentName?: string;
+  /** Offered as a picker when `residentId` is not given. */
+  residents?: Array<{ id: string; name: string }>;
   /** `EDUCATION_PROGRESS_PROGRAM` or `MEDICAL_PROGRESS_PROGRAM`. */
   program: string;
   /** Called after the report is filed, so the module can refresh its lists. */
@@ -85,12 +93,20 @@ export function ProgressReportDialog({
   onClose,
   residentId,
   residentName,
+  residents,
   program,
   onSubmitted,
 }: ProgressReportDialogProps) {
   const { documents, addDocument } = useData();
   const { user } = useAuth();
   const dialog = useSystemDialog();
+
+  // Chosen inside the dialog when the caller had nobody selected.
+  const [pickedId, setPickedId] = useState('');
+  const effectiveResidentId = residentId || pickedId;
+  const effectiveResidentName = residentName
+    || residents?.find((resident) => resident.id === effectiveResidentId)?.name
+    || '';
 
   const [rows, setRows] = useState<ProgressReportRow[]>([emptyRow()]);
   const [narrative, setNarrative] = useState('');
@@ -111,10 +127,10 @@ export function ProgressReportDialog({
    */
   const existingForQuarter = useMemo(
     () => documents.find((doc: any) =>
-      String(doc.residentId) === String(residentId) &&
+      String(doc.residentId) === String(effectiveResidentId) &&
       reportQuarterOf(doc, program) === quarterKey
     ),
-    [documents, residentId, program, quarterKey],
+    [documents, effectiveResidentId, program, quarterKey],
   );
   const quarterIsTaken = Boolean(existingForQuarter) && existingForQuarter?.status !== 'Rejected';
 
@@ -126,6 +142,7 @@ export function ProgressReportDialog({
     setSignature('');
     setError('');
     setSubmitting(false);
+    setPickedId('');
   }, [open, residentId]);
 
   const setRow = (index: number, key: keyof ProgressReportRow, value: string) => {
@@ -139,8 +156,12 @@ export function ProgressReportDialog({
   const handleSubmit = async () => {
     setError('');
 
+    if (!effectiveResidentId) {
+      setError('Choose the resident this report is for.');
+      return;
+    }
     if (quarterIsTaken) {
-      setError(`A ${program} for ${quarterKey} is already on file for ${residentName}. Only a rejected report can be replaced.`);
+      setError(`A ${program} for ${quarterKey} is already on file for ${effectiveResidentName}. Only a rejected report can be replaced.`);
       return;
     }
     const filled = rows.filter(row =>
@@ -168,8 +189,8 @@ export function ProgressReportDialog({
         program,
         quarter,
         year,
-        residentName,
-        residentId,
+        residentName: effectiveResidentName,
+        residentId: effectiveResidentId,
         rows: filled,
         narrative: narrative.trim(),
         preparedByName,
@@ -180,11 +201,11 @@ export function ProgressReportDialog({
       };
 
       const { dataUrl, size } = await generateProgressReportPdf(fields);
-      const fileName = `Progress_Report_${quarter}_${year}_${residentName.replace(/\s+/g, '_')}.pdf`;
+      const fileName = `Progress_Report_${quarter}_${year}_${effectiveResidentName.replace(/\s+/g, '_')}.pdf`;
 
       await addDocument({
-        residentId,
-        residentName,
+        residentId: effectiveResidentId,
+        residentName: effectiveResidentName,
         title: program,
         type: program,
         // The category decides the folder *and* who may read it — see
@@ -192,7 +213,7 @@ export function ProgressReportDialog({
         // the reviewer the alert is addressed to is refused the file.
         category: program,
         description: [
-          `${program} for ${residentName}.`,
+          `${program} for ${effectiveResidentName}.`,
           `REPORT QUARTER: ${quarter}`,
           `REPORT YEAR: ${year}`,
         ].join(' '),
@@ -228,15 +249,31 @@ export function ProgressReportDialog({
         <DialogHeader className="shrink-0 border-b px-5 py-3">
           <DialogTitle className="text-[#2F3E46]">{program}</DialogTitle>
           <DialogDescription>
-            {residentName} · {quarterKey} — the program line and your name are filled in automatically.
+            {effectiveResidentName || 'No resident chosen'} · {quarterKey} — the program line and your name are filled in automatically.
           </DialogDescription>
         </DialogHeader>
 
         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-4">
+          {!residentId && (
+            <div className="space-y-1">
+              <Label className="text-[#2F3E46]">Resident</Label>
+              <select
+                value={pickedId}
+                onChange={(event) => setPickedId(event.target.value)}
+                className="h-9 w-full rounded-md border border-gray-200 bg-white px-2 text-sm"
+              >
+                <option value="">Select a resident…</option>
+                {(residents || []).map((resident) => (
+                  <option key={resident.id} value={resident.id}>{resident.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
           {quarterIsTaken && (
             <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-              A {program} for {quarterKey} is already on file for {residentName}. It can only be replaced if a
-              reviewer rejects it.
+              A {program} for {quarterKey} is already on file for {effectiveResidentName}. It can only be
+              replaced if a reviewer rejects it.
             </p>
           )}
 

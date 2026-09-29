@@ -742,8 +742,6 @@ export function Health() {
           <Button
             variant="outline"
             className="gap-2 font-bold"
-            disabled={!reportResident}
-            title={reportResident ? undefined : 'Choose a resident in the filter below first'}
             onClick={() => setIsProgressReportOpen(true)}
           >
             <FileText className="w-4 h-4" /> Medical Quarterly Report
@@ -761,16 +759,18 @@ export function Health() {
         </div>
       </div>
 
-      {reportResident && (
-        <ProgressReportDialog
-          open={isProgressReportOpen}
-          onClose={() => setIsProgressReportOpen(false)}
-          residentId={reportResident.id}
-          residentName={reportResident.name}
-          program={MEDICAL_PROGRESS_PROGRAM}
-          onSubmitted={() => { void refreshData(); }}
-        />
-      )}
+      <ProgressReportDialog
+        open={isProgressReportOpen}
+        onClose={() => setIsProgressReportOpen(false)}
+        /* Pre-filled when a resident is already filtered, otherwise the dialog
+           asks — the button used to be disabled instead, which left a nurse with
+           no way in and no explanation beyond a tooltip. */
+        residentId={reportResident?.id}
+        residentName={reportResident?.name}
+        residents={statusChildren.map((child: any) => ({ id: child.id, name: child.name }))}
+        program={MEDICAL_PROGRESS_PROGRAM}
+        onSubmitted={() => { void refreshData(); }}
+      />
       {saveMessage && <div className="rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm font-semibold text-green-700">{saveMessage}</div>}
 
       {/* FILTERS */}
