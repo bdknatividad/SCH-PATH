@@ -14,6 +14,7 @@ import { useAuth } from '../state/AuthContext';
 import { useData } from '../state/DataContext';
 import { formatShortDate, formatShortDateTime } from '@/utils/dateFormatter';
 import { admissionPeriodsFor } from '@/utils/admissionPeriods';
+import { renderReportPdf } from '@/app/utils/reportPdf';
 
 const CASE_PHASES = [
   'Admission Phase',
@@ -142,71 +143,6 @@ function readFileAsDataUrl(file: File): Promise<string> {
     reader.onabort = () => reject(new Error(`Reading ${file.name} was cancelled.`));
     reader.readAsDataURL(file);
   });
-}
-
-/**
- * Render the discharge report to a PDF blob, for filing into the child's folder.
- *
- * `html2canvas` and `jspdf` are imported on demand — together they outweigh
- * everything else this module carries, and a discharge report is generated
- * rarely, so nobody should download them to open a phase checklist.
- *
- * The report is drawn into a hidden same-origin iframe rather than into this
- * document. Its stylesheet uses bare selectors — `body`, `table`, `th`, `.section`,
- * `.header` — so mounting the markup here would restyle the entire application
- * the moment the report was generated. An iframe gets its own document, and the
- * styles stay inside it.
- */
-async function renderReportPdf(html: string): Promise<Blob> {
-  const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
-    import('html2canvas'),
-    import('jspdf'),
-  ]);
-
-  // The report prints itself on load. That must not fire inside a hidden frame.
-  const printable = html.replace(/<script>window\.onload[\s\S]*?<\/script>/i, '');
-
-  const frame = document.createElement('iframe');
-  frame.setAttribute('aria-hidden', 'true');
-  frame.style.cssText = 'position:fixed;left:-10000px;top:0;width:210mm;height:297mm;border:0;';
-  document.body.appendChild(frame);
-  try {
-    const frameDoc = frame.contentDocument;
-    if (!frameDoc) throw new Error('The report frame could not be created.');
-    frameDoc.open();
-    frameDoc.write(printable);
-    frameDoc.close();
-
-    // One turn for the written document to lay out before it is measured.
-    await new Promise(resolve => window.setTimeout(resolve, 250));
-
-    const canvas = await html2canvas(frameDoc.body, {
-      scale: 2,
-      backgroundColor: '#ffffff',
-      windowWidth: frameDoc.body.scrollWidth,
-    });
-
-    const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
-    const pageWidth = pdf.internal.pageSize.getWidth();
-    const pageHeight = pdf.internal.pageSize.getHeight();
-    const imageHeight = (canvas.height * pageWidth) / canvas.width;
-    const image = canvas.toDataURL('image/jpeg', 0.92);
-
-    // A4 is shorter than the report, so the whole image is drawn once per page
-    // with the overflow pushed above the top edge. A row can straddle a page
-    // break; keeping whole sections together would mean paginating the report
-    // itself rather than slicing one tall image.
-    let drawn = 0;
-    while (drawn < imageHeight) {
-      pdf.addImage(image, 'JPEG', 0, -drawn, pageWidth, imageHeight);
-      drawn += pageHeight;
-      if (drawn < imageHeight) pdf.addPage();
-    }
-
-    return pdf.output('blob');
-  } finally {
-    frame.remove();
-  }
 }
 
 interface PhaseRecord {

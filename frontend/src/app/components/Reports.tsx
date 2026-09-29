@@ -21,6 +21,8 @@ import { Textarea } from '@/app/components/ui/textarea';
 import { SignaturePadModal } from '@/app/components/SignaturePad';
 import { useSystemDialog } from '@/app/components/SystemDialog';
 import { useData } from '../state/DataContext';
+import { useAuth } from '../state/AuthContext';
+import { renderReportPdf, blobToDataUrl } from '@/app/utils/reportPdf';
 import { describeError, request } from '@/services/api';
 import { useNavigate } from 'react-router-dom';
 import { AnecdotalReports, downloadAnecdotalPdf } from './AnecdotalReports';
@@ -539,15 +541,16 @@ async function generateResidentReport(
   children: any[],
   selectedIds: string[],
   allAssessments: any[],
-  live: { activities?: any[]; violations?: any[]; documents?: any[] } = {},
+  live: { activities?: any[]; violations?: any[]; documents?: any[]; phaseProgress?: any[] } = {},
   target?: Window | null
-) {
+): Promise<Array<{ id: string; name: string; html: string }>> {
   const selected = children.filter(c => selectedIds.includes(c.id));
-  if (selected.length === 0) return;
+  if (selected.length === 0) return [];
 
   const activities = Array.isArray(live.activities) ? live.activities : [];
   const violations = Array.isArray(live.violations) ? live.violations : [];
   const documents = Array.isArray(live.documents) ? live.documents : [];
+  const phaseProgress = Array.isArray(live.phaseProgress) ? live.phaseProgress : [];
 
   // The discharge plan is per resident and lives behind its own endpoint. A
   // caller who is not assigned to the resident gets a 403, which is not an error
@@ -625,8 +628,41 @@ async function generateResidentReport(
       return `<table>
         <thead><tr><th>Admission</th><th>Date Admitted</th><th>Date Ended</th><th>Status</th></tr></thead>
         <tbody>${periods.map(p =>
-          `<tr><td>Admission ${p.admissionNumber}</td><td>${p.startDate ? esc(formatDate(p.startDate)) : '—'}</td><td>${p.endDate ? esc(formatDate(p.endDate)) : '—'}</td><td>${p.isCurrent ? 'Current' : 'Closed'}</td></tr>`
+          `<tr><td>Admission ${esc(p.admissionNumber)}</td><td>${p.startDate ? esc(formatDate(p.startDate)) : '—'}</td><td>${p.endDate ? esc(formatDate(p.endDate)) : '—'}</td><td>${p.isCurrent ? 'Current' : 'Closed'}</td></tr>`
         ).join('')}</tbody>
+      </table>`;
+    })());
+
+    /*
+     * The phase timeline, in the order the resident walked it. One row per
+     * `phaseProgress` record, and a returning resident has the earlier stay's
+     * rows in the same list — which is why the dates are printed rather than a
+     * bare list of phase names: an old row reads as old instead of as work done
+     * on this admission. The same rows drive the Phase Timeline screen's
+     * checkboxes, so the two cannot disagree about which phase a resident
+     * reached.
+     */
+    const phases = phaseProgress
+      .filter((p: any) => p.residentId === child.id)
+      .sort((a: any, b: any) => String(a.enteredAt || '').localeCompare(String(b.enteredAt || '')));
+
+    const phaseTimeline = section('Phase Timeline & History', (() => {
+      if (phases.length === 0) return '<p class="empty">No phase records on file.</p>';
+      return `<table>
+        <thead><tr><th>Phase</th><th>Entered</th><th>Completed</th><th>Tasks</th><th>Status</th><th>Notes</th></tr></thead>
+        <tbody>${phases.map((p: any) => {
+          const completed = Array.isArray(p.tasksCompleted) ? p.tasksCompleted.length : 0;
+          const required = Array.isArray(p.tasksRequired) ? p.tasksRequired.length : 0;
+          const status = p.isCurrent ? 'Current' : (p.completedAt ? 'Completed' : 'Past');
+          return `<tr>
+            <td>${esc(p.phaseName || '—')}</td>
+            <td>${p.enteredAt ? esc(formatDate(String(p.enteredAt).slice(0, 10))) : '—'}</td>
+            <td>${p.completedAt ? esc(formatDate(String(p.completedAt).slice(0, 10))) : '—'}</td>
+            <td>${required ? `${completed} / ${required}` : '—'}</td>
+            <td>${status}</td>
+            <td>${esc(p.notes || '—')}</td>
+          </tr>`;
+        }).join('')}</tbody>
       </table>`;
     })());
 
@@ -746,6 +782,7 @@ async function generateResidentReport(
         ${personalInfo}
         ${caseProgress}
         ${admissionHistory}
+        ${phaseTimeline}
         ${dischargeSection}
         ${medicalInfo}
         ${activitySection}
@@ -755,7 +792,51 @@ async function generateResidentReport(
       </div>`;
   };
 
-  const html = `<!DOCTYPE html>
+  /*
+   * The on-screen toolbar and its scripts, shown only in the popup window. The
+   * copy that gets filed as a PDF omits it: `html2canvas` does not apply
+   * `@media print`, so a toolbar hidden only for printing would be captured
+   * into the filed report.
+   */
+  const toolbar = `
+  <div class="no-print" style="background:#2F3E46;color:white;padding:12px 20px;border-radius:8px;margin-bottom:24px;display:flex;justify-content:space-between;align-items:center;">
+    <span style="font-weight:bold;">Resident Report — ${selected.length} resident(s)</span>
+    <div style="display:flex;gap:10px;">
+      <button onclick="window.print()" style="background:#FFD100;color:#2F3E46;border:none;padding:8px 20px;border-radius:6px;font-weight:bold;cursor:pointer;font-size:13px;">Print</button>
+      <button id="savePdfBtn" onclick="savePDF()" style="background:white;color:#2F3E46;border:none;padding:8px 20px;border-radius:6px;font-weight:bold;cursor:pointer;font-size:13px;">Save as PDF</button>
+      <button onclick="window.close()" style="background:rgba(255,255,255,0.15);color:white;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:13px;">Close</button>
+    </div>
+  </div>
+  <script>
+    function savePDF() {
+      const btn = document.getElementById('savePdfBtn');
+      btn.textContent = 'Generating...';
+      btn.disabled = true;
+      const toolbar = document.querySelector('.no-print');
+      toolbar.style.display = 'none';
+      const filename = 'Resident-Report-${dateStr.replace(/,/g,'').replace(/ /g,'-')}.pdf';
+      const opt = {
+        margin: [10, 10, 10, 10],
+        filename: filename,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true, logging: false },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+        pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
+      };
+      html2pdf().set(opt).from(document.body).save().then(() => {
+        toolbar.style.display = 'flex';
+        btn.textContent = 'Save as PDF';
+        btn.disabled = false;
+      });
+    }
+  </script>`;
+
+  /**
+   * The printable document. `blocksHtml` is the per-resident markup and
+   * `chrome` is the toolbar above plus the CDN script it needs — omitted for
+   * the filed copy, which is rendered headlessly.
+   */
+  const buildDocument = (blocksHtml: string, residentCount: number, chrome: boolean) => `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -790,48 +871,18 @@ async function generateResidentReport(
       .no-print { display: none; }
     }
   </style>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+  ${chrome ? '<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>' : ''}
 </head>
 <body>
-  <div class="no-print" style="background:#2F3E46;color:white;padding:12px 20px;border-radius:8px;margin-bottom:24px;display:flex;justify-content:space-between;align-items:center;">
-    <span style="font-weight:bold;">Resident Report — ${selected.length} resident(s)</span>
-    <div style="display:flex;gap:10px;">
-      <button onclick="window.print()" style="background:#FFD100;color:#2F3E46;border:none;padding:8px 20px;border-radius:6px;font-weight:bold;cursor:pointer;font-size:13px;">Print</button>
-      <button id="savePdfBtn" onclick="savePDF()" style="background:white;color:#2F3E46;border:none;padding:8px 20px;border-radius:6px;font-weight:bold;cursor:pointer;font-size:13px;">Save as PDF</button>
-      <button onclick="window.close()" style="background:rgba(255,255,255,0.15);color:white;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;font-size:13px;">Close</button>
-    </div>
-  </div>
-  <script>
-    function savePDF() {
-      const btn = document.getElementById('savePdfBtn');
-      btn.textContent = 'Generating...';
-      btn.disabled = true;
-      const toolbar = document.querySelector('.no-print');
-      toolbar.style.display = 'none';
-      const filename = 'Resident-Report-${dateStr.replace(/,/g,'').replace(/ /g,'-')}.pdf';
-      const opt = {
-        margin: [10, 10, 10, 10],
-        filename: filename,
-        image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true, logging: false },
-        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
-        pagebreak: { mode: ['avoid-all', 'css', 'legacy'] }
-      };
-      html2pdf().set(opt).from(document.body).save().then(() => {
-        toolbar.style.display = 'flex';
-        btn.textContent = 'Save as PDF';
-        btn.disabled = false;
-      });
-    }
-  </script>
+${chrome ? toolbar : ''}
 
   <div class="header">
     <div class="agency">Republic of the Philippines · Province of Laguna · City Government of Calamba<br>City Social Services Department — Second Chance Home</div>
     <h1>Resident Comprehensive Report</h1>
-    <div class="date">Generated: ${dateStr} &nbsp;|&nbsp; ${selected.length} Resident(s)</div>
+    <div class="date">Generated: ${dateStr} &nbsp;|&nbsp; ${residentCount} Resident(s)</div>
   </div>
 
-  ${selected.map((child) => renderChild(child, plans[child.id])).join('')}
+  ${blocksHtml}
 
   <div class="footer">
     Second Chance Home — City Social Services Department, Calamba, Laguna<br>
@@ -840,14 +891,26 @@ async function generateResidentReport(
 </body>
 </html>`;
 
+  // One block per selected resident, built once — the same markup feeds the
+  // popup and the filed copy, so the two cannot show different figures.
+  const blocks = selected.map((child) => {
+    const markup = renderChild(child, plans[child.id]);
+    return { id: child.id as string, name: String(child.name ?? child.id), markup };
+  });
+
   // The window is opened by the caller, synchronously inside the click handler.
   // Opening it here would be after the discharge-plan `await`, and a browser
   // treats `window.open` outside a user gesture as a popup and blocks it.
   if (target && !target.closed) {
     target.document.open();
-    target.document.write(html);
+    target.document.write(buildDocument(blocks.map(b => b.markup).join(''), selected.length, true));
     target.document.close();
   }
+
+  // One self-contained document per resident, for filing into that resident's
+  // own Documents folder. The wrapper is rebuilt with a count of 1 and without
+  // the toolbar, so the filed copy is the resident's report alone.
+  return blocks.map(b => ({ id: b.id, name: b.name, html: buildDocument(b.markup, 1, false) }));
 }
 
 // ── REPORT FORM ROW ─────────────────────────────────────────────────────────
@@ -1434,7 +1497,8 @@ function ReportFormViewer({ form, onClose }: { form: ReportForm; onClose: () => 
 
 // ── MAIN COMPONENT ──────────────────────────────────────────────────────────
 export function Reports() {
-  const { children, assessments, reports, refreshData, activities, violations, documents } = useData();
+  const { children, assessments, reports, refreshData, activities, violations, documents, phaseProgress, addDocument } = useData();
+  const { user } = useAuth();
   const dialog = useSystemDialog();
   // Deep-linked from the "Anecdotal Report needs review" notification:
   // /reports?tab=review&anecdotalId=ANR00x opens the Needs Review tab with that
@@ -1480,6 +1544,64 @@ export function Reports() {
 
   const [generating, setGenerating] = useState(false);
 
+  /**
+   * File each generated report into its own resident's Documents folder, one
+   * PDF per resident.
+   *
+   * Generating the report used to leave nothing behind — it existed only as the
+   * print-out in the popup, so a report that had been produced could not be
+   * reopened from the child's record. The filed copy is rendered headlessly from
+   * the same markup the popup got, so the two cannot show different figures.
+   *
+   * Filed at `Submitted`, not `Approved`: the API normalises a client-supplied
+   * `Approved` to `Draft` anyway (only a system-wide uploader or the Admission
+   * Slip is final on upload), and a filed report is still the Center Head's to
+   * clear. Rendered one at a time — a snapshot of a full report is heavy, and
+   * `Promise.all` over a "select all" of ten residents would run ten at once.
+   *
+   * A failure is collected rather than thrown: the report is already generated
+   * and open for printing, so a filing problem must not read as a failed report.
+   */
+  const fileResidentReports = async (generated: Array<{ id: string; name: string; html: string }>) => {
+    const failures: string[] = [];
+    const filedOn = new Date().toISOString().slice(0, 10);
+
+    for (const report of generated) {
+      try {
+        const blob = await renderReportPdf(report.html);
+        const fileName = `Resident Comprehensive Report - ${report.name} - ${filedOn}.pdf`;
+        await addDocument({
+          residentId: report.id,
+          residentName: report.name,
+          title: 'Resident Comprehensive Report',
+          type: 'Resident Comprehensive Report',
+          category: 'Resident Comprehensive Report',
+          description: `Comprehensive report generated for ${report.name}.`,
+          fileName,
+          fileSize: blob.size,
+          fileData: await blobToDataUrl(blob),
+          fileType: 'application/pdf',
+          status: 'Submitted',
+          uploaderRole: user?.role || 'socialworker',
+          uploadedBy: user?.username || 'System',
+          uploadedAt: new Date().toISOString(),
+        });
+      } catch (filingError) {
+        console.error('Resident report could not be filed:', report.name, filingError);
+        failures.push(report.name);
+      }
+    }
+
+    if (failures.length > 0) {
+      await dialog.failure(
+        'Report generated, but not filed',
+        failures.length === generated.length
+          ? 'The report opened for printing, but it could not be saved into the residents\' Documents folders.'
+          : `The report opened for printing, but it could not be saved for: ${failures.join(', ')}.`,
+      );
+    }
+  };
+
   const handleGenerateReport = async () => {
     // Opened synchronously, before any await, so the browser counts it as part
     // of the click rather than as a popup.
@@ -1495,7 +1617,14 @@ export function Reports() {
 
     setGenerating(true);
     try {
-      await generateResidentReport(children, selectedResidents, assessments, { activities, violations, documents }, win);
+      const generated = await generateResidentReport(
+        children,
+        selectedResidents,
+        assessments,
+        { activities, violations, documents, phaseProgress },
+        win,
+      );
+      await fileResidentReports(generated);
     } catch (error: any) {
       // The popup shows the same sentence the app would; it used to print the
       // exception's own message, which is a raw failure, not a description.

@@ -145,6 +145,10 @@ const DOCUMENT_READ_ROLES_BY_CATEGORY = {
   // roles contributed to it, and withholding it would only put a "Request
   // Access" button in front of a document they can already read the source of.
   'resident discharge report': ['houseparent', 'nurse', 'psychologist', 'educator', 'socialworker', 'centerhead', 'admin'],
+  // The Resident Comprehensive Report the Reports module files, one per
+  // resident. Same set again: it is assembled entirely from the resident's own
+  // record, and every one of these roles contributed a section of it.
+  'resident comprehensive report': ['houseparent', 'nurse', 'psychologist', 'educator', 'socialworker', 'centerhead', 'admin'],
 };
 
 const DOCUMENT_READ_ROLE_KEYWORDS = [

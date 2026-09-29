@@ -11,6 +11,7 @@
     "Violation Records",
     "Intervention Records",
     "Quarterly Reports",
+    "Resident Comprehensive Report",
     "Resident Discharge Report",
     "Other Documents"
   ],
@@ -33,6 +34,13 @@
       "types": ["Quarterly Progress Report"],
       "categories": ["Progress Report"],
       "keywords": ["quarterly progress report"]
+    },
+    {
+      "$note": "The Resident Comprehensive Report the Reports module files, one per resident. Matched on `type` alone, deliberately: the title carries the word \"report\", and the loose keyword pass would otherwise decide where it lands.",
+      "folder": "Resident Comprehensive Report",
+      "types": ["Resident Comprehensive Report"],
+      "categories": [],
+      "keywords": []
     },
     {
       "$note": "The discharge report the Phase Timeline files when a resident is discharged. Matched on `type` alone, deliberately: a loose \"discharge\" keyword would also claim the Pre-integration Phase's \"Discharge Form\", which is a required document and belongs with the admission paperwork.",

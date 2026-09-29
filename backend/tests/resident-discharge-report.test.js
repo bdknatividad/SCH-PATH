@@ -49,9 +49,13 @@ test('the report reads activities from the data layer, not from localStorage', (
 });
 
 test('the report takes its live data as arguments rather than reaching for globals', () => {
-  assert.match(body, /live: \{ activities\?: any\[\]; violations\?: any\[\]; documents\?: any\[\] \}/);
+  assert.match(body, /live: \{ activities\?: any\[\]; violations\?: any\[\]; documents\?: any\[\]; phaseProgress\?: any\[\] \}/);
   assert.match(body, /const violations = Array\.isArray\(live\.violations\)/);
   assert.match(body, /const documents = Array\.isArray\(live\.documents\)/);
+  // The phase timeline section reads `phaseProgress`, which the page did not
+  // pass in before — the section would have printed "No phase records" for
+  // every resident while the table held their phases.
+  assert.match(body, /const phaseProgress = Array\.isArray\(live\.phaseProgress\)/);
 });
 
 test('the behavioural section reads the violations table, not the legacy log column', () => {
@@ -156,8 +160,17 @@ test('every interpolated value is escaped before it reaches the report HTML', ()
   const NOT_RESIDENT_TEXT = [
     /^content$/, /^value \|\| '—'$/, /^age$/, /^dateStr$/, /^dateStr\.replace\(/,
     /^selected\.length$/, /^selected\.map\(/,
-    /^personalInfo$/, /^caseProgress$/, /^dischargeSection$/, /^medicalInfo$/,
+    /^personalInfo$/, /^caseProgress$/, /^admissionHistory$/, /^phaseTimeline$/,
+    /^dischargeSection$/, /^medicalInfo$/,
     /^activitySection$/, /^behaviorSection$/, /^assessmentSection$/, /^reintegration$/,
+    // A status word chosen from two fixed strings by a stored boolean.
+    /^p\.isCurrent \? 'Current' : 'Closed'$/,
+    // The document wrapper, which is built once and takes the per-resident
+    // markup (already escaped) as a string rather than interpolating fields.
+    /^residentCount$/, /^blocksHtml$/, /^blocks\.map\(/, /^chrome \?/,
+    // Phase-timeline cells that are not stored text: two array lengths and a
+    // status word derived from `isCurrent` / `completedAt`.
+    /^completed$/, /^required$/, /^status$/,
   ];
 
   // The four places where a stored field is interpolated without `esc()` on
@@ -194,7 +207,10 @@ test('the report window is opened before the awaits, not after them', () => {
   // generator is allowed to explain the rule in a comment.
   assert.doesNotMatch(body, /\bwindow\s*\.\s*open\s*\(/, 'the generator must not open the window itself');
   assert.match(source, /const win = window\.open\('', '_blank'\);/);
-  assert.match(source, /await generateResidentReport\(children, selectedResidents, assessments, \{ activities, violations, documents \}, win\)/);
+  assert.match(
+    source,
+    /await generateResidentReport\(\s*children,\s*selectedResidents,\s*assessments,\s*\{ activities, violations, documents, phaseProgress \},\s*win,?\s*\)/
+  );
 });
 
 test('the generator is awaited by its click handler so failures are caught', () => {
@@ -203,5 +219,5 @@ test('the generator is awaited by its click handler so failures are caught', () 
 });
 
 test('the Reports page passes the live collections it now needs', () => {
-  assert.match(source, /const \{ children, assessments, reports, refreshData, activities, violations, documents \} = useData\(\);/);
+  assert.match(source, /const \{ children, assessments, reports, refreshData, activities, violations, documents, phaseProgress, addDocument \} = useData\(\);/);
 });
