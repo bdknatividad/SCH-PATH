@@ -9,7 +9,52 @@ const router = express.Router();
 const documentController = require('../controllers/documentController');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { authorize, authorizeNonHouseparent } = require('../middleware/auth');
-const { requirePermission, requireSubModule } = require('../middleware/rbac');
+const { requirePermission, requireSubModule, snapshotFor } = require('../middleware/rbac');
+const { hasModuleAccess, hasPermission } = require('../config/rbac');
+
+/**
+ * The module each generated quarterly Progress Report is filed from.
+ *
+ * Only the two generators write these types, so the map is what tells this
+ * route which capability to ask for. Kept beside the route rather than in
+ * `constants.js` because it exists for this gate and nothing else.
+ */
+const PROGRESS_REPORT_PROGRAM_BY_TYPE = {
+  'Education Quarterly Report': 'Education',
+  'Medical Quarterly Report': 'Health',
+};
+
+/**
+ * Filing a document needs `Documents: create` — except for the two generated
+ * quarterly Progress Reports, which are filed from the program's own module.
+ *
+ * The Educator's specification deliberately withholds document management, and
+ * the gate below is what enforces it. But the Educator is also the one who fills
+ * in the **Education Quarterly Report**, from a button inside the Education
+ * module, where they do hold `create` — so gating that write on
+ * `Documents: create` made the whole form a dead end: the button is there, the
+ * form fills in, and filing it answers *"Access denied. Documents: create
+ * permission is required."* The Nurse was never affected because Health's
+ * specification happens to grant `Documents: create` as well; Education's does
+ * not, and that asymmetry is the bug.
+ *
+ * So a progress report is checked against the **program's** capability instead,
+ * which also keeps the two apart: an Educator cannot file the Medical report and
+ * a Nurse cannot file the Education one, because neither holds the other's
+ * module. Everything else — and every other caller — still goes through
+ * `Documents: create`, unchanged: a role that holds neither program module falls
+ * back to it, so nothing that used to work stops working.
+ */
+function requireDocumentCreate(req, res, next) {
+  const program = PROGRESS_REPORT_PROGRAM_BY_TYPE[String(req.body?.type || '').trim()];
+  if (program) {
+    const snapshot = snapshotFor(req);
+    if (hasModuleAccess(snapshot, program) && hasPermission(snapshot, program, 'create')) {
+      return next();
+    }
+  }
+  return requirePermission('Documents', 'create')(req, res, next);
+}
 
 /**
  * GET /api/documents
@@ -64,8 +109,11 @@ router.get('/:id', asyncHandler(documentController.getById));
  * non-Houseparent. Without this the Educator — whose specification says it
  * cannot manage documents — could POST an upload even though every button that
  * would do so is hidden in the interface.
+ *
+ * `requireDocumentCreate` is that same check with one exemption, for the two
+ * generated quarterly Progress Reports — see there for why.
  */
-router.post('/', authorizeNonHouseparent, requirePermission('Documents', 'create'), asyncHandler(documentController.create));
+router.post('/', authorizeNonHouseparent, requireDocumentCreate, asyncHandler(documentController.create));
 
 /**
  * PUT /api/documents/:id
