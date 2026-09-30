@@ -21,17 +21,21 @@ const canReadIncidentForms = requireModule('Violations');
 
 /**
  * POST /api/incident-reports
- * Social Worker saves a completed digital Incident Report against a violation.
- * The Psychological Staff is deliberately absent: the specification forbids creating
- * an incident.
+ * Save a completed digital Incident Report against a violation.
+ *
+ * The four roles the specification names as filers: the Houseparent (who files
+ * most of them), the Social Worker, the Center Head, and the Psychological
+ * Support Staff. The Psychological Staff used to be absent here, on the reading
+ * that the role could not create an incident — the role files the form and signs
+ * it, so it is authorized now.
  */
-router.post('/', authorize('socialworker', 'centerhead', 'houseparent'), asyncHandler(incidentReportController.create));
+router.post('/', authorize('socialworker', 'centerhead', 'houseparent', 'psychologist'), asyncHandler(incidentReportController.create));
 
 /**
  * GET /api/incident-reports/violation/:violationId
  * Fetch the incident report tied to a specific violation.
  */
-router.post('/:id/resubmit', authorize('socialworker', 'centerhead', 'houseparent', 'admin'), asyncHandler(incidentReportController.resubmit));
+router.post('/:id/resubmit', authorize('socialworker', 'centerhead', 'houseparent', 'admin', 'psychologist'), asyncHandler(incidentReportController.resubmit));
 
 router.get('/violation/:violationId', canReadIncidentForms, asyncHandler(incidentReportController.getByViolationId));
 
@@ -43,18 +47,21 @@ router.get('/resident/:residentId', canReadIncidentForms, asyncHandler(incidentR
 
 /**
  * POST /api/incident-reports/:id/verify
- * Verify the report. Form 08 takes TWO verifications — the Psychological Staff
- * signs the clinical side and the Social Worker counter-signs — so both roles
- * reach this endpoint and each signature fills its own slot. `status` only
- * becomes 'Verified' once both are present.
+ * Sign Form 08. It carries THREE signatures — the Social Worker signs "Checked
+ * by", the Psychological Support Staff signs the clinical line, and the Center
+ * Head signs "Noted by" last — so all three roles reach this endpoint and each
+ * call fills exactly one line with the drawn signature it sends.
+ *
+ * The route is the same for all three because the side is derived from the
+ * caller's role, never requested: a role can only fill its own line, so no
+ * account can sign on someone else's behalf. The Center Head is refused until
+ * both Stage-1 lines are in, and `status` only becomes 'Verified' — and the
+ * linked document only 'Approved' — once all three are present.
  *
  * The capability, not the role name, is the gate — so a future role granted
  * `verify` on Violations inherits the endpoint with no route change. The
- * Houseparent holds `view` alone, which is what keeps them out of verification
- * on the API as well as in the menu.
- *
- * `centerhead`/`admin` are full-access and may sign either side, but they must
- * say which (`verificationSide`), so one account cannot complete the form alone.
+ * Houseparent holds `view` alone, which is what keeps them out of signing on the
+ * API as well as in the menu.
  */
 router.post(
   '/:id/verify',

@@ -679,6 +679,20 @@ function isSignableProgressReport(doc: DocumentWithApproval, role: string): bool
   return !fields[field];
 }
 
+/**
+ * Is this document a Form 08?
+ *
+ * An Incident Report is approved by its signatures — the Social Worker, the
+ * Psychological Support Staff and the Center Head each sign their own printed
+ * line from the Form 08 card in the Intervention Tracker — and the API refuses to
+ * approve one from the document workflow. Matching on the title is the same test
+ * the backend and the tracker use, so the three cannot disagree about which
+ * documents this applies to.
+ */
+function isIncidentReportDocument(doc: DocumentWithApproval | null | undefined): boolean {
+  return String(doc?.title || '').trim().toLowerCase() === 'incident report';
+}
+
 export function DocumentUpload() {
   const { documents, addDocument, updateDocument, deleteDocument, children, refreshData } = useData();
   const { user } = useAuth();
@@ -1482,6 +1496,23 @@ export function DocumentUpload() {
     if (isSignableProgressReport(document, user?.role || '')) {
       setSignTarget(document);
       setSignValue('');
+      return;
+    }
+
+    /*
+     * A Form 08 is not approved from here.
+     *
+     * Its approval is the third signature: the Social Worker, the Psychological
+     * Support Staff and the Center Head each draw on their own printed line from
+     * the Form 08 card in the Intervention Tracker, and the API refuses this path
+     * for an Incident Report. Saying so before the confirmation is the difference
+     * between a reason and a red error box. Returning it stays available — that is
+     * how the form goes back for correction.
+     */
+    if (isIncidentReportDocument(document)) {
+      await dialog.validation('Sign the Form 08 instead', {
+        description: `“${document.title}” is approved by its signatures, not from Documents. Open the Intervention Tracker, find the Form 08 row, and sign your line there — the report is approved once the Social Worker, the Psychological Support Staff and the Center Head have all signed it.`,
+      });
       return;
     }
 

@@ -2382,15 +2382,18 @@ async function runMigrations() {
       console.warn(`Migration warning (incidentReports.${column}):`, err.message);
     }
   }
-  // Form 08 takes two verifications — the Psychological Staff signs the clinical
-  // side, the Social Worker counter-signs — and `status` only reaches 'Verified'
-  // when both are recorded. A deployed database therefore needs both stamp
-  // pairs; without them every verification would write a column that is not
-  // there and the form could never be completed.
+  // Form 08 takes three verifications — the Psychological Staff signs the
+  // clinical side, the Social Worker signs "Checked by", and the Center Head
+  // signs "Noted by" last — and `status` only reaches 'Verified' when all three
+  // are recorded. A deployed database therefore needs all three stamp pairs;
+  // without them a signature would write a column that is not there and the form
+  // could never be completed.
   await ensureColumn('incidentReports', 'psychVerifiedBy', 'VARCHAR(100) NULL', 'verifiedAt');
   await ensureColumn('incidentReports', 'psychVerifiedAt', 'DATETIME NULL', 'psychVerifiedBy');
   await ensureColumn('incidentReports', 'swVerifiedBy', 'VARCHAR(100) NULL', 'psychVerifiedAt');
   await ensureColumn('incidentReports', 'swVerifiedAt', 'DATETIME NULL', 'swVerifiedBy');
+  await ensureColumn('incidentReports', 'chVerifiedBy', 'VARCHAR(100) NULL', 'swVerifiedAt');
+  await ensureColumn('incidentReports', 'chVerifiedAt', 'DATETIME NULL', 'chVerifiedBy');
 
 
   try {

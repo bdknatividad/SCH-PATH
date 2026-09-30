@@ -5,6 +5,7 @@ import { usePermissions } from '@/app/hooks/usePermissions';
 import { useNavigate } from 'react-router-dom';
 import { describeError, request } from '@/services/api';
 import { systemDialog } from '@/app/components/SystemDialog';
+import { SignaturePadModal } from '@/app/components/SignaturePad';
 import { formatShortDate, getCurrentPHDateTime } from '@/utils/dateFormatter';
 import IncidentReportModal from './IncidentReportModal';
 import { Card, CardContent, CardHeader, CardTitle } from '@/app/components/ui/card';
@@ -76,11 +77,36 @@ const formatDateValue = (value: any) => {
   return Number.isNaN(parsed.getTime()) ? String(value) : formatShortDate(parsed);
 };
 
+/**
+ * The Form 08 line a role signs, or `null` if it signs none.
+ *
+ * Mirrors `VERIFICATION_SIDES` in `incidentReportController`, which is the
+ * authority — it refuses a signature for a line the caller does not own. This
+ * only decides whether the row offers the pad.
+ */
+const form8SideForRole = (role: string): string | null => {
+  switch (role) {
+    case 'socialworker': return 'sw';
+    case 'psychologist': return 'psych';
+    case 'centerhead': return 'ch';
+    default: return null;
+  }
+};
+
+/**
+ * One entry of the report's `signatures.sides`, as the API derived it — including
+ * the printed line each signer owns. Read from the payload rather than kept as a
+ * second copy here, so the row and the form cannot disagree about who signs what.
+ */
+const form8Side = (report: any, side: string | null) =>
+  (report?.signatures?.sides || []).find((entry: any) => entry.side === side) || null;
+
 export function InterventionTracker({ embedded = false }: { embedded?: boolean } = {}) {
   const { children, violations, refreshData } = useData();
   const { user } = useAuth();
   const { canOpenModule } = usePermissions();
-  const isHouseparent = user?.role?.toLowerCase() === 'houseparent';
+  const role = String(user?.role || '').toLowerCase();
+  const isHouseparent = role === 'houseparent';
   const navigate = useNavigate();
   /**
    * The "Profile" action opens `/children/:id`, guarded by the Child Records
@@ -102,6 +128,18 @@ export function InterventionTracker({ embedded = false }: { embedded?: boolean }
   const [form8ViolationId, setForm8ViolationId] = useState<string | null>(null);
   const [form8Mode, setForm8Mode] = useState<'create' | 'edit'>('create');
   const [form8ResidentId, setForm8ResidentId] = useState<string | null>(null);
+  /**
+   * Signing one's own line on a Form 08.
+   *
+   * The pad lives here rather than in `IncidentReportModal` because the three
+   * signer lines are not the filer's: the Social Worker, the Psychological
+   * Support Staff and the Center Head each sign from this tracker, in their own
+   * session, and the form is approved only when all three have signed.
+   */
+  const [signTarget, setSignTarget] = useState<any | null>(null);
+  const [signValue, setSignValue] = useState('');
+  const [signing, setSigning] = useState(false);
+  const [signError, setSignError] = useState<string | null>(null);
   const [scheduleTarget, setScheduleTarget] = useState<any | null>(null);
   const [scheduleValue, setScheduleValue] = useState('');
   const [schedulingId, setSchedulingId] = useState<string | null>(null);
@@ -423,6 +461,48 @@ export function InterventionTracker({ embedded = false }: { embedded?: boolean }
       setMarkDoneError(err instanceof Error ? err.message : 'Unable to mark intervention as done.');
     } finally {
       setMarkingDone(null);
+    }
+  };
+
+  /**
+   * Sign the Form 08 line this role owns.
+   *
+   * The signature goes to the Incident Report, not to the document: the report is
+   * the record, and the endpoint is what decides whether this caller's line is
+   * the one the form is waiting for and whether this signature completes it. On
+   * the third signature the linked document becomes 'Approved' — which is what
+   * unlocks `Mark Done` — so the tracker is re-read afterwards.
+   */
+  const handleSignForm8 = async () => {
+    const report = signTarget;
+    if (!report) return;
+    if (!signValue) {
+      setSignError('Draw your signature first.');
+      return;
+    }
+    setSigning(true);
+    setSignError(null);
+    try {
+      const response: any = await request(`/incident-reports/${report.id}/verify`, {
+        method: 'POST',
+        body: JSON.stringify({ signature: signValue }),
+      });
+      if (!response?.success) throw new Error(response?.message || 'Unable to sign the Incident Report.');
+
+      // Re-read this violation's report so the row shows the new count and whose
+      // turn it is next, and the tracker rows so the button state is current.
+      try {
+        const refreshed: any = await request(`/incident-reports/violation/${report.violationId}`, { method: 'GET' });
+        setIncidentReportsByViolation(prev => ({ ...prev, [report.violationId]: refreshed?.data || null }));
+      } catch { /* the refresh is cosmetic; the signature is already recorded */ }
+      setSignTarget(null);
+      setSignValue('');
+      await loadTrackerRecords();
+      void systemDialog.success('Signature recorded', response.message || 'The form has been passed on.');
+    } catch (err) {
+      setSignError(describeError(err, 'The signature was not recorded. Please try again.'));
+    } finally {
+      setSigning(false);
     }
   };
 
@@ -833,7 +913,42 @@ export function InterventionTracker({ embedded = false }: { embedded?: boolean }
                                           </Button>
                                         </div>
                                       );
-                                      return <span className="text-[10px] font-bold text-amber-600">Pending approval</span>;
+                                      /*
+                                       * Still unsigned, and waiting. The row says how
+                                       * many of the three signatures are in and who it
+                                       * is waiting for, and offers the pad to the one
+                                       * whose turn it is — the Social Worker and the
+                                       * Psychological Support Staff first, in either
+                                       * order, and the Center Head last. The API is the
+                                       * authority on both questions (it refuses a line
+                                       * the caller does not own, and refuses the Center
+                                       * Head until both Stage-1 lines are in); this
+                                       * only decides what to show.
+                                       */
+                                      const signatures = report.signatures;
+                                      const signedCount = signatures?.signedCount ?? 0;
+                                      const total = signatures?.total ?? 3;
+                                      const mySide = form8SideForRole(role);
+                                      const myTurn = Boolean(mySide) && signatures?.nextSide === mySide;
+                                      const waitingOn = form8Side(report, signatures?.nextSide);
+                                      return (
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-[10px] font-bold text-amber-600">
+                                            {signedCount} of {total} signed
+                                            {waitingOn ? ` — waiting on the ${waitingOn.label}` : ''}
+                                          </span>
+                                          {myTurn && (
+                                            <Button
+                                              size="sm"
+                                              variant="outline"
+                                              className="h-6 text-[10px] border-green-300 text-green-800 hover:bg-green-50"
+                                              onClick={() => { setSignTarget(report); setSignValue(''); setSignError(null); }}
+                                            >
+                                              Sign my line
+                                            </Button>
+                                          )}
+                                        </div>
+                                      );
                                     })() : (
                                       incidentReportsLoaded ? (
                                         <Button size="sm" variant="outline" className="h-6 text-[10px] border-blue-300 text-blue-700" onClick={() => { setForm8ViolationId(track.violation.id); setForm8ResidentId(track.violation.residentId); setForm8Mode('create'); }}>
@@ -907,6 +1022,41 @@ export function InterventionTracker({ embedded = false }: { embedded?: boolean }
           <DialogFooter>
             <Button variant="outline" onClick={() => setEarlyEndTarget(null)}>Cancel</Button>
             <Button className="bg-red-600 hover:bg-red-700 text-white" disabled={!!completingReqId} onClick={() => earlyEndTarget && completeEndRequirement(earlyEndTarget.step, earlyEndTarget.endDate)}>End Intervention</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Signing one's own line on a Form 08 — reached from the Form 08 row by the
+          signer whose turn it is. The third signature is what approves the form
+          and unlocks `Mark Done`. */}
+      <Dialog open={!!signTarget} onOpenChange={(open) => { if (!open) { setSignTarget(null); setSignValue(''); setSignError(null); } }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader><DialogTitle>Sign the Incident Report (Form 08)</DialogTitle></DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="rounded-lg bg-gray-50 border p-3 text-sm">
+              <p className="font-semibold text-[#2F3E46]">
+                {children.find(c => c.id === signTarget?.residentId)?.name || signTarget?.residentId}
+              </p>
+              <p className="text-xs text-gray-500 mt-1">
+                Your signature is printed on the “{form8Side(signTarget, form8SideForRole(role))?.line || 'your'}” line of the form.
+                {signTarget?.signatures?.nextSide === 'ch'
+                  ? ' This is the last signature — the report is approved once you sign.'
+                  : ''}
+              </p>
+            </div>
+            {signError && <p className="text-xs text-red-600">{signError}</p>}
+            <SignaturePadModal label="Your signature" value={signValue} onChange={setSignValue} hint="Sign here" />
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => { setSignTarget(null); setSignValue(''); setSignError(null); }}>Cancel</Button>
+            <Button
+              style={{ backgroundColor: '#FFD100', color: '#2F3E46' }}
+              className="font-bold"
+              disabled={signing || !signValue}
+              onClick={handleSignForm8}
+            >
+              {signing ? 'Signing…' : 'Sign'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

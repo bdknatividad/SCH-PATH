@@ -180,15 +180,25 @@ test('the returned report stays actionable, not just visible', () => {
   // 'Reassessment' on the incident, plus 'Rejected' / 'For Reassessment' and the
   // linked document's own 'Rejected' / 'Reassessment', which is what a report
   // marked Failed before the reject route synchronised the incident reads as.
+  //
+  // It also accepts a report still under review, for the Stage-1 reviewers: the
+  // flow has the Social Worker and the Psychological Support Staff correct the
+  // report themselves rather than sending it back, so a Submitted report stays
+  // editable to them (see `reviewing` in the controller).
   assert.match(
     INCIDENT_CONTROLLER,
-    /if \(!\['Failed', 'Reassessment', 'Rejected', 'For Reassessment'\]\.includes\(existing\.status\) && !\['Rejected', 'Reassessment'\]\.includes\(documentStatus\)\) \{/,
-    'the resubmit endpoint no longer accepts a reassessment report',
+    /const returned = \['Failed', 'Reassessment', 'Rejected', 'For Reassessment'\]\.includes\(existing\.status\)[\s\S]{0,120}?\|\| \['Rejected', 'Reassessment'\]\.includes\(documentStatus\);/,
+    'the resubmit endpoint no longer accepts a returned report',
   );
   assert.match(
     INCIDENT_CONTROLLER,
-    /throw new ApiError\(409, 'Only failed or reassessment Incident Reports can be resubmitted\.'\)/,
-    'the resubmit endpoint no longer refuses a report that was never returned',
+    /const reviewing = \['Submitted', 'Pending Review'\]\.includes\(existing\.status\)/,
+    'a report still under review is no longer correctable in place',
+  );
+  assert.match(
+    INCIDENT_CONTROLLER,
+    /throw new ApiError\(409, 'Only a returned Incident Report, or one still under review, can be corrected\.'\)/,
+    'the resubmit endpoint no longer refuses a report that was never returned and is not under review',
   );
 });
 

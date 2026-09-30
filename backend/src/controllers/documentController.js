@@ -104,6 +104,28 @@ const MEDICAL_RECORD_ROLES = new Set(['nurse', 'centerhead', 'admin']);
 const APPROVER_ROLES = ['centerhead', 'socialworker', 'admin'];
 
 /**
+ * An Incident Report (Form 08) is never approved through the document workflow.
+ *
+ * Its approval *is* the third signature: the Social Worker, the Psychological
+ * Support Staff and the Center Head each sign their own printed line, and the
+ * signature that completes the set is what sets this document to 'Approved'. A
+ * one-click approval here — which the Center Head, the Social Worker or the
+ * Administrator could all perform — would file a form whose signature lines are
+ * empty and then let `Mark Done` proceed on it, which is exactly the hole this
+ * flow closes.
+ *
+ * Rejection stays open: returning the form with a reason is how it goes back for
+ * correction.
+ */
+function assertNotIncidentReportApproval(document) {
+  if (String(document?.title || '').trim().toLowerCase() !== 'incident report') return;
+  throw new ApiError(
+    409,
+    'An Incident Report is approved by its signatures, not from Documents. Sign it as the Social Worker, the Psychological Support Staff or the Center Head — the form is approved once all three have signed it. Return it instead if something is wrong.',
+  );
+}
+
+/**
  * The two quarterly reports the Education and Health modules generate from the
  * one shared PROGRESS REPORT form.
  *
@@ -1159,6 +1181,8 @@ async function approve(req, res, next) {
       throw new ApiError(404, 'Document not found');
     }
 
+    assertNotIncidentReportApproval(existing[0]);
+
     // A closed admission's files are the historical record of that stay.
     await assertAdmissionOpen(existing[0], 'reviewed');
 
@@ -1439,10 +1463,21 @@ async function applyIncidentReportDecision(document, status, reason, actor) {
   );
   await pool.query(
     `UPDATE incidentReports
-     SET status = ?, updatedAt = CURRENT_TIMESTAMP
+     SET status = ?, updatedAt = CURRENT_TIMESTAMP,
+         verifiedBy = NULL, verifiedAt = NULL,
+         psychVerifiedBy = NULL, psychVerifiedAt = NULL,
+         swVerifiedBy = NULL, swVerifiedAt = NULL,
+         chVerifiedBy = NULL, chVerifiedAt = NULL,
+         checkedBySignature = NULL, notedBySignature = NULL, psychStaffSignature = NULL
      WHERE pdfDocumentId = ?`,
     [incidentStatus, document.id]
   );
+
+  // Returning the form clears every signature with it. The signers signed the
+  // text that is about to be corrected, so their signatures do not carry over to
+  // the corrected version — and a returned report that still read "1 of 3 signed"
+  // would tell the tracker something that is no longer true. The filed copy is
+  // redrawn without them when the correction is saved.
 
   // The report alone is returned for correction. Do NOT reset intervention_tracker,
   // intervention_requirements, assessments, schedules, or the violation's resolved
@@ -1497,6 +1532,11 @@ async function update(req, res, next) {
     const [beforeRows] = await pool.query('SELECT * FROM documents WHERE id = ? LIMIT 1', [req.params.id]);
     if (!beforeRows.length) throw new ApiError(404, 'Document not found');
     const before = beforeRows[0];
+
+    // This is the path the Documents page actually approves through, so the
+    // Incident Report guard has to be here as well as on the dedicated route —
+    // guarding one of the two would leave the other wide open.
+    if (status === 'Approved') assertNotIncidentReportApproval(before);
 
     // A closed admission's files are the historical record of that stay.
     await assertAdmissionOpen(before, 'edited');
@@ -1655,6 +1695,8 @@ async function update(req, res, next) {
               SET status = 'Submitted', verifiedBy = NULL, verifiedAt = NULL,
                   psychVerifiedBy = NULL, psychVerifiedAt = NULL,
                   swVerifiedBy = NULL, swVerifiedAt = NULL,
+                  chVerifiedBy = NULL, chVerifiedAt = NULL,
+                  checkedBySignature = NULL, notedBySignature = NULL, psychStaffSignature = NULL,
                   updatedAt = CURRENT_TIMESTAMP
             WHERE pdfDocumentId = ?`,
           [document.id]

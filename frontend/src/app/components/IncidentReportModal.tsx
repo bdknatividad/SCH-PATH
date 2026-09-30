@@ -47,6 +47,16 @@ const SIGNATURE_LABELS: Record<keyof typeof SIGNATURE_BOXES, string> = {
 };
 
 /**
+ * The lines the person filling the form in signs, and the lines they do not.
+ *
+ * The three signer lines are drawn by the Social Worker, the Psychological
+ * Support Staff and the Center Head from the Form 08 card in the Intervention
+ * Tracker — never here — so this form shows them but cannot set them.
+ */
+const FILER_SIGNATURE_KEYS = ['reportedBy', 'endorsedTo'] as const;
+const SIGNER_SIGNATURE_KEYS = ['checkedBy', 'notedBy', 'psychStaff'] as const;
+
+/**
  * The two right-hand sign-off lines are pre-printed, not typed: the same two
  * people endorse and note every Form 08, so leaving them to be filled in meant
  * they could differ — or be left blank — from one report to the next. These
@@ -316,10 +326,20 @@ function Form08Editor({
             <div className="text-black" style={{ fontSize: `${8.5 * scale}px`, lineHeight: `${12 * scale}px` }}>{FIXED_PSYCH_STAFF_ROLE}</div>
           </div>
 
-          {/* One signature pad per sign-off, drawn in place on the form. Each
-              keeps its own typed name above it, so an unsigned line still shows
-              who was meant to sign. */}
-          {(Object.keys(SIGNATURE_BOXES) as Array<keyof typeof SIGNATURE_BOXES>).map((key) => {
+          {/*
+            Only the filer's own two lines are signed here.
+
+            "Checked by", "Noted by" and the Psychological Support Staff line
+            belong to the three people who sign them, and they sign from the
+            Form 08 card in the Intervention Tracker — each one drawing on their
+            own line, in their own session. A pad in this form would let whoever
+            filed the report sign on their behalf, which is what the flow exists
+            to prevent.
+
+            A line that already carries a signature is still shown, so the
+            preview here matches the PDF in the resident's folder.
+          */}
+          {FILER_SIGNATURE_KEYS.map((key) => {
             const box = SIGNATURE_BOXES[key];
             const field = `${key}Signature` as keyof typeof emptyForm;
             return (
@@ -334,6 +354,26 @@ function Form08Editor({
                   onChange={(value) => onChange(field, value)}
                   disabled={!editable}
                   hint="Sign here"
+                />
+              </div>
+            );
+          })}
+
+          {SIGNER_SIGNATURE_KEYS.map((key) => {
+            const box = SIGNATURE_BOXES[key];
+            const drawn = String((form as Record<string, unknown>)[`${key}Signature`] || '');
+            if (!drawn) return null;
+            return (
+              <div
+                key={key}
+                aria-label={`${SIGNATURE_LABELS[key]} signature`}
+                className="absolute z-20 pointer-events-none"
+                style={fieldStyle(box.x, box.top, box.width, box.height, scale)}
+              >
+                <img
+                  src={drawn}
+                  alt={`${SIGNATURE_LABELS[key]} signature`}
+                  className="h-full w-full object-contain object-bottom"
                 />
               </div>
             );
@@ -356,7 +396,10 @@ export default function IncidentReportModal({
   const [saveError, setSaveError] = useState<string | null>(null);
 
   const role = String(user?.role || '').toLowerCase();
-  const isReadOnly = mode === 'view' || !['socialworker', 'social_worker', 'social worker', 'centerhead', 'center_head', 'center head', 'houseparent', 'admin'].includes(role);
+  // The four roles the specification names as filers. The Psychological Staff
+  // used to be read-only here — the role files Form 08 and signs it, so it fills
+  // it in too.
+  const isReadOnly = mode === 'view' || !['socialworker', 'social_worker', 'social worker', 'centerhead', 'center_head', 'center head', 'houseparent', 'psychologist', 'psychological staff', 'admin'].includes(role);
 
   useEffect(() => {
     if (!open) return;
@@ -447,9 +490,6 @@ export default function IncidentReportModal({
         notedBy: form.notedBy,
         reportedBySignature: form.reportedBySignature || null,
         endorsedToSignature: form.endorsedToSignature || null,
-        checkedBySignature: form.checkedBySignature || null,
-        notedBySignature: form.notedBySignature || null,
-        psychStaffSignature: form.psychStaffSignature || null,
       };
 
       if (mode === 'edit' && report?.id) {

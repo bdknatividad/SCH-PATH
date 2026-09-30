@@ -577,16 +577,33 @@ test('the on-screen Form 08 pads sit exactly where the stamps land', () => {
   );
 });
 
-test('Form 08 sends its signatures to the server and loads them back', () => {
+test('Form 08 sends the filer\'s signatures and loads every line back', () => {
   const modal = read(INCIDENT_MODAL);
 
-  // Save
+  // Save — the filer's own two lines only. "Checked by", the psych line and
+  // "Noted by" belong to the Social Worker, the Psychological Support Staff and
+  // the Center Head, who draw them from the Form 08 row in the Intervention
+  // Tracker; the API ignores them on this path, and a form that could carry them
+  // would let whoever filed the report sign on their behalf.
   assert.match(modal, /reportedBySignature:\s*form\.reportedBySignature/, 'save drops the Reported-by signature');
-  assert.match(modal, /notedBySignature:\s*form\.notedBySignature/, 'save drops the Noted-by signature');
+  assert.match(modal, /endorsedToSignature:\s*form\.endorsedToSignature/, 'save drops the Endorsed-to signature');
+  for (const field of ['checkedBySignature', 'notedBySignature', 'psychStaffSignature']) {
+    assert.doesNotMatch(
+      modal,
+      new RegExp(`${field}:\\s*form\\.${field}`),
+      `save still sends ${field}, which is not the filer's line to set`,
+    );
+  }
 
-  // Load — reopening a signed report must show the signatures again.
-  assert.match(modal, /reportedBySignature:\s*r\.reportedBySignature/, 'view drops the Reported-by signature');
-  assert.match(modal, /notedBySignature:\s*r\.notedBySignature/, 'view drops the Noted-by signature');
+  // Load — reopening a signed report must show every signature again, including
+  // the three the filer never drew. This is what makes the preview here match the
+  // PDF in the resident's folder.
+  for (const field of [
+    'reportedBySignature', 'endorsedToSignature',
+    'checkedBySignature', 'notedBySignature', 'psychStaffSignature',
+  ]) {
+    assert.match(modal, new RegExp(`${field}:\\s*r\\.${field}`), `view drops the ${field} signature`);
+  }
 
   // The pads must be read-only when the form is not editable.
   assert.match(

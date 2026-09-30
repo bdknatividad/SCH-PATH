@@ -2,10 +2,19 @@
  * Incident Report Controller
  * @module controllers/incidentReportController
  * @description Digital version of Form 08 (Second Chance Home Incident Report).
- *              A Social Worker fills this out and saves it against a violation
- *              record; a Psychological Staff then reviews and verifies it, at which
- *              point they can attach a Psycho-Social Activity intervention and
- *              a schedule date.
+ *
+ * A Houseparent — or a Social Worker, the Psychological Support Staff or the
+ * Center Head — fills the form out against a violation record. It is then signed
+ * by three people, each on their own printed line, in two stages: the Social
+ * Worker ("Checked by") and the Psychological Support Staff (the clinical line,
+ * with the intervention and its schedule) first, in either order, and the Center
+ * Head ("Noted by") last. The form is approved only when all three signatures are
+ * on it, and the approval is what the Intervention Tracker's `Mark Done` waits
+ * for.
+ *
+ * A Stage-1 reviewer who finds something wrong corrects the report in place
+ * rather than sending it back; every signature is cleared by such an edit,
+ * because a signature belongs to the text its signer read.
  */
 
 const { pool } = require('../config/database');
@@ -37,7 +46,46 @@ function mapIncidentReport(row) {
   } catch {
     reportTypes = [];
   }
-  return { ...row, reportTypes, statusLabel: row.status === 'Failed' ? 'Failed' : row.status === 'Reassessment' ? 'For Reassessment' : row.status };
+  return {
+    ...row,
+    reportTypes,
+    statusLabel: row.status === 'Failed' ? 'Failed' : row.status === 'Reassessment' ? 'For Reassessment' : row.status,
+    signatures: signatureState(row),
+  };
+}
+
+/**
+ * Which of Form 08's three signature lines are filled, and whose turn it is.
+ *
+ * Derived here rather than in the browser so no screen has to name
+ * `swVerifiedBy` / `psychVerifiedBy` / `chVerifiedBy`. The Form 08 modal is
+ * pinned by a test that forbids those names outright — they used to be read as
+ * if the *report* carried a verification surface of its own, which is how three
+ * separate approvals grew onto one incident.
+ *
+ * `nextSide` is the signer the form is waiting on: both Stage-1 sides first, in
+ * any order, then the Center Head. `null` once all three have signed.
+ */
+function signatureState(row) {
+  const sides = Object.entries(VERIFICATION_SIDES).map(([side, columns]) => ({
+    side,
+    label: columns.label,
+    line: columns.line,
+    signed: Boolean(row[columns.by]),
+    by: row[columns.by] || null,
+    at: row[columns.at] || null,
+  }));
+  const signedCount = sides.filter((entry) => entry.signed).length;
+  const complete = signedCount === sides.length;
+  return {
+    sides,
+    signedCount,
+    total: sides.length,
+    complete,
+    nextSide: complete
+      ? null
+      : STAGE_ONE_SIDES.find((side) => !row[VERIFICATION_SIDES[side].by]) || FINAL_SIDE,
+  };
 }
 
 function escapePdfText(value) {
@@ -250,6 +298,47 @@ async function buildForm08Pdf({
 }
 
 /**
+ * Draw Form 08 again from the values stored on the report, with `overrides`
+ * applied.
+ *
+ * Used whenever a signature is added: the filed PDF has to carry every signature
+ * the report holds, and the report is the only place those drawings live. A form
+ * redrawn from a stale copy would print a signature over a line the signer never
+ * read — and the file the resident's folder serves is this drawing.
+ *
+ * `childName` is not a column on `incidentReports` — the report stores the
+ * resident id — so the name is read back the same way `create` first read it.
+ */
+async function renderForm08Pdf(report, overrides = {}) {
+  const [childRows] = await pool.query('SELECT name FROM children WHERE id = ?', [report.residentId]);
+  let reportTypes = [];
+  try {
+    reportTypes = typeof report.reportTypes === 'string' ? JSON.parse(report.reportTypes) : (report.reportTypes || []);
+  } catch {
+    reportTypes = [];
+  }
+  return buildForm08Pdf({
+    childName: childRows[0]?.name || report.residentId,
+    incidentDateTime: report.incidentDateTime,
+    reportTypes,
+    othersSpecify: report.othersSpecify,
+    summary: report.summary,
+    actionTaken: report.actionTaken,
+    result: report.result,
+    reportedBy: report.reportedBy,
+    endorsedTo: report.endorsedTo,
+    checkedBy: report.checkedBy,
+    notedBy: report.notedBy,
+    reportedBySignature: report.reportedBySignature,
+    endorsedToSignature: report.endorsedToSignature,
+    checkedBySignature: report.checkedBySignature,
+    notedBySignature: report.notedBySignature,
+    psychStaffSignature: report.psychStaffSignature,
+    ...overrides,
+  });
+}
+
+/**
  * POST /api/incident-reports
  * Create the digital incident report for an already-created violation.
  * Body: { violationId, residentId, reportTypes, othersSpecify, incidentDateTime,
@@ -260,8 +349,7 @@ async function create(req, res, next) {
     const {
       violationId, residentId, reportTypes, othersSpecify, incidentDateTime,
       summary, actionTaken, result, reportedBy, endorsedTo, checkedBy, notedBy,
-      reportedBySignature, endorsedToSignature, checkedBySignature, notedBySignature,
-      psychStaffSignature,
+      reportedBySignature, endorsedToSignature,
     } = req.body || {};
 
     if (!violationId) throw new ApiError(400, 'violationId is required');
@@ -329,8 +417,7 @@ async function create(req, res, next) {
       const pdfBuffer = await buildForm08Pdf({
         childName, incidentDateTime, reportTypes, othersSpecify, summary, actionTaken, result,
         reportedBy, endorsedTo, checkedBy, notedBy,
-        reportedBySignature, endorsedToSignature, checkedBySignature, notedBySignature,
-        psychStaffSignature,
+        reportedBySignature, endorsedToSignature,
       });
       const pdfFileName = `Incident-Report-${incidentId}.pdf`;
       const [docRows] = await pool.query('SELECT id FROM documents');
@@ -349,6 +436,10 @@ async function create(req, res, next) {
          req.user?.role || 'socialworker', admissionNumber ? `Admission #${admissionNumber}` : null, uploader, uploader, uploader, uploader]
       );
 
+      // The filer signs "Reported by" and may sign "Endorsed to". The three
+      // signer lines are deliberately left empty: they belong to the people who
+      // sign them, and a form filed with those already filled in is the bug this
+      // flow removes.
       await connection.query(
         `INSERT INTO incidentReports
           (id, violationId, residentId, interventionTrackerId, reportTypes, othersSpecify, incidentDateTime,
@@ -360,8 +451,8 @@ async function create(req, res, next) {
           incidentId, violationId, residentId, completedInterventionId, JSON.stringify(reportTypes || []), othersSpecify || null,
           incidentDateTime, summary || null, actionTaken || null, result || null,
           reportedBy || null, endorsedTo || null, FORM08_CHECKED_BY_NAME, FORM08_NOTED_BY_NAME,
-          reportedBySignature || null, endorsedToSignature || null, checkedBySignature || null, notedBySignature || null,
-          psychStaffSignature || null,
+          reportedBySignature || null, endorsedToSignature || null, null, null,
+          null,
           docId,
         ]
       );
@@ -371,20 +462,27 @@ async function create(req, res, next) {
 
     const [rows] = await pool.query('SELECT * FROM incidentReports WHERE id = ?', [newId]);
 
-    // Form 08 is filed by a Social Worker and verified by a Psychological Staff, so
-    // the verifier is the one who needs to be told it is waiting. Until now the
-    // only signal was a status column on a page nobody had a reason to open.
+    // Form 08 starts at Stage 1: the Social Worker and the Psychological Support
+    // Staff read it and sign their own lines, and only then does it reach the
+    // Center Head. Both are told, one row each so read state stays per person —
+    // and the filer is left out, because `notifyUsers` does not skip the actor and
+    // a Houseparent who filed the report should not be asked to sign it.
     try {
-      await notifications.notify({
+      const stageOne = await notifications.usersWithAnyRole(
+        STAGE_ONE_SIDES.map((side) => VERIFICATION_SIDES[side].role),
+      );
+      const recipients = stageOne
+        .filter((account) => String(account.username) !== String(uploader))
+        .map((account) => account.id);
+      await notifications.notifyUsers(recipients, {
         type: 'Incident Report',
         residentId,
-        title: `Incident Report (Form 08) to Verify - ${childName}`,
-        message: `${uploader} filed the Form 08 Incident Report for ${childName}. It is waiting for verification.`,
+        title: `Incident Report (Form 08) to sign - ${childName}`,
+        message: `${uploader} filed the Form 08 Incident Report for ${childName}. It needs the Social Worker's and the Psychological Support Staff's signatures.`,
         priority: 'High',
-        actionRequired: 'Verify the incident report and set the intervention schedule.',
+        actionRequired: 'Read the incident report, correct it if it needs correcting, and sign your line.',
         relatedRecordType: 'incidentReports',
         relatedRecordId: newId,
-        targetRole: 'psychologist',
         actorUsername: uploader,
         dedupeKey: `incident-report:${newId}:submitted`,
       });
@@ -419,8 +517,25 @@ async function resubmit(req, res, next) {
       const [docRows] = await pool.query('SELECT status FROM documents WHERE id = ? LIMIT 1', [existing.pdfDocumentId]);
       documentStatus = docRows[0]?.status || null;
     }
-    if (!['Failed', 'Reassessment', 'Rejected', 'For Reassessment'].includes(existing.status) && !['Rejected', 'Reassessment'].includes(documentStatus)) {
-      throw new ApiError(409, 'Only failed or reassessment Incident Reports can be resubmitted.');
+    /*
+     * Two ways to save a correction, and the difference is who is correcting.
+     *
+     * A returned form (Failed / Reassessment / Rejected) is the filer's to fix. A
+     * form still in review is the Stage-1 reviewers' to fix: the flow is that the
+     * Social Worker and the Psychological Support Staff correct the report
+     * themselves rather than sending it back, so a Submitted report stays editable
+     * to them. Every signature is cleared below either way — a signature belongs
+     * to the text its signer read, and an edit changes that text.
+     */
+    const returned = ['Failed', 'Reassessment', 'Rejected', 'For Reassessment'].includes(existing.status)
+      || ['Rejected', 'Reassessment'].includes(documentStatus);
+    const editorRole = normalizeRole(req.user?.role);
+    const nothingSigned = !existing.swVerifiedBy && !existing.psychVerifiedBy && !existing.chVerifiedBy;
+    const reviewing = ['Submitted', 'Pending Review'].includes(existing.status)
+      && (STAGE_ONE_SIDES.some((side) => VERIFICATION_SIDES[side].role === editorRole) || nothingSigned);
+
+    if (!returned && !reviewing) {
+      throw new ApiError(409, 'Only a returned Incident Report, or one still under review, can be corrected.');
     }
     if (!await canEditIncidentReport(req.user, existing)) {
       throw new ApiError(403, 'You are not assigned to this resident.');
@@ -429,8 +544,7 @@ async function resubmit(req, res, next) {
     const {
       reportTypes, othersSpecify, incidentDateTime, summary, actionTaken, result,
       reportedBy, endorsedTo, checkedBy, notedBy,
-      reportedBySignature, endorsedToSignature, checkedBySignature, notedBySignature,
-      psychStaffSignature,
+      reportedBySignature, endorsedToSignature,
     } = req.body || {};
     if (!Array.isArray(reportTypes) || reportTypes.length === 0) throw new ApiError(400, 'At least one report type is required');
     if (reportTypes.includes('Other') && !String(othersSpecify || '').trim()) throw new ApiError(400, 'Please specify the "Other" type of report.');
@@ -449,28 +563,35 @@ async function resubmit(req, res, next) {
     const pdfBuffer = await buildForm08Pdf({
       childName, incidentDateTime, reportTypes, othersSpecify, summary, actionTaken, result,
       reportedBy, endorsedTo, checkedBy, notedBy,
-      reportedBySignature, endorsedToSignature, checkedBySignature, notedBySignature,
-      psychStaffSignature,
+      reportedBySignature, endorsedToSignature,
     });
     const pdfFileName = `Incident-Report-${existing.id}.pdf`;
 
+    /*
+     * Every signature is cleared, because every signature belongs to the text its
+     * signer read and this statement replaces that text. That includes the three
+     * signer lines themselves: `checkedBySignature` / `notedBySignature` /
+     * `psychStaffSignature` are set to NULL rather than taken from the body, so a
+     * client cannot carry a signature over from the version that was corrected —
+     * and the filer's own two lines are the only ones this endpoint accepts.
+     */
     await pool.query(
       `UPDATE incidentReports
        SET reportTypes = ?, othersSpecify = ?, incidentDateTime = ?, summary = ?, actionTaken = ?, result = ?,
            reportedBy = ?, endorsedTo = ?, checkedBy = ?, notedBy = ?,
-           reportedBySignature = ?, endorsedToSignature = ?, checkedBySignature = ?, notedBySignature = ?,
-           psychStaffSignature = ?,
+           reportedBySignature = ?, endorsedToSignature = ?,
+           checkedBySignature = NULL, notedBySignature = NULL, psychStaffSignature = NULL,
            status = 'Submitted',
            verifiedBy = NULL, verifiedAt = NULL,
            psychVerifiedBy = NULL, psychVerifiedAt = NULL,
            swVerifiedBy = NULL, swVerifiedAt = NULL,
+           chVerifiedBy = NULL, chVerifiedAt = NULL,
            updatedAt = CURRENT_TIMESTAMP
        WHERE id = ?`,
       [JSON.stringify(reportTypes), othersSpecify || null, String(incidentDateTime).replace('T', ' '), summary || null,
        actionTaken || null, result || null, reportedBy || null, endorsedTo || null,
        FORM08_CHECKED_BY_NAME, FORM08_NOTED_BY_NAME,
-       reportedBySignature || null, endorsedToSignature || null, checkedBySignature || null, notedBySignature || null,
-       psychStaffSignature || null, id]
+       reportedBySignature || null, endorsedToSignature || null, id]
     );
 
     if (existing.pdfDocumentId) {
@@ -500,32 +621,56 @@ async function resubmit(req, res, next) {
 
     const [updatedRows] = await pool.query('SELECT * FROM incidentReports WHERE id = ?', [id]);
     const updated = updatedRows[0];
+    // A correction restarts Stage 1, so the people asked to sign are the two
+    // Stage-1 signers — the Center Head is not pulled in until both have signed.
+    // The person who made the correction is left out of their own notice.
     try {
-      const reviewer = await notifications.usersWithAnyRole(['psychologist', 'centerhead']);
-      await notifications.notifyUsers(reviewer.map((u) => u.id), {
-        type: 'Incident Report Resubmitted',
-        title: `Incident Report Resubmitted - ${childName}`,
-        message: `${actor} corrected and resubmitted the Incident Report for ${childName}. It is waiting for review again.`,
-        priority: 'High',
-        actionRequired: 'Review the resubmitted Incident Report.',
-        residentId: existing.residentId,
-        relatedRecordType: 'incidentReports',
-        relatedRecordId: id,
-        actorUsername: actor,
-      });
+      const reviewer = await notifications.usersWithAnyRole(
+        STAGE_ONE_SIDES.map((side) => VERIFICATION_SIDES[side].role),
+      );
+      await notifications.notifyUsers(
+        reviewer.filter((account) => String(account.username) !== String(actor)).map((account) => account.id),
+        {
+          type: 'Incident Report Resubmitted',
+          title: `Incident Report ${returned ? 'Resubmitted' : 'Corrected'} - ${childName}`,
+          message: `${actor} ${returned ? 'corrected and resubmitted' : 'corrected'} the Incident Report for ${childName}. Every signature was cleared, so it needs the Social Worker's and the Psychological Support Staff's signatures again.`,
+          priority: 'High',
+          actionRequired: 'Read the corrected report and sign your line.',
+          residentId: existing.residentId,
+          relatedRecordType: 'incidentReports',
+          relatedRecordId: id,
+          actorUsername: actor,
+        },
+      );
     } catch (notifyErr) {
       console.error('[IncidentReportController] Resubmission notification failed (non-fatal):', notifyErr.message);
     }
 
-    res.json({ success: true, data: mapIncidentReport(updated), documentId: updated.pdfDocumentId, message: 'Incident Report resubmitted for review.' });
+    res.json({
+      success: true,
+      data: mapIncidentReport(updated),
+      documentId: updated.pdfDocumentId,
+      message: returned
+        ? 'Incident Report resubmitted for review.'
+        : 'Incident Report corrected. Every signature was cleared, so it goes back for signing.',
+    });
   } catch (error) {
     next(error);
   }
 }
 
+/**
+ * Who may fill Form 08 in. The specification names four roles: the Houseparent
+ * (who files most of them), the Social Worker, the Psychological Support Staff
+ * and the Center Head.
+ *
+ * The Psychological Staff used to be absent from this list and from the create
+ * route, on the reading that the specification forbade the role from creating an
+ * incident. The role does file the form — and signs it — so it is here now.
+ */
 async function canEditIncidentReport(user, report) {
-  const role = String(user?.role || '').toLowerCase();
-  if (!['socialworker', 'centerhead', 'houseparent', 'admin'].includes(role)) return false;
+  const role = normalizeRole(user?.role);
+  if (!['socialworker', 'centerhead', 'houseparent', 'admin', 'psychologist'].includes(role)) return false;
   return await canAccessResident(user, report.residentId);
 }
 
@@ -590,67 +735,90 @@ async function getByResidentId(req, res, next) {
  * Body: { interventionType, interventionScheduleDate, verifiedBy }
  */
 /**
- * The two signatures a Form 08 needs, and the columns each one writes.
+ * The three signatures a Form 08 needs, and the columns each one writes.
  *
- * Form 08 is filed by a Social Worker and reviewed by the Psychological Staff,
- * and the specification requires *both* to sign it off: the Psychological Staff
- * signs the clinical side — and with it the intervention and its schedule — and
- * the Social Worker counter-signs. Until now a single call from either role set
- * `status = 'Verified'`, so one signature completed the form and the second
- * signatory was never asked.
+ * The specification requires all three: the Social Worker signs "Checked by"
+ * (Francis C. Patricio, RSW), the Psychological Support Staff signs the clinical
+ * line (Joyce Anne D.C. Tenorio) — and with it the intervention and its
+ * schedule — and the Center Head signs "Noted by" (MARICOR C. NAVARRO, RSW)
+ * last. The three printed names are already on the template; what each side adds
+ * here is the drawn signature that goes above its own name.
  *
- * `status` therefore only reaches 'Verified' when *both* stamp pairs are
- * present. `verifiedBy`/`verifiedAt` keep their existing meaning for the rest of
- * the system — "who signed this off" — and record whichever signature completed
- * the pair.
+ * `status` only reaches 'Verified' when all three stamp pairs are present, and
+ * the document is only approved then. `verifiedBy`/`verifiedAt` keep their
+ * existing meaning for the rest of the system — "who signed this off" — and
+ * record whichever signature completed the set.
  */
 const VERIFICATION_SIDES = {
-  psych: { by: 'psychVerifiedBy', at: 'psychVerifiedAt', label: 'Psychological Staff' },
-  sw: { by: 'swVerifiedBy', at: 'swVerifiedAt', label: 'Social Worker' },
+  sw: {
+    by: 'swVerifiedBy', at: 'swVerifiedAt', signature: 'checkedBySignature',
+    role: 'socialworker', label: 'Social Worker', line: 'Checked by',
+  },
+  psych: {
+    by: 'psychVerifiedBy', at: 'psychVerifiedAt', signature: 'psychStaffSignature',
+    role: 'psychologist', label: 'Psychological Support Staff', line: 'Psychological Support Staff',
+  },
+  ch: {
+    by: 'chVerifiedBy', at: 'chVerifiedAt', signature: 'notedBySignature',
+    role: 'centerhead', label: 'Center Head', line: 'Noted by',
+  },
 };
 
 /**
- * Which side is this caller signing?
+ * The order the form is routed in.
  *
- * A role that owns one side signs that side, and may not sign the other — a
- * Social Worker cannot counter-sign on the Psychological Staff's behalf, or the
- * two signatures would be one person's. A full-access role holds every
- * capability but still signs one side at a time, so they must say which; that
- * keeps "both signatures" true for them too rather than letting one account
- * complete the form alone.
+ * Stage 1 is the Social Worker and the Psychological Support Staff, in either
+ * order — they read the report, correct it if it needs correcting, and sign
+ * their own line. Only when *both* have signed does it reach the Center Head,
+ * whose signature is the approval. Enforced here rather than in the UI, so a
+ * direct call cannot sign the form out of turn.
+ */
+const STAGE_ONE_SIDES = ['sw', 'psych'];
+const FINAL_SIDE = 'ch';
+const SIGNING_ORDER = [...STAGE_ONE_SIDES, FINAL_SIDE];
+
+/** The sides whose stamp pairs are present on this row. */
+function signedSides(row) {
+  return SIGNING_ORDER.filter((side) => Boolean(row[VERIFICATION_SIDES[side].by]));
+}
+
+/**
+ * Which line is this caller signing?
+ *
+ * Each of the three roles owns exactly one line and signs only that one — a
+ * Social Worker cannot sign on the Psychological Support Staff's behalf, or
+ * "three signatures" would be fewer than three people. The side is derived from
+ * the caller's role and cannot be chosen: there is no `verificationSide` to send,
+ * so no account can fill a line it does not own.
+ *
+ * A full-access role with no line of its own (the Administrator) is refused. It
+ * used to be allowed to *name* a side, which made an administrator able to
+ * complete a form the specification says three named people sign.
  *
  * @param {Object} user - The authenticated user.
- * @param {string} [requested] - `psych` or `sw`, required of a full-access role.
- * @returns {'psych'|'sw'}
+ * @returns {'sw'|'psych'|'ch'}
  */
-function resolveVerificationSide(user, requested) {
+function resolveVerificationSide(user) {
   const role = normalizeRole(user?.role);
-  const wanted = String(requested || '').trim().toLowerCase();
-
-  const ownSide = role === 'psychologist' ? 'psych' : role === 'socialworker' ? 'sw' : null;
-  if (ownSide) {
-    if (wanted && wanted !== ownSide) {
-      throw new ApiError(403, `Your role signs the ${VERIFICATION_SIDES[ownSide].label} verification, not the ${VERIFICATION_SIDES[wanted]?.label || wanted} one.`);
-    }
-    return ownSide;
-  }
+  const ownSide = SIGNING_ORDER.find((side) => VERIFICATION_SIDES[side].role === role);
+  if (ownSide) return ownSide;
 
   if (isFullAccessRole(role)) {
-    if (!VERIFICATION_SIDES[wanted]) {
-      throw new ApiError(400, 'An Incident Report needs two verifications, so a full-access account signs one side at a time: send verificationSide as "psych" or "sw".');
-    }
-    return wanted;
+    throw new ApiError(
+      403,
+      'Form 08 is signed by the Social Worker, the Psychological Support Staff and the Center Head, each on their own line — an administrator has no line to sign.',
+    );
   }
 
-  throw new ApiError(403, `Your role (${role || 'unknown'}) is not permitted to verify an Incident Report.`);
+  throw new ApiError(403, `Your role (${role || 'unknown'}) is not permitted to sign an Incident Report.`);
 }
 
 async function verify(req, res, next) {
   try {
     const { id } = req.params;
-    const { interventionType, interventionScheduleDate, verifiedBy, verificationSide } = req.body || {};
+    const { interventionType, interventionScheduleDate, verifiedBy, signature } = req.body || {};
 
-    const side = resolveVerificationSide(req.user, verificationSide);
+    const side = resolveVerificationSide(req.user);
     const columns = VERIFICATION_SIDES[side];
 
     const [rows] = await pool.query('SELECT * FROM incidentReports WHERE id = ?', [id]);
@@ -658,93 +826,161 @@ async function verify(req, res, next) {
     const report = rows[0];
 
     if (report.status === 'Verified') {
-      return res.json({ success: true, data: mapIncidentReport(report), message: 'Incident report was already verified.' });
+      return res.json({ success: true, data: mapIncidentReport(report), message: 'Incident report was already signed off.' });
     }
     if (!['Submitted', 'Pending Review'].includes(report.status)) {
-      throw new ApiError(409, 'This Incident Report must be corrected and resubmitted before it can be approved.');
+      throw new ApiError(409, 'This Incident Report must be corrected and resubmitted before it can be signed.');
     }
 
-    // A side signs once. Re-sending the same side would otherwise let one account
-    // satisfy both slots by calling the endpoint twice.
+    // A line signs once. Re-sending the same side would otherwise let one account
+    // fill a line it had already filled.
     if (report[columns.by]) {
-      throw new ApiError(409, `This Incident Report already carries the ${columns.label} verification (${report[columns.by]}).`);
+      throw new ApiError(409, `This Incident Report already carries the ${columns.label} signature (${report[columns.by]}).`);
+    }
+
+    /*
+     * Form 08 routes bottom-up: the Social Worker and the Psychological Support
+     * Staff sign first, in either order, and only then does it reach the Center
+     * Head. Enforced here rather than in the UI, because his signature *is* the
+     * approval — a Center Head signing a report the two people who were supposed
+     * to have read it never saw would approve it with nothing downstream to
+     * catch it.
+     */
+    if (side === FINAL_SIDE) {
+      const missing = STAGE_ONE_SIDES.filter((other) => !report[VERIFICATION_SIDES[other].by]);
+      if (missing.length) {
+        throw new ApiError(
+          409,
+          `The ${missing.map((other) => VERIFICATION_SIDES[other].label).join(' and ')} must sign this Incident Report before the Center Head does.`,
+        );
+      }
+    }
+
+    // The drawn signature is the point of the endpoint — a line that records only
+    // a name is what this replaces. An unusable value is refused rather than
+    // skipped: `buildForm08Pdf` draws nothing for an image it cannot decode, so a
+    // header with no image behind it would be recorded as a signature and leave
+    // the line blank on the page. The 32-character floor is what separates a
+    // drawing from a bare `data:image/png;base64,` — the smallest real signature
+    // is an order of magnitude longer.
+    const drawn = String(signature || '').trim();
+    const decoded = drawn.match(/^data:image\/(png|jpeg|jpg);base64,([A-Za-z0-9+/=]+)$/i);
+    if (!decoded || decoded[2].length < 32) {
+      throw new ApiError(400, 'Draw your signature before signing the Incident Report.');
     }
 
     const signer = verifiedBy || req.user?.username || null;
-    if (!signer) throw new ApiError(400, 'A verifying user is required.');
-
-    const otherSide = side === 'psych' ? 'sw' : 'psych';
-    const bothSigned = Boolean(report[VERIFICATION_SIDES[otherSide].by]);
+    if (!signer) throw new ApiError(400, 'A signing user is required.');
 
     // The intervention and its schedule belong to the clinical decision, so only
-    // the Psychological Staff's signature carries them. The Social Worker's
-    // counter-signature must not silently overwrite what was prescribed.
+    // the Psychological Support Staff's signature carries them. Neither of the
+    // other two lines may silently overwrite what was prescribed.
     const nextInterventionType = side === 'psych' ? (interventionType || null) : (report.interventionType || null);
     const nextSchedule = side === 'psych'
       ? (interventionScheduleDate ? String(interventionScheduleDate).replace('T', ' ') : null)
       : (report.interventionScheduleDate || null);
 
+    const signedAfterThis = [...signedSides(report), side];
+    const complete = STAGE_ONE_SIDES.every((other) => signedAfterThis.includes(other))
+      && signedAfterThis.includes(FINAL_SIDE);
+    const stillWaiting = STAGE_ONE_SIDES.find((other) => !signedAfterThis.includes(other)) || null;
+
+    /*
+     * The signed PDF is rebuilt before anything is written, and carries every
+     * signature the report holds at this moment. The order matters: a drawing
+     * that cannot be produced must leave the report exactly as it was, rather
+     * than record a signature that never reached the page.
+     */
+    const signedPdf = report.pdfDocumentId
+      ? await renderForm08Pdf(report, { [columns.signature]: drawn })
+      : null;
+
+    const assignments = [
+      `${columns.by} = ?`, `${columns.at} = NOW()`,
+      `${columns.signature} = ?`,
+      'interventionType = ?', 'interventionScheduleDate = ?',
+    ];
+    const values = [signer, drawn, nextInterventionType, nextSchedule];
+
+    if (complete) {
+      // `verifiedBy`/`verifiedAt` mean "who signed this off" for the rest of the
+      // system, so they are stamped by whichever signature completed the set —
+      // here, the Center Head's.
+      assignments.push('status = ?', 'verifiedBy = ?', 'verifiedAt = NOW()');
+      values.push('Verified', signer);
+    }
+
     await pool.query(
-      `UPDATE incidentReports
-       SET ${columns.by} = ?, ${columns.at} = NOW(),
-           interventionType = ?, interventionScheduleDate = ?,
-           status = ?, verifiedBy = ?, verifiedAt = ?
-       WHERE id = ?`,
-      [
-        signer,
-        nextInterventionType, nextSchedule,
-        bothSigned ? 'Verified' : report.status,
-        // `verifiedBy`/`verifiedAt` mean "who signed this off", so they are
-        // stamped by whichever signature completes the pair.
-        bothSigned ? signer : report.verifiedBy || null,
-        bothSigned ? new Date().toISOString().slice(0, 19).replace('T', ' ') : (report.verifiedAt || null),
-        id,
-      ]
+      `UPDATE incidentReports SET ${assignments.join(', ')}, updatedAt = CURRENT_TIMESTAMP WHERE id = ?`,
+      [...values, id],
     );
+
+    if (signedPdf && report.pdfDocumentId) {
+      // The linked document is the copy the resident's folder serves and the copy
+      // `Mark Done` reads, so it has to carry the signature just added. It only
+      // becomes 'Approved' on the third signature: approving it earlier would
+      // unlock the intervention while the form was still unsigned.
+      const docAssignments = ['fileData = ?', 'fileSize = ?', 'modifiedBy = ?'];
+      const docValues = [signedPdf.toString('base64'), signedPdf.length, signer];
+      if (complete) {
+        docAssignments.push("status = 'Approved'", 'approvedBy = ?', 'approvedAt = NOW()');
+        docValues.push(signer);
+      }
+      await pool.query(
+        `UPDATE documents SET ${docAssignments.join(', ')} WHERE id = ?`,
+        [...docValues, report.pdfDocumentId],
+      );
+    }
 
     const [updated] = await pool.query('SELECT * FROM incidentReports WHERE id = ?', [id]);
 
-    // The verification that completes the pair schedules the intervention, so the
-    // people who carry it out (the case owner and the resident's Houseparents)
-    // need to be told. A first signature is recorded quietly: the form is not
-    // approved yet and telling anyone to act on it would be premature.
+    /*
+     * Who has to act next. A Stage-1 signature hands the form to the other
+     * Stage-1 signer; once both are in it goes to the Center Head; and only the
+     * signature that completes the set tells the people who carry the
+     * intervention out. Anything earlier would be asking someone to act on a form
+     * that is not approved yet.
+     */
     try {
       const childName = (await notifications.residentName(report.residentId)) || report.residentId;
       const schedule = nextSchedule ? ` Scheduled for ${nextSchedule}.` : '';
+      const base = {
+        type: 'Incident Report',
+        residentId: report.residentId,
+        relatedRecordType: 'incidentReports',
+        relatedRecordId: id,
+        actorUsername: signer,
+      };
 
-      if (!bothSigned) {
-        // The one person who has to act is the other signatory. A Social Worker
-        // filing the form has already had their turn; it is the Psychological
-        // Staff who must now sign, and the reverse.
-        const waitingOn = side === 'psych' ? 'socialworker' : 'psychologist';
-        await notifications.notify({
-          type: 'Incident Report',
-          residentId: report.residentId,
-          title: `Incident Report (Form 08) needs your verification - ${childName}`,
-          message: `${signer} signed the ${columns.label} verification for ${childName}. It still needs the ${VERIFICATION_SIDES[otherSide].label} verification before it is approved.`,
-          priority: 'High',
-          actionRequired: `Sign the ${VERIFICATION_SIDES[otherSide].label} verification.`,
-          relatedRecordType: 'incidentReports',
-          relatedRecordId: id,
-          targetRole: waitingOn,
-          actorUsername: signer,
-          dedupeKey: `incident-report:${id}:awaiting-${otherSide}`,
-        });
-      } else {
-        const base = {
-          type: 'Incident Report',
-          residentId: report.residentId,
-          title: `Incident Report Verified - ${childName}`,
-          message: `${signer} completed the verification of the Form 08 Incident Report for ${childName}.${nextInterventionType ? ` Intervention: ${nextInterventionType}.` : ''}${schedule}`,
-          priority: 'Medium',
-          actionRequired: 'Carry out the scheduled intervention.',
-          relatedRecordType: 'incidentReports',
-          relatedRecordId: id,
-          actorUsername: signer,
-        };
-
+      if (!complete) {
+        // The next signer: the other Stage-1 line, or the Center Head once both
+        // Stage-1 lines are in.
+        const waitingSide = stillWaiting || FINAL_SIDE;
+        const waitingOn = VERIFICATION_SIDES[waitingSide];
         await notifications.notify({
           ...base,
+          title: stillWaiting
+            ? `Incident Report (Form 08) needs your verification - ${childName}`
+            : `Incident Report (Form 08) is ready for your signature - ${childName}`,
+          message: `${signer} signed the ${columns.label} line for ${childName}. The form is waiting for the ${waitingOn.label} signature.`,
+          priority: 'High',
+          actionRequired: `Sign the ${waitingOn.label} line ("${waitingOn.line}") on the Form 08.`,
+          targetRole: waitingOn.role,
+          dedupeKey: `incident-report:${id}:awaiting-${waitingSide}`,
+        });
+      } else {
+        const verified = {
+          ...base,
+          title: `Incident Report Verified - ${childName}`,
+          message: `${signer} completed the signatures on the Form 08 Incident Report for ${childName}.${nextInterventionType ? ` Intervention: ${nextInterventionType}.` : ''}${schedule}`,
+          priority: 'Medium',
+          actionRequired: 'Carry out the scheduled intervention.',
+        };
+
+        // The case owner, the resident's Houseparents, and whoever filed the
+        // form — the three sets of people who act on the outcome.
+        await notifications.notify({
+          ...verified,
           targetRole: 'socialworker',
           dedupeKey: `incident-report:${id}:verified`,
         });
@@ -752,22 +988,34 @@ async function verify(req, res, next) {
         const houseparents = await notifications.houseparentsOf(report.residentId);
         await notifications.notifyUsers(
           houseparents.map((hp) => hp.id),
-          { ...base, dedupeKey: `incident-report:${id}:verified-houseparent` }
+          { ...verified, dedupeKey: `incident-report:${id}:verified-houseparent` },
         );
 
-        // The alert asking this person to verify the report is now finished.
-        await notifications.markRelatedRead(req.user, 'incidentReports', id);
+        if (report.pdfDocumentId) {
+          const [docRows] = await pool.query('SELECT submittedBy FROM documents WHERE id = ? LIMIT 1', [report.pdfDocumentId]);
+          const filerId = await notifications.userIdForUsername(docRows[0]?.submittedBy);
+          if (filerId) {
+            await notifications.notifyUsers([filerId], {
+              ...verified,
+              dedupeKey: `incident-report:${id}:verified-filer`,
+            });
+          }
+        }
       }
+
+      // The alert that asked this person to sign is finished either way.
+      await notifications.markRelatedRead(req.user, 'incidentReports', id);
     } catch (notifyErr) {
-      console.error('[IncidentReportController] Verification notification failed (non-fatal):', notifyErr.message);
+      console.error('[IncidentReportController] Signing notification failed (non-fatal):', notifyErr.message);
     }
 
+    const nextLabel = complete ? null : VERIFICATION_SIDES[stillWaiting || FINAL_SIDE].label;
     res.json({
       success: true,
       data: mapIncidentReport(updated[0]),
-      message: bothSigned
-        ? 'Incident report verified.'
-        : `Your ${columns.label} verification was recorded. The report is verified once the ${VERIFICATION_SIDES[otherSide].label} also signs it.`,
+      message: complete
+        ? 'Incident report signed off by all three signatories.'
+        : `Your ${columns.label} signature was recorded. The form goes to the ${nextLabel} next.`,
     });
   } catch (error) {
     next(error);
@@ -783,7 +1031,8 @@ module.exports = {
   FORM08_ENDORSED_TO_NAME, FORM08_CHECKED_BY_NAME, FORM08_CHECKED_BY_ROLE,
   FORM08_NOTED_BY_NAME, FORM08_NOTED_BY_ROLE,
   FORM08_PSYCH_STAFF_NAME, FORM08_PSYCH_STAFF_ROLE, FORM08_SIGNATURE_BOXES,
-  // Exported so the dual-verification rule can be asserted directly: which side a
-  // caller signs, and which columns each side writes.
-  VERIFICATION_SIDES, resolveVerificationSide,
+  // Exported so the signing rule can be asserted directly: which line a caller
+  // signs, which columns each line writes, and which lines come before which.
+  VERIFICATION_SIDES, resolveVerificationSide, STAGE_ONE_SIDES, FINAL_SIDE, SIGNING_ORDER,
+  signatureState,
 };

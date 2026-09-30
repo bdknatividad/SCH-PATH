@@ -47,6 +47,16 @@ const CHILD_TABS = new Set(['personal', 'timeline', 'education', 'medical', 'beh
  */
 const VERIFICATION_ALERT_TYPES = new Set(['Violation For Verification', 'Violation Verification']);
 
+/**
+ * The Form 08 alerts that name an action only the Intervention Tracker offers.
+ *
+ * Signing one's own line on a Form 08 happens from the report's row in the
+ * tracker — the pad is there, and so is the count of signatures — so those
+ * notices have to land on it. Every other incident notice stays on the resident's
+ * Behavioral tab, where the incident itself is readable.
+ */
+const FORM08_SIGNING_ALERT_TYPES = new Set(['incident report', 'incident report resubmitted']);
+
 export function Notifications() {
   const navigate = useNavigate();
   const {
@@ -232,6 +242,14 @@ export function Notifications() {
       // Form 08 and the intervention it belongs to both live in the Violations
       // module, which every role that can act on them holds.
       case 'incidentreports':
+        // A notice asking for a signature opens the tracker: that is where the
+        // Form 08 row is, and where the pad for the signer's own line lives.
+        // Landing on the Behavioral tab showed the recipient the incident without
+        // the action the notice named.
+        if (FORM08_SIGNING_ALERT_TYPES.has(String(alert.type || '').toLowerCase())) {
+          target = '/intervention-tracker';
+          break;
+        }
         target = childTab('behavioral') || '/violations';
         break;
       case 'violation':

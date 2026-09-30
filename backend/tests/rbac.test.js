@@ -1905,20 +1905,24 @@ test('the Psychologist is refused every module it does not hold over HTTP', asyn
   });
 });
 
-test('the Psychologist cannot create or edit an incident form over HTTP', async () => {
+test('the Psychologist files and signs an incident form, but not the incident itself', async () => {
+  // The specification names the Psychological Support Staff as one of the four
+  // roles that fill Form 08 in — and the role signs it, on its own line. Both
+  // write routes used to answer 403 here, which left the role with a form it
+  // could neither file nor complete.
   const app = loadApp(createPoolStub(psychologistAccount()));
 
   await withServer(app, async (base) => {
     const create = await send(base, '/api/incident-reports', 'psychologist', { method: 'POST', body: {} });
-    assert.equal(create.status, 403, 'the Psychologist must not create an incident');
+    assert.notEqual(create.status, 403, 'the Psychologist must be able to file a Form 08');
 
     const resubmit = await send(base, '/api/incident-reports/I1/resubmit', 'psychologist', { method: 'POST', body: {} });
-    assert.equal(resubmit.status, 403, 'the Psychologist must not edit an incident');
+    assert.notEqual(resubmit.status, 403, 'the Psychologist must be able to correct a Form 08');
 
-    // Verifying is the one write the workflow assigns to the role, so it must
-    // get past the guards and fail later (on the missing record), not with 403.
+    // Signing is the write the workflow assigns to the role, so it must get past
+    // the guards and fail later (on the missing record), not with 403.
     const verify = await send(base, '/api/incident-reports/I1/verify', 'psychologist', { method: 'POST', body: {} });
-    assert.notEqual(verify.status, 403, 'verification is inside the Psychologist workflow');
+    assert.notEqual(verify.status, 403, 'signing is inside the Psychologist workflow');
   });
 });
 

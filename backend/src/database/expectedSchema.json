@@ -2771,6 +2771,20 @@
     "extra": ""
    },
    {
+    "name": "chVerifiedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "chVerifiedAt",
+    "type": "datetime",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
     "name": "createdAt",
     "type": "timestamp",
     "nullable": false,

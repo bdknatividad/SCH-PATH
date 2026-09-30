@@ -58,9 +58,15 @@ ALTER TABLE incidentReports MODIFY COLUMN status ENUM('Submitted', 'Pending Revi
 
 ALTER TABLE incidentReports ADD COLUMN pdfDocumentId VARCHAR(40) NULL AFTER interventionTrackerId;
 
--- Dual verification. An existing database gains the four columns here; the boot
--- migration in server.js does the same, so this file stays runnable on its own.
+-- Form 08's three signatures: the Social Worker signs "Checked by", the
+-- Psychological Support Staff signs the clinical line, and the Center Head signs
+-- "Noted by" last. `status` only reaches 'Verified' when all three pairs are
+-- present; `verifiedBy`/`verifiedAt` then record whichever signature completed
+-- the set. An existing database gains the columns here; the boot migration in
+-- server.js does the same, so this file stays runnable on its own.
 ALTER TABLE incidentReports ADD COLUMN psychVerifiedBy VARCHAR(100) NULL AFTER verifiedAt;
 ALTER TABLE incidentReports ADD COLUMN psychVerifiedAt DATETIME NULL AFTER psychVerifiedBy;
 ALTER TABLE incidentReports ADD COLUMN swVerifiedBy VARCHAR(100) NULL AFTER psychVerifiedAt;
 ALTER TABLE incidentReports ADD COLUMN swVerifiedAt DATETIME NULL AFTER swVerifiedBy;
+ALTER TABLE incidentReports ADD COLUMN chVerifiedBy VARCHAR(100) NULL AFTER swVerifiedAt;
+ALTER TABLE incidentReports ADD COLUMN chVerifiedAt DATETIME NULL AFTER chVerifiedBy;
