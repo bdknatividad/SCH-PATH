@@ -31,6 +31,22 @@ const ROUTE_MODULE: Record<string, string> = MODULE_TREE.reduce<Record<string, s
 /** The child-detail tabs that actually exist. `case` was never one of them. */
 const CHILD_TABS = new Set(['personal', 'timeline', 'education', 'medical', 'behavioral']);
 
+/**
+ * The violation alerts that ask the recipient to *verify* a logged incident.
+ *
+ * Both are `relatedRecordType: 'violation'`, which sends every violation alert to
+ * the resident's Behavioral tab — and that switch is checked before the
+ * type-based fallback below, so the fallback never saw them. The incident is
+ * visible on the Behavioral tab, but the action the alert names is not: the
+ * verification queue is Violations → For Verification, and that is where these
+ * two have to land.
+ *
+ * 'Violation For Verification' is the notice sent when an incident is logged;
+ * 'Violation Verification' is the one that tells the *other* side the first
+ * verification is in and the incident is waiting on them.
+ */
+const VERIFICATION_ALERT_TYPES = new Set(['Violation For Verification', 'Violation Verification']);
+
 export function Notifications() {
   const navigate = useNavigate();
   const {
@@ -216,7 +232,17 @@ export function Notifications() {
       // Form 08 and the intervention it belongs to both live in the Violations
       // module, which every role that can act on them holds.
       case 'incidentreports':
+        target = childTab('behavioral') || '/violations';
+        break;
       case 'violation':
+        // A verification notice opens the For Verification queue, which is where
+        // the work it names actually is. It used to open the resident's
+        // Behavioral tab — the incident is there, the verification is not, so
+        // clicking the alert showed the recipient the record without the action.
+        if (VERIFICATION_ALERT_TYPES.has(String(alert.type || ''))) {
+          target = '/violations?tab=verification';
+          break;
+        }
         target = childTab('behavioral') || '/violations';
         break;
       case 'phaseprogress':
