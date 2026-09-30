@@ -471,23 +471,42 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
   useEffect(() => { loadData(); }, [loadData]);
 
   /**
-   * Catch up when the reader returns to the tab.
+   * Keep this page current while it is open.
    *
    * A document uploaded here is reviewed in the Documents module, and a phase
    * can be advanced by another user, so this page's copy of both goes stale
    * while it sits in the background — the uploader had to reload the page to see
    * their own document come back approved. `refreshData()` is the same store
-   * refresh the Documents module runs on focus, and the phase record is re-read
-   * alongside it; both are background reads, so the page does not blank to a
-   * spinner every time it regains focus.
+   * refresh the Documents module runs, and the phase record is re-read alongside
+   * it; both are background reads (`silent`), so the page does not blank to a
+   * spinner and an error the reader is looking at is not replaced.
+   *
+   * Three triggers, because they cover different ways of being away:
+   *
+   *   · `focus` — the window was deactivated and came back;
+   *   · `visibilitychange` — the tab or the phone app was switched away. A
+   *     mobile browser does not reliably fire `focus` for this, which is the
+   *     case the reviewer-on-another-device flow actually lands in;
+   *   · a 60-second poll — the case nothing else can see. A reviewer approving a
+   *     document in another browser changes nothing this window can observe, so
+   *     without a poll the status stays "Pending" until the reader does
+   *     something. Once a minute, matching Case Load: an approval is not urgent
+   *     to the second, and the two event triggers above cover the common case.
    */
   useEffect(() => {
-    const refreshOnFocus = () => {
-      void refreshData();
+    const refresh = () => {
+      void refreshData({ silent: true });
       void loadData({ background: true });
     };
-    window.addEventListener('focus', refreshOnFocus);
-    return () => window.removeEventListener('focus', refreshOnFocus);
+    const onVisibility = () => { if (document.visibilityState === 'visible') refresh(); };
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', onVisibility);
+    const timer = window.setInterval(refresh, 60000);
+    return () => {
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.clearInterval(timer);
+    };
   }, [refreshData, loadData]);
 
   const handleToggleTask = async (task: string, done: boolean) => {

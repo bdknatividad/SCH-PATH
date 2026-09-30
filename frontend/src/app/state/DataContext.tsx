@@ -372,7 +372,7 @@ interface DataContextType {
   setLoading: (loading: boolean) => void;
   error: string | null;
   setError: (error: string | null) => void;
-  refreshData: () => void;
+  refreshData: (options?: { silent?: boolean }) => void;
 }
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
@@ -512,12 +512,22 @@ export function DataProvider({ children: childrenProp }: { children: ReactNode }
 
   // Memoised so consumers that depend on its identity (e.g. the Notifications
   // polling interval) are not torn down on every provider render.
-  const loadStore = useCallback(async () => {
+  //
+  // `silent` is for a refresh the reader did not ask for — a poll while the page
+  // sits open, or regaining focus. It skips the page-wide flags only: `isLoading`
+  // puts every consumer back into its loading state and `setError(null)` clears
+  // an error the reader may still be reading, and neither is wanted for a
+  // background read. The data is written either way. Default `false`, so every
+  // existing caller is unchanged.
+  const loadStore = useCallback(async (options?: { silent?: boolean }) => {
+    const silent = options?.silent === true;
     // Claim the newest generation. Any response from an earlier call that is
     // still in flight will see a higher number below and discard itself.
     const generation = (loadGeneration.current += 1);
-    setIsLoading(true);
-    setError(null);
+    if (!silent) {
+      setIsLoading(true);
+      setError(null);
+    }
     try {
       const store = await getStore();
       // A newer load started while this one was in flight — its data is at
@@ -597,11 +607,17 @@ export function DataProvider({ children: childrenProp }: { children: ReactNode }
       // A superseded request must not surface its error either: the newer load
       // is already on its way and will report whatever is actually wrong.
       if (generation !== loadGeneration.current) return;
+      // Nor may a failed background poll: the reader asked for nothing, and
+      // replacing the screen they are working on with an error is worse than
+      // waiting for the next poll to succeed.
+      if (silent) return;
       setError(err instanceof Error ? err.message : 'Unable to load backend data');
     } finally {
       // Only the newest call owns the spinner. Clearing it here unconditionally
       // would hide the progress indicator while a newer request is still
-      // running, so the page would look idle-but-empty.
+      // running, so the page would look idle-but-empty. A silent call must still
+      // clear one a superseded non-silent call left behind, or the page would
+      // spin forever.
       if (generation === loadGeneration.current) setIsLoading(false);
     }
   }, [user?.role, refreshAlerts]);
