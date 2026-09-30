@@ -185,10 +185,13 @@ test('the Documents list filters residents by status and defaults to Active', ()
     /useState<'Active' \| 'Discharged' \| 'all'>\('Active'\)/,
     'the resident-status filter does not default to Active',
   );
+  // The predicate reads through `isClosedResident`, so a Transferred resident
+  // lands in the Discharged bucket rather than counting as Active — the filter
+  // offers one bucket for "no longer in care", not two.
   assert.match(
     DOCUMENTS,
-    /\(child\.status === 'Discharged' \? 'Discharged' : 'Active'\) === residentStatusFilter/,
-    'the status predicate no longer treats everything but Discharged as Active',
+    /\(isClosedResident\(child\.status\) \? 'Discharged' : 'Active'\) === residentStatusFilter/,
+    'the status predicate no longer treats every open case as Active',
   );
   // Applied everywhere the resident filter is: the folder tree, the flat list,
   // the folder count and the pending queue. A filter that only narrowed one of

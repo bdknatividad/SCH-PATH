@@ -31,6 +31,7 @@ import { admissionPeriodKeyFor, admissionPeriodsFor } from '@/utils/admissionPer
 import { downloadDocumentFile } from '@/utils/documentFile';
 import { isPendingReview } from '@/utils/pendingDocuments';
 import { describeError, request, apiUrl, authHeaders, fetchBinary } from '@/services/api';
+import { isClosedResident } from '@/utils/residentStatus';
 
 /**
  * The largest file a person may upload, and the only place it is written down.
@@ -1055,13 +1056,15 @@ export function DocumentUpload() {
   }, [documentSearch]);
 
   /**
-   * `children.status` is 'Discharged' once a case closes and carries no other
-   * value, so everything else — including a blank on a record written before the
-   * field existed — reads as Active.
+   * The Active / Discharged filter, with both closed statuses landing on
+   * Discharged. A `Transferred` resident is out of the active population the same
+   * way — they left without completing the programme — and the filter offers one
+   * bucket for "no longer in care", not two. A blank status reads as Active, which
+   * is what it means on a record written before the field existed.
    */
   const matchesResidentStatus = useCallback((child: { status?: string }) => {
     if (residentStatusFilter === 'all') return true;
-    return (child.status === 'Discharged' ? 'Discharged' : 'Active') === residentStatusFilter;
+    return (isClosedResident(child.status) ? 'Discharged' : 'Active') === residentStatusFilter;
   }, [residentStatusFilter]);
 
   /**

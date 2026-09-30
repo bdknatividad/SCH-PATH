@@ -23,6 +23,7 @@ import { systemDialog } from '@/app/components/SystemDialog';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/app/components/ui/dialog';
 import { Textarea } from '@/app/components/ui/textarea';
 import { Label } from '@/app/components/ui/label';
+import { isClosedResident } from '@/utils/residentStatus';
 
 interface MetricCardProps {
   title: string;
@@ -92,7 +93,7 @@ export function SystemEvaluation() {
   // Calculate metrics
   const totalResidents = children.length;
   const activeResidents = children.filter(c => c.status === 'Active').length;
-  const completedCases = children.filter(c => c.status === 'Discharged').length;
+  const completedCases = children.filter(c => isClosedResident(c.status)).length;
   
   const totalViolations = violations.length;
   const resolvedViolations = violations.filter(v => v.status === 'Resolved').length;

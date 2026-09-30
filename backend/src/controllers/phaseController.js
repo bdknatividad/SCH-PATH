@@ -368,10 +368,24 @@ async function complete(req, res, next) {
     // a phaseProgress row lock, so locking the whole id range would deadlock
     // against a concurrent completion (see runInTransactionWithIdRetry).
     await runInTransactionWithIdRetry(pool, async (connection) => {
+      // Was this admission force-advanced — by this completion, or by an earlier
+      // one? A programme that was forced anywhere was not completed, and the
+      // answer decides the resident's status below: `Transferred`, not
+      // `Discharged`. Read inside the transaction so it sees the same rows the
+      // write below is about to change.
+      const [forcedRows] = await connection.query(
+        `SELECT id FROM phaseProgress
+          WHERE residentId = ? AND forced = 1 AND id <> ?
+            AND (admissionId = ? OR admissionId IS NULL)
+          LIMIT 1`,
+        [phase.residentId, id, phase.admissionId ?? null]
+      );
+      const admissionForced = canForceAdvance || forcedRows.length > 0;
+
       // Mark current phase complete
       await connection.query(
-        `UPDATE phaseProgress SET completedAt = ?, completedBy = ?, isCurrent = 0, notes = COALESCE(?, notes) WHERE id = ?`,
-        [completedAt, completedByUser, notes, id]
+        `UPDATE phaseProgress SET completedAt = ?, completedBy = ?, isCurrent = 0, forced = ?, notes = COALESCE(?, notes) WHERE id = ?`,
+        [completedAt, completedByUser, canForceAdvance ? 1 : 0, notes, id]
       );
 
       if (nextPhase) {
@@ -400,9 +414,13 @@ async function complete(req, res, next) {
           [nextPhase, phase.residentId]
         );
       } else if (readyForDischarge) {
+        // The timeline is over. Whether the resident *completed* it decides the
+        // status: a programme force-advanced past its requirements is not a
+        // completed one, so that resident leaves as Transferred. Only a resident
+        // who met every phase's documents and checklist is Discharged.
         await connection.query(
-          "UPDATE children SET status = 'Discharged' WHERE id = ?",
-          [phase.residentId]
+          'UPDATE children SET status = ? WHERE id = ?',
+          [admissionForced ? 'Transferred' : 'Discharged', phase.residentId]
         );
       }
     });

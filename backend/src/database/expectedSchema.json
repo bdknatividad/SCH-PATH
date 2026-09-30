@@ -935,7 +935,7 @@
    },
    {
     "name": "status",
-    "type": "enum('Active','Discharged','Absconded')",
+    "type": "enum('Active','Discharged','Transferred','Absconded')",
     "nullable": false,
     "default": "Active",
     "extra": ""
@@ -3151,6 +3151,13 @@
    },
    {
     "name": "isCurrent",
+    "type": "tinyint(1)",
+    "nullable": false,
+    "default": "0",
+    "extra": ""
+   },
+   {
+    "name": "forced",
     "type": "tinyint(1)",
     "nullable": false,
     "default": "0",

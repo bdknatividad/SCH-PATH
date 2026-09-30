@@ -23,6 +23,7 @@ import { downloadDocumentFile } from '@/utils/documentFile';
 import { formatShortDate } from '@/utils/dateFormatter';
 import { PrescriptionList } from './PrescriptionList';
 import { ProgressReportDialog, MEDICAL_PROGRESS_PROGRAM } from './ProgressReportDialog';
+import { isClosedResident } from '@/utils/residentStatus';
 
 // ── CONSTANTS ──────────────────────────────────────────────────────────────
 const ALLERGIES = ['None', 'Penicillin', 'Aspirin', 'Sulfa drugs', 'Food allergies', 'Others'];
@@ -566,13 +567,14 @@ export function Health() {
   };
 
   /**
-   * Whether a resident passes the Active / Discharged / All filter. A resident
-   * is Discharged only when their record says so; everyone else is Active.
+   * Whether a resident passes the Active / Discharged / All filter. Both closed
+   * statuses land on Discharged — a transferred resident is out of the active
+   * population the same way — and a blank status reads as Active.
    */
   const matchesResidentStatus = (residentId?: string) => {
     if (residentStatusFilter === 'all') return true;
     const resident = children.find(c => c.id === residentId);
-    return (resident?.status === 'Discharged' ? 'Discharged' : 'Active') === residentStatusFilter;
+    return (isClosedResident(resident?.status) ? 'Discharged' : 'Active') === residentStatusFilter;
   };
   const statusChildren = useMemo(
     () => children.filter(c => matchesResidentStatus(c.id)),

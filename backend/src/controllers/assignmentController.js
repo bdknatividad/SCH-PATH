@@ -503,7 +503,7 @@ async function getMyResidents(req, res, next) {
     if (!ids.length) return res.json({ success: true, data: [] });
     const placeholders = ids.map(() => '?').join(',');
     const [rows] = await pool.query(
-      `SELECT * FROM children WHERE id IN (${placeholders}) AND status <> 'Discharged' ORDER BY name`,
+      `SELECT * FROM children WHERE id IN (${placeholders}) AND status NOT IN ('Discharged', 'Transferred') ORDER BY name`,
       ids
     );
     res.json({ success: true, data: rows });

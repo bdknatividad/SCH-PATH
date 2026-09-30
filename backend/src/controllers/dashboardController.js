@@ -548,7 +548,7 @@ async function centerHeadOverview(req, res, next) {
           // period, so that is where the month is read from.
           pool.query(
             `SELECT COUNT(*) AS n FROM children c
-              WHERE c.status = 'Discharged'
+              WHERE c.status IN ('Discharged', 'Transferred')
                 AND EXISTS (SELECT 1 FROM admissions a
                              WHERE a.residentId = c.id
                                AND a.closedDate >= ? AND a.closedDate <= ?)`,
@@ -701,7 +701,7 @@ async function centerHeadOverview(req, res, next) {
     // ── Discharges ─────────────────────────────────────────────────────────
     const discharges = await safe('discharges', async () => {
       const [[closed], [closedThisMonth], [recommendations]] = await Promise.all([
-        pool.query("SELECT COUNT(*) AS n FROM children WHERE status = 'Discharged'"),
+        pool.query("SELECT COUNT(*) AS n FROM children WHERE status IN ('Discharged', 'Transferred')"),
         pool.query(
           "SELECT COUNT(*) AS n FROM admissions WHERE status = 'Closed' AND closedDate >= ?",
           [monthStart]
@@ -886,7 +886,7 @@ async function centerHeadOverview(req, res, next) {
     // query adopts the same rule rather than inventing a second one.
     const documents = await safe('documents', async () => {
       const where = `d.status IN ('Submitted', 'Under Review')
-                       AND (c.id IS NULL OR c.status <> 'Discharged')`;
+                       AND (c.id IS NULL OR c.status NOT IN ('Discharged', 'Transferred'))`;
       const queuedAt = 'COALESCE(d.submittedAt, d.uploadedAt)';
       const [[total], [rows]] = await Promise.all([
         pool.query(

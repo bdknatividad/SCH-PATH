@@ -19,6 +19,9 @@
  * how the two numbers came apart in the first place.
  */
 
+import { isClosedResident } from './residentStatus';
+
+
 /** The two pre-decision statuses. `Submitted` is a first look; `Under Review` is
  *  one a reviewer has opened but not decided. `GET /documents/pending` and the
  *  Documents module both treat the two as pending. */
@@ -39,7 +42,7 @@ export function isPendingReview(doc: any): boolean {
  */
 export function residentIsActive(children: any[] | undefined, residentId?: string | null): boolean {
   const owner = (children || []).find((child) => child?.id === residentId);
-  return !owner || owner.status !== 'Discharged';
+  return !owner || !isClosedResident(owner.status);
 }
 
 /**

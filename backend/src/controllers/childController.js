@@ -23,6 +23,8 @@ const notifications = require('../services/notificationService');
 const { buildAccessSnapshot, hasModuleAccess, hasSubModuleAccess, can } = require('../config/rbac');
 const { activeAdmissionIdFor } = require('../services/admissionLink');
 const { ABSCONDED_STATUS, assertResidentNotAbsconded } = require('../utils/abscond');
+const { admissionCompletion } = require('../utils/phaseCompletion');
+const { isClosedResidentStatus, NOT_CLOSED_SQL } = require('../utils/residentStatus');
 
 const baseController = createController('children');
 
@@ -549,12 +551,48 @@ async function update(req, res, next) {
       previousMedicalNotes = before[0]?.notes ?? null;
     }
 
+    // Closing a case is decided by the timeline, not by whoever sends the PUT.
+    //
+    // Until this guard existed, `status: 'Discharged'` was accepted from any
+    // caller with edit rights on the resident, so a case could be closed with
+    // documents still unapproved and checklists unticked — and the Phase
+    // Timeline's own dialog offered exactly that, behind a warning. The rule is
+    // now the same one the timeline renders:
+    //
+    //   - **Discharged** needs every phase of the current admission completed
+    //     with its documents Approved and its checklist ticked. Nothing forced.
+    //   - **Transferred** is the other exit: a phase was force-advanced, or the
+    //     programme was not finished. It is the only status available to a
+    //     resident who was pushed through.
+    //
+    // Both close the active admission below, so the difference is the record,
+    // not the mechanics.
+    if (req.body && (req.body.status === 'Discharged' || req.body.status === 'Transferred')) {
+      const completion = await admissionCompletion(pool, req.params.id);
+      const requested = req.body.status;
+
+      if (requested === 'Discharged' && !completion.complete) {
+        throw new ApiError(
+          422,
+          completion.forced
+            ? 'This resident was advanced past a phase\'s requirements, so the programme was not completed. They can only be released as Transferred.'
+            : `This resident has not completed the programme. Still open: ${completion.missingPhases.join(', ')}.`,
+        );
+      }
+      if (requested === 'Transferred' && completion.complete) {
+        throw new ApiError(
+          422,
+          'This resident completed every phase requirement, so they are Discharged, not Transferred.',
+        );
+      }
+    }
+
     await baseController.update(req, res, next);
 
-    // When a child is discharged, close their active admission so a returning
-    // resident can be admitted again without the "already has an active
-    // admission" block.
-    if (req.body.status === 'Discharged') {
+    // When a case closes — either way — close the active admission, so a
+    // returning resident can be admitted again without the "already has an
+    // active admission" block.
+    if (req.body.status === 'Discharged' || req.body.status === 'Transferred') {
       const today = new Date().toISOString().split('T')[0];
       await pool.query(
         `UPDATE admissions
@@ -783,9 +821,9 @@ async function readmit(req, res, next) {
       date: previousAdmission?.admissionDate || child.admissionDate,
       admissionDate: previousAdmission?.admissionDate || child.admissionDate,
       dischargeDate: previousAdmission?.closedDate
-        || (child.status === 'Discharged' ? today : null),
+        || (isClosedResidentStatus(child.status) ? today : null),
       closedDate: previousAdmission?.closedDate
-        || (child.status === 'Discharged' ? today : null),
+        || (isClosedResidentStatus(child.status) ? today : null),
     };
 
     // Build updated previousCases array
@@ -1075,7 +1113,7 @@ async function abscond(req, res, next) {
     if (!rows.length) throw new ApiError(404, 'Resident not found');
     const child = rows[0];
     if (child.status === ABSCONDED_STATUS) throw new ApiError(409, 'This resident is already marked as absconded.');
-    if (child.status === 'Discharged') throw new ApiError(409, 'A discharged resident cannot be marked as absconded.');
+    if (isClosedResidentStatus(child.status)) throw new ApiError(409, 'A closed case cannot be marked as absconded.');
 
     const today = new Date().toISOString().split('T')[0];
     const actor = req.user?.username || 'System';

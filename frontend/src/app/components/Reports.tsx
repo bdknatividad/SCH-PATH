@@ -32,6 +32,7 @@ import {
   QuarterlyProgressReportEditor,
 } from './QuarterlyProgressReport';
 import { ProgramQuarterlyReports } from './ProgramQuarterlyReports';
+import { isClosedResident } from '@/utils/residentStatus';
 
 // ── DATE HELPER ─────────────────────────────────────────────────────────────
 const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -1523,7 +1524,17 @@ export function Reports() {
   const [viewerForm, setViewerForm] = useState<ReportForm | null>(null);
   const [showSWForms, setShowSWForms] = useState(false);
   const navigate = useNavigate();
-  const activeChildren = children.filter(c => c.status === 'Active' || !c.status);
+  /**
+   * The residents this card can report on: the ones whose case has closed.
+   *
+   * The card is "Resident Discharge Reports" and the button below says "Generate
+   * Resident Report", but the picker listed **active** residents — so the one
+   * document it exists to produce could never be produced for the residents it is
+   * named after, and the report was instead offered for children still in care.
+   * Both closed statuses are here: a resident released as Transferred left the
+   * programme the same way and needs the same closing document.
+   */
+  const closedChildren = children.filter(c => isClosedResident(c.status));
 
   const [selectedResidents, setSelectedResidents] = useState<string[]>([]);
   const [selectAll, setSelectAll] = useState(false);
@@ -1538,7 +1549,7 @@ export function Reports() {
     if (selectAll) {
       setSelectedResidents([]);
     } else {
-      setSelectedResidents(activeChildren.map(c => c.id));
+      setSelectedResidents(closedChildren.map(c => c.id));
     }
     setSelectAll(!selectAll);
   };
@@ -1710,14 +1721,14 @@ export function Reports() {
             <Card className="shadow-sm border-none">
               <CardHeader className="border-b border-gray-100"><CardTitle className="flex items-center gap-2 text-[#2F3E46]"><FileText className="w-5 h-5 text-[#FFD100]" /> Resident Discharge Reports</CardTitle></CardHeader>
               <CardContent className="pt-4">
-                <p className="mb-4 text-sm text-gray-500">Generate comprehensive discharge reports for residents.</p>
+                <p className="mb-4 text-sm text-gray-500">Generate the comprehensive closing report for residents whose case has been discharged or transferred.</p>
                 <Dialog>
                   <DialogTrigger asChild><Button className="w-full bg-[#2F3E46] text-white gap-2 hover:bg-[#263440]"><FileText className="w-4 h-4" /> Generate Resident Report</Button></DialogTrigger>
                   <DialogContent className="max-w-md rounded-2xl bg-white">
                     <DialogHeader><DialogTitle className="font-bold text-[#2F3E46]">Select Residents</DialogTitle><DialogDescription>Choose which residents to include in the comprehensive report.</DialogDescription></DialogHeader>
                     <div className="mt-2 space-y-4">
                       <div className="flex items-center space-x-2 rounded-xl border bg-gray-50 p-3"><Checkbox id="select-all" checked={selectAll} onCheckedChange={handleSelectAll} /><Label htmlFor="select-all" className="cursor-pointer font-medium">Select All Residents</Label></div>
-                      {activeChildren.length === 0 ? <p className="py-4 text-center text-sm italic text-gray-400">No active residents found.</p> : <div className="max-h-64 space-y-2 overflow-y-auto">{activeChildren.map(child => <div key={child.id} className="flex items-center space-x-2 rounded-xl border p-3 hover:bg-gray-50"><Checkbox id={child.id} checked={selectedResidents.includes(child.id)} onCheckedChange={() => handleSelectResident(child.id)} /><Label htmlFor={child.id} className="flex-1 cursor-pointer"><span className="font-medium">{child.name}</span><span className="ml-2 text-xs text-gray-400">({child.id})</span></Label></div>)}</div>}
+                      {closedChildren.length === 0 ? <p className="py-4 text-center text-sm italic text-gray-400">No closed cases found.</p> : <div className="max-h-64 space-y-2 overflow-y-auto">{closedChildren.map(child => <div key={child.id} className="flex items-center space-x-2 rounded-xl border p-3 hover:bg-gray-50"><Checkbox id={child.id} checked={selectedResidents.includes(child.id)} onCheckedChange={() => handleSelectResident(child.id)} /><Label htmlFor={child.id} className="flex-1 cursor-pointer"><span className="font-medium">{child.name}</span><span className="ml-2 text-xs text-gray-400">({child.id})</span></Label></div>)}</div>}
                       <div className="space-y-2 border-t pt-3"><p className="text-sm text-gray-500">Selected: {selectedResidents.length} resident(s)</p><Button className="w-full bg-[#2F3E46] text-white" disabled={!selectedResidents.length || generating} onClick={() => { void handleGenerateReport(); }}>{generating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Printer className="mr-2 h-4 w-4" />} {generating ? 'Preparing…' : `Generate & Print Report${selectedResidents.length > 1 ? 's' : ''}`}</Button></div>
                     </div>
                   </DialogContent>

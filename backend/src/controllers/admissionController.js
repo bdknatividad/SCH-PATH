@@ -14,6 +14,7 @@ const {
 } = require('../utils/constants');
 const notifications = require('../services/notificationService');
 const { canAccessResident } = require('./assignmentController');
+const { isClosedResidentStatus } = require('../utils/residentStatus');
 const BODY_MARKINGS = require('../config/bodyMarkings.json');
 const { ABSCONDED_STATUS } = require('../utils/abscond');
 
@@ -357,9 +358,12 @@ async function create(req, res, next) {
         existingResident = rows[0];
         reAdmittedFromAbscond = existingResident.status === ABSCONDED_STATUS;
         // The other way a resident's record can end. `children.status` is an ENUM
-        // of Active / Discharged / Absconded, so a returning resident is one or
-        // the other, and between them they decide the classification outright.
-        reAdmittedFromDischarge = existingResident.status === 'Discharged';
+        // of Active / Discharged / Transferred / Absconded, so a returning
+        // resident is one or the other, and between them they decide the
+        // classification outright. Both closed values count: a resident released
+        // as Transferred is coming back to a *new* admission exactly like one who
+        // completed the programme.
+        reAdmittedFromDischarge = isClosedResidentStatus(existingResident.status);
 
         /*
          * Never create another admission while the latest admission is active.

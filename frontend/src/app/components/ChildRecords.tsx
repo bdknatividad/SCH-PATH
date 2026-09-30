@@ -118,6 +118,7 @@ import {
   BodyMarkingEntry,
   drawBodyMarkingsOnSlip,
 } from '@/app/utils/admissionSlipMarkings';
+import { isActiveResident, isClosedResident } from '@/utils/residentStatus';
 
 // The body parts a piercing or tattoo can be recorded against. Read from the
 // same file `admissionController` validates against, so the dropdown and the API
@@ -4237,16 +4238,12 @@ export function ChildRecords() {
           (
             statusFilter ===
               'Active' &&
-            child.status !==
-              'Discharged' &&
-            child.status !==
-              'Absconded'
+            isActiveResident(child.status)
           ) ||
           (
             statusFilter ===
               'Discharged' &&
-            child.status ===
-              'Discharged'
+            isClosedResident(child.status)
           ) ||
           (
             statusFilter ===
@@ -4265,10 +4262,7 @@ export function ChildRecords() {
   const activeCount =
     children.filter(
       (child: any) =>
-        child.status !==
-        'Discharged' &&
-        child.status !==
-        'Absconded'
+        isActiveResident(child.status)
     ).length;
 
   // Residents marked Absconded (from the Abscond button in Personal Info).
@@ -4282,8 +4276,7 @@ export function ChildRecords() {
   const dischargedCount =
     children.filter(
       (child: any) =>
-        child.status ===
-        'Discharged'
+        isClosedResident(child.status)
     ).length;
 
   const exactResident =
@@ -4310,9 +4303,12 @@ export function ChildRecords() {
     isReturningAdmission &&
       (duplicateChild || exactResident)?.status === 'Absconded'
   );
+  // Both closed statuses count. A resident who left as Transferred is coming
+     // back to a new admission exactly like one who completed the programme, and
+  // the backend classifies it the same way (`reAdmittedFromDischarge`).
   const isReturningFromDischarge = Boolean(
     isReturningAdmission &&
-      (duplicateChild || exactResident)?.status === 'Discharged'
+      isClosedResident((duplicateChild || exactResident)?.status)
   );
 
   const admissionStatus = editingId
@@ -5758,8 +5754,7 @@ export function ChildRecords() {
                             'No category'}
                         </Badge>
 
-                        {child.status ===
-                          'Discharged' && (
+                        {isClosedResident(child.status) && (
                           <Badge className="bg-emerald-500/20 text-emerald-300 border-none text-[10px] uppercase font-bold">
                             Case Closed
                           </Badge>

@@ -500,7 +500,7 @@ async function runMigrations() {
       name VARCHAR(150) NOT NULL,
       age INT NOT NULL DEFAULT 0,
       gender ENUM('Male', 'Female') NOT NULL DEFAULT 'Male',
-      status ENUM('Active', 'Discharged', 'Absconded') NOT NULL DEFAULT 'Active',
+      status ENUM('Active', 'Discharged', 'Transferred', 'Absconded') NOT NULL DEFAULT 'Active',
       createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
@@ -1740,7 +1740,7 @@ async function runMigrations() {
         admissionDate DATE NULL,
         legalCategory VARCHAR(150) NULL,
         caseType VARCHAR(150) NULL,
-        status ENUM('Active', 'Discharged', 'Absconded') NOT NULL DEFAULT 'Active',
+        status ENUM('Active', 'Discharged', 'Transferred', 'Absconded') NOT NULL DEFAULT 'Active',
         casePhase VARCHAR(150) NULL,
         isRepeatOffender BOOLEAN NOT NULL DEFAULT FALSE,
         previousCaseDetails TEXT NULL,
@@ -1780,7 +1780,7 @@ async function runMigrations() {
         admissionDate: 'DATE NULL',
         legalCategory: 'VARCHAR(150) NULL',
         caseType: 'VARCHAR(150) NULL',
-        status: "ENUM('Active', 'Discharged', 'Absconded') NOT NULL DEFAULT 'Active'",
+        status: "ENUM('Active', 'Discharged', 'Transferred', 'Absconded') NOT NULL DEFAULT 'Active'",
         casePhase: 'VARCHAR(150) NULL',
         isRepeatOffender: 'BOOLEAN NOT NULL DEFAULT FALSE',
         previousCaseDetails: 'TEXT NULL',
@@ -1815,9 +1815,10 @@ async function runMigrations() {
           console.log(`Migration: added children.${column}.`);
         }
       }
-      // An existing database has the two-value status; widen it so a resident
-      // can be marked Absconded. Idempotent, and no existing value changes.
-      await pool.query(`ALTER TABLE children MODIFY COLUMN status ENUM('Active', 'Discharged', 'Absconded') NOT NULL DEFAULT 'Active'`);
+      // An existing database has a narrower status; widen it so a resident can
+      // be marked Absconded or Transferred. Idempotent, and no existing value
+      // changes.
+      await pool.query(`ALTER TABLE children MODIFY COLUMN status ENUM('Active', 'Discharged', 'Transferred', 'Absconded') NOT NULL DEFAULT 'Active'`);
     }
   } catch (err) {
     console.warn('Migration warning (childRecordTabs):', err.message);
@@ -1836,9 +1837,9 @@ async function runMigrations() {
     // production throws ER_BAD_FIELD_ERROR.
     await ensureColumn('children', 'abscondedAt', 'DATETIME NULL', 'updatedAt');
     await ensureColumn('children', 'abscondedBy', 'VARCHAR(100) NULL', 'abscondedAt');
-    // An existing database has the two-value status; widen it so a resident can
-    // be marked Absconded. Idempotent, and no existing value changes.
-    await pool.query(`ALTER TABLE children MODIFY COLUMN status ENUM('Active', 'Discharged', 'Absconded') NOT NULL DEFAULT 'Active'`);
+    // An existing database has a narrower status; widen it so a resident can be
+    // marked Absconded or Transferred. Idempotent, and no existing value changes.
+    await pool.query(`ALTER TABLE children MODIFY COLUMN status ENUM('Active', 'Discharged', 'Transferred', 'Absconded') NOT NULL DEFAULT 'Active'`);
   } catch (err) {
     console.warn('Migration warning (children absconded):', err.message);
   }
@@ -2813,6 +2814,14 @@ async function runMigrations() {
   // exactly one admission, and retiring an admission retires only its own rows.
   await ensureColumn('phaseProgress', 'admissionId', 'VARCHAR(40) NULL', 'residentId');
   await ensureIndex('phaseProgress', 'idx_phaseProgress_admission', 'admissionId');
+
+  // Records that this phase was advanced by a Center Head / Social Worker
+  // override, past requirements that were still outstanding. It is what decides
+  // whether a resident who reaches the end of the timeline is recorded as
+  // Discharged (they completed the programme) or Transferred (they did not) —
+  // see `residentStatus`. Existing rows default to 0, which is right: nothing
+  // before this column existed could record that it had been forced.
+  await ensureColumn('phaseProgress', 'forced', 'BOOLEAN NOT NULL DEFAULT FALSE', 'isCurrent');
   await backfillPhaseProgressAdmissions();
   await repairWorkflowDocuments();
   await grantChildRecordsToHouseparents();

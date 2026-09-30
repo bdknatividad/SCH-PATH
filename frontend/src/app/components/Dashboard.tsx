@@ -19,6 +19,7 @@ import { lazyComponent, RouteFallback } from '@/app/utils/lazyComponent';
 import { canOpenModule, userCan } from '@/app/config/moduleAccess';
 import { formatShortDate } from '@/utils/dateFormatter';
 import { pendingReviewQueue } from '@/utils/pendingDocuments';
+import { isClosedResident } from '@/utils/residentStatus';
 
 /**
  * The command centre is the only screen that imports recharts — roughly 350 kB
@@ -193,7 +194,7 @@ function ChildrenOverviewModal({ open, onClose, children: allChildren, violation
   if (!open) return null;
 
   const activeChildren = allChildren.filter(c => !c.status || c.status === 'Active');
-  const dischargedChildren = allChildren.filter(c => c.status === 'Discharged');
+  const dischargedChildren = allChildren.filter(c => isClosedResident(c.status));
   const getRisk = (childId: string) => {
     const active = violations.filter(
       v => v.residentId === childId && v.status !== 'Resolved'
@@ -1700,7 +1701,7 @@ export function Dashboard() {
   // is how the "Active Cases" tile and the "Total Residents" tile came to
   // disagree.
   const activeCount    = activeChildren.length;
-  const closedCount    = children.filter(c => c.status === 'Discharged').length;
+  const closedCount    = children.filter(c => isClosedResident(c.status)).length;
 
   const needImprovementCount = activeChildren.filter(c => getRealTimeUrgency(c.id).label === 'Need Improvement').length;
   const fairCount = activeChildren.filter(c => getRealTimeUrgency(c.id).label === 'Fair').length;

@@ -141,7 +141,11 @@ const RESOURCES = {
     prefix: 'PHS',
     orderBy: 'enteredAt ASC',
     jsonFields: ['tasksRequired', 'tasksCompleted'],
-    columns: ['id', 'residentId', 'phaseName', 'enteredAt', 'completedAt', 'tasksRequired', 'tasksCompleted', 'notes', 'enteredBy', 'completedBy', 'isCurrent', 'createdBy', 'modifiedBy'],
+    // `forced` says this phase was advanced by a Center Head / Social Worker
+    // override, past requirements that were still outstanding. It is what stops
+    // a resident who never finished the programme from being recorded as
+    // Discharged — they leave as Transferred instead. See `residentStatus`.
+    columns: ['id', 'residentId', 'phaseName', 'enteredAt', 'completedAt', 'tasksRequired', 'tasksCompleted', 'notes', 'enteredBy', 'completedBy', 'isCurrent', 'forced', 'createdBy', 'modifiedBy'],
   },
   education_records: {
     prefix: 'EDU',

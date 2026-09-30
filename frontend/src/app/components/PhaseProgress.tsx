@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/app/components/ui/card';
 import { Button } from '@/app/components/ui/button';
 import { Badge } from '@/app/components/ui/badge';
-import { CheckCircle2, Circle, ChevronRight, AlertTriangle, Lock, ClipboardList, FileText, Loader2, Upload, Clock, XCircle, Download, FolderOpen, Trash2 } from 'lucide-react';
+import { CheckCircle2, Circle, ChevronRight, AlertTriangle, Lock, ClipboardList, FileText, Loader2, Upload, Clock, XCircle, Download, FolderOpen, Trash2, Repeat } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/app/components/ui/dialog';
 import { Textarea } from '@/app/components/ui/textarea';
 import { Input } from '@/app/components/ui/input';
@@ -15,6 +15,7 @@ import { useData } from '../state/DataContext';
 import { formatShortDate, formatShortDateTime } from '@/utils/dateFormatter';
 import { admissionPeriodsFor } from '@/utils/admissionPeriods';
 import { renderReportPdf } from '@/app/utils/reportPdf';
+import { isClosedResident } from '@/utils/residentStatus';
 
 const CASE_PHASES = [
   'Admission Phase',
@@ -386,7 +387,7 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
   // Sync discharged state — resets to false when child is re-admitted
   useEffect(() => {
     const child = children.find(c => c.id === residentId);
-    if (child?.status === 'Discharged') {
+    if (isClosedResident(child?.status)) {
       setIsCaseClosed(true);
     } else if (child?.status === 'Active') {
       setIsCaseClosed(false); // reset when re-admitted
@@ -937,8 +938,8 @@ ${admissionHistorySection}
     <div class="section-title">Discharge Summary</div>
     <div class="grid">
       <div class="field"><div class="label">Final Phase</div><div class="value">${currentPhase}</div></div>
-      <div class="field"><div class="label">Discharge Status</div><div class="value"><span class="status-badge">✓ Cleared for Discharge</span></div></div>
-      <div class="field"><div class="label">Shelter Recommendation</div><div class="value">${dischargeRecommendation || 'For Reintegration'}</div></div>
+      <div class="field"><div class="label">Case Status</div><div class="value"><span class="status-badge">${dischargeCase === 'transfer' ? '↪ Transferred Out' : '✓ Cleared for Discharge'}</span></div></div>
+      <div class="field"><div class="label">Shelter Recommendation</div><div class="value">${dischargeCase === 'transfer' ? 'For Transfer' : (dischargeRecommendation || 'For Reintegration')}</div></div>
       <div class="field"><div class="label">Discharge Date</div><div class="value">${dischargeDate || 'To be confirmed'}</div></div>
     </div>
   </div>
@@ -1051,16 +1052,27 @@ ${admissionHistorySection}
     setIsConfirmingDischarge(true);
     try {
       const existingNotes = children.find(c => c.id === residentId)?.notes || '';
-      const recNote = dischargeRecommendation ? (String.fromCharCode(10) + '[Discharge Recommendation: ' + dischargeRecommendation + ']') : '';
+      // A forced programme closes as a transfer, and the recommendation follows
+      // it — the record must not say "For Reintegration" about a resident who
+      // never finished. The backend refuses the mismatch either way.
+      const recommendation = dischargeCase === 'transfer' ? 'For Transfer' : dischargeRecommendation;
+      const recNote = recommendation ? (String.fromCharCode(10) + '[Discharge Recommendation: ' + recommendation + ']') : '';
       const reasonNote = dischargeNote.trim() ? (String.fromCharCode(10) + '[Discharge Note: ' + dischargeNote.trim() + ']') : '';
       await updateChild(residentId, {
-        status: 'Discharged',
+        status: dischargeCase === 'transfer' ? 'Transferred' : 'Discharged',
         notes: existingNotes + recNote + reasonNote,
         ...(dischargeDate ? { dischargeDate } : {}),
       } as any);
       setIsDischargeConfirmed(true);
       onPhaseAdvanced?.();
-    } catch (e) { console.error('Discharge failed:', e); }
+    } catch (e) {
+      // The API refuses a close that does not match the timeline, so a failed
+      // one has to say why instead of only reaching the console.
+      void systemDialog.failure(
+        'Could not close the case',
+        describeError(e, 'The case was not closed. Please try again.'),
+      );
+    }
     setIsConfirmingDischarge(false);
   };
 
@@ -1495,10 +1507,151 @@ ${admissionHistorySection}
   const allPhasesComplete = allPreviousPhasesComplete && finalPhaseAllDone;
   const todayDateStr = new Date().toISOString().split('T')[0];
   const hasReachedEstimatedDate = !estimatedDischargeDate || todayDateStr >= estimatedDischargeDate;
-  type DischargeCase = 'incomplete' | 'early' | 'ready';
-  const dischargeCase: DischargeCase = !allPhasesComplete
-    ? 'incomplete'
-    : (!hasReachedEstimatedDate ? 'early' : 'ready');
+  /**
+   * Was any phase of this admission advanced by a Center Head / Social Worker
+   * override, past requirements that were still outstanding?
+   *
+   * This is what separates the two ways a case closes. A programme pushed
+   * through was not completed, so that resident leaves as **Transferred**; only
+   * one who met every phase's documents and checklist is **Discharged**. The
+   * backend enforces the same rule on the write, so the dialog and the API
+   * cannot disagree.
+   */
+  const admissionForced = phaseHistory.some(h => Number((h as { forced?: unknown }).forced) === 1);
+
+  type DischargeCase = 'incomplete' | 'early' | 'ready' | 'transfer';
+  /**
+   * Which closing the timeline allows, in order of precedence:
+   *
+   *  - `transfer`   — a phase was force-advanced. The programme was not
+   *                   completed, so this is the only exit available.
+   *  - `incomplete` — requirements outstanding. **No exit**: this used to be a
+   *                   warning on a button that discharged anyway.
+   *  - `early`      — everything done, before the estimated discharge date.
+   *  - `ready`      — everything done, date reached.
+   */
+  const dischargeCase: DischargeCase = admissionForced
+    ? 'transfer'
+    : (!allPhasesComplete
+        ? 'incomplete'
+        : (!hasReachedEstimatedDate ? 'early' : 'ready'));
+
+  /**
+   * The discharge-report signature step, held as a value rather than inline.
+   *
+   * It used to sit at the bottom of the page body, which is never rendered
+   * once a case is closed — `isCaseClosed` returns early, above it — so the
+   * "Download Discharge Report" button on the CASE CLOSED screen opened a
+   * dialog that was never mounted and did nothing at all. Both branches render
+   * this same element now, so there is still exactly one of it.
+   */
+  const dischargeSignDialog = (
+        <Dialog
+          open={isDischargeSignOpen}
+          onOpenChange={(open) => {
+            // Cancelling (Escape / overlay click / the Cancel button all route
+            // through here) discards the draft names and signatures and stops an
+            // in-flight generation from finishing — nothing is saved,
+            // submitted, or written to the report once this fires.
+            if (!open) {
+              dischargeGenerationCancelledRef.current = true;
+              setDischargeSignerName('');
+              setDischargePreparedBySignature('');
+              setDischargeApprovedByName('');
+              setDischargeApprovedBySignature('');
+              setIsGeneratingReport(false);
+            }
+            setIsDischargeSignOpen(open);
+          }}
+        >
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle className="text-[#2F3E46]">Sign the Discharge Report</DialogTitle>
+              <DialogDescription>
+                Two signatures are printed on the report, each above its printed name: the staff who
+                prepared it and the approving authority. Leave a pad blank to print that form with an
+                empty line instead.
+              </DialogDescription>
+            </DialogHeader>
+  
+            <div className="grid gap-6 py-2 sm:grid-cols-2">
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <Label className="text-sm font-bold" htmlFor="discharge-prepared-by-name">Prepared by — Full Name</Label>
+                  <Input
+                    id="discharge-prepared-by-name"
+                    value={dischargeSignerName}
+                    onChange={(e) => setDischargeSignerName(e.target.value)}
+                    placeholder="Enter full name"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-sm font-bold">Prepared by signature</Label>
+                  <div className="h-28 w-full">
+                    <SignaturePadModal
+                      label="Prepared by signature"
+                      value={dischargePreparedBySignature}
+                      onChange={setDischargePreparedBySignature}
+                      hint="Tap to sign"
+                    />
+                  </div>
+                </div>
+              </div>
+  
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <Label className="text-sm font-bold" htmlFor="discharge-approved-by-name">Approving authority — Full Name</Label>
+                  <Input
+                    id="discharge-approved-by-name"
+                    value={dischargeApprovedByName}
+                    onChange={(e) => setDischargeApprovedByName(e.target.value)}
+                    placeholder="Enter full name"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-sm font-bold">Approving authority signature</Label>
+                  <div className="h-28 w-full">
+                    <SignaturePadModal
+                      label="Approving authority signature"
+                      value={dischargeApprovedBySignature}
+                      onChange={setDischargeApprovedBySignature}
+                      hint="Tap to sign"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+  
+            <DialogFooter className="gap-2">
+              {/* Always clickable — including while a report is being generated,
+                  so Cancel can stop that in-flight generation instead of being
+                  greyed out and leaving the user stuck on this screen. */}
+              <Button
+                variant="outline"
+                onClick={() => {
+                  dischargeGenerationCancelledRef.current = true;
+                  setDischargeSignerName('');
+                  setDischargePreparedBySignature('');
+                  setDischargeApprovedByName('');
+                  setDischargeApprovedBySignature('');
+                  setIsGeneratingReport(false);
+                  setIsDischargeSignOpen(false);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={() => buildDischargeReport(dischargePreparedBySignature, dischargeApprovedBySignature)}
+                disabled={isGeneratingReport}
+                className="bg-[#2F3E46] text-white gap-2"
+              >
+                {isGeneratingReport ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                Generate Report
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+  );
 
   if (loading) {
     return (
@@ -1519,7 +1672,10 @@ ${admissionHistorySection}
         <div className="space-y-2">
           <h2 className="text-4xl font-black text-emerald-700 tracking-tight">CASE CLOSED</h2>
           <p className="text-gray-500 text-sm">
-            <strong>{child?.name}</strong> has been officially discharged from Second Chance Home.
+            <strong>{child?.name}</strong>{' '}
+            {String(child?.status || '').trim() === 'Transferred'
+              ? 'was transferred out of Second Chance Home — a phase was force-advanced, so the programme was not completed.'
+              : 'has been officially discharged from Second Chance Home.'}
           </p>
           <p className="text-xs text-gray-400 italic">Record preserved and accessible in archives.</p>
         </div>
@@ -1531,6 +1687,9 @@ ${admissionHistorySection}
           {isGeneratingReport ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileText className="w-4 h-4" />}
           Download Discharge Report
         </button>
+        {/* Mounted here too — this branch returns before the page body, so the
+            dialog has to travel with it or the button above does nothing. */}
+        {dischargeSignDialog}
       </div>
     );
   }
@@ -1996,18 +2155,45 @@ ${admissionHistorySection}
             {!isHouseparent && (
             <div className="pt-2 border-t border-gray-100">
               {currentPhase === CASE_PHASES[CASE_PHASES.length - 1] ? (
-                <Button
-                  onClick={() => {
-                    setDischargeDate(todayDateStr);
-                    setDischargeNote('');
-                    setIsDischargePopupOpen(true);
-                  }}
-                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold"
-                  size="sm"
-                >
-                  <CheckCircle2 className="w-4 h-4 mr-2" />
-                  Discharge
-                </Button>
+                <>
+                  <Button
+                    onClick={() => {
+                      setDischargeDate(todayDateStr);
+                      setDischargeNote('');
+                      // A forced programme is recommended for transfer, and the
+                      // dialog offers no other option — seed it here so the report
+                      // and the confirm step agree with the picker.
+                      setDischargeRecommendation(dischargeCase === 'transfer' ? 'For Transfer' : 'For Reintegration');
+                      setIsDischargePopupOpen(true);
+                    }}
+                    disabled={dischargeCase === 'incomplete'}
+                    title={dischargeCase === 'incomplete'
+                      ? 'Every phase requirement has to be met before the case can be closed.'
+                      : undefined}
+                    className={`w-full text-white font-bold ${
+                      dischargeCase === 'transfer'
+                        ? 'bg-blue-600 hover:bg-blue-700'
+                        : 'bg-emerald-600 hover:bg-emerald-700'
+                    } disabled:bg-gray-300 disabled:cursor-not-allowed`}
+                    size="sm"
+                  >
+                    {dischargeCase === 'transfer'
+                      ? <Repeat className="w-4 h-4 mr-2" />
+                      : <CheckCircle2 className="w-4 h-4 mr-2" />}
+                    {dischargeCase === 'transfer' ? 'Transfer Out' : 'Discharge'}
+                  </Button>
+                  {/* The rule, stated where the button is. A disabled control with
+                      no reason reads as a bug, and the reason is not obvious: the
+                      outstanding items are further up the page. */}
+                  {dischargeCase === 'incomplete' && (
+                    <p className="mt-2 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5">
+                      Not yet closable — every phase's documents and checklist have to be
+                      complete. Finish the outstanding items above, or the Center Head or
+                      Social Worker can override a phase, which releases the resident as
+                      Transferred instead of Discharged.
+                    </p>
+                  )}
+                </>
               ) : (
                 <Button
                   onClick={handleValidate}
@@ -2152,20 +2338,42 @@ ${admissionHistorySection}
                 /* ── Step 1: Pre-confirmation prompt ── */
                 <>
                   <DialogHeader>
-                    <DialogTitle className={`flex items-center gap-2 text-lg ${dischargeCase === 'incomplete' ? 'text-amber-600' : dischargeCase === 'early' ? 'text-blue-600' : 'text-emerald-700'}`}>
-                      {dischargeCase === 'ready' ? <CheckCircle2 className="w-5 h-5" /> : '⚠'} Are you sure you want to close this case?
+                    <DialogTitle className={`flex items-center gap-2 text-lg ${dischargeCase === 'incomplete' ? 'text-amber-600' : dischargeCase === 'transfer' ? 'text-blue-700' : dischargeCase === 'early' ? 'text-blue-600' : 'text-emerald-700'}`}>
+                      {dischargeCase === 'ready' ? <CheckCircle2 className="w-5 h-5" /> : '⚠'}{' '}
+                      {dischargeCase === 'transfer'
+                        ? 'This case can only be closed as a transfer'
+                        : dischargeCase === 'incomplete'
+                          ? 'This case cannot be closed yet'
+                          : 'Are you sure you want to close this case?'}
                     </DialogTitle>
                   </DialogHeader>
                   <div className="space-y-4 py-2">
                     {dischargeCase === 'incomplete' && (
                       <div className="p-4 bg-amber-50 border border-amber-300 rounded-lg">
                         <p className="text-amber-900 text-sm font-semibold">
-                          You are about to officially close the case of{' '}
-                          <strong>{children.find(c => c.id === residentId)?.name}</strong>.
+                          <strong>{children.find(c => c.id === residentId)?.name}</strong> still has phase requirements outstanding.
                         </p>
                         <p className="text-amber-700 text-xs mt-2">
-                          This will discharge the resident from the shelter and mark the case as <strong>Closed</strong>, even though not
-                          all phase requirements are complete yet.
+                          A case can only be closed once every phase's documents are approved and its checklist is
+                          complete. Finish the outstanding items on this timeline, then come back — or have the Center
+                          Head or a Social Worker override the phase, which releases the resident as
+                          <strong> Transferred</strong> rather than Discharged.
+                        </p>
+                      </div>
+                    )}
+
+                    {/* A forced programme has exactly one exit, and this says so
+                        before the reader is asked to confirm it. */}
+                    {dischargeCase === 'transfer' && (
+                      <div className="p-4 bg-blue-50 border border-blue-300 rounded-lg">
+                        <p className="text-blue-900 text-sm font-semibold">
+                          A phase on <strong>{children.find(c => c.id === residentId)?.name}</strong>'s timeline was
+                          force-advanced past its requirements.
+                        </p>
+                        <p className="text-blue-700 text-xs mt-2">
+                          The programme was therefore not completed, so this case cannot be recorded as a discharge.
+                          Closing it records the resident as <strong>Transferred</strong>, and the shelter
+                          recommendation is fixed to <strong>For Transfer</strong>.
                         </p>
                       </div>
                     )}
@@ -2203,11 +2411,16 @@ ${admissionHistorySection}
                       </p>
                     </div>
 
-                    {/* Shelter Recommendation */}
+                    {/* Shelter Recommendation. A forced programme has one
+                        answer, so only that one is offered — "For Reintegration"
+                        would claim a reintegration that never happened. */}
                     <div className="space-y-2">
                       <p className="text-sm font-bold text-[#2F3E46]">Shelter Recommendation *</p>
                       <div className="flex gap-2">
-                        {(['For Reintegration', 'For Transfer'] as const).map(rec => (
+                        {(dischargeCase === 'transfer'
+                          ? (['For Transfer'] as const)
+                          : (['For Reintegration', 'For Transfer'] as const)
+                        ).map(rec => (
                           <button
                             key={rec}
                             type="button"
@@ -2265,11 +2478,15 @@ ${admissionHistorySection}
                         Cancel
                       </Button>
                       <Button
-                        className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white"
-                        disabled={!dischargeRecommendation}
+                        className={`flex-1 text-white ${dischargeCase === 'transfer' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-emerald-600 hover:bg-emerald-700'}`}
+                        disabled={!dischargeRecommendation || dischargeCase === 'incomplete'}
                         onClick={() => setShowDischargeConfirmPrompt(true)}
                       >
-                        Yes, proceed to close case
+                        {dischargeCase === 'incomplete'
+                          ? 'Requirements outstanding'
+                          : dischargeCase === 'transfer'
+                            ? 'Yes, proceed to transfer'
+                            : 'Yes, proceed to close case'}
                       </Button>
                     </div>
                   </div>
@@ -2278,13 +2495,17 @@ ${admissionHistorySection}
                 /* ── Step 2: Discharge actions ── */
                 <>
                   <DialogHeader>
-                    <DialogTitle className="flex items-center gap-2 text-emerald-700 text-lg">
-                      <CheckCircle2 className="w-6 h-6 text-emerald-500" />
-                      {dischargeCase === 'ready' ? 'Ready for Discharge' : 'Confirm Discharge'}
+                    <DialogTitle className={`flex items-center gap-2 text-lg ${dischargeCase === 'transfer' ? 'text-blue-700' : 'text-emerald-700'}`}>
+                      {dischargeCase === 'transfer'
+                        ? <Repeat className="w-6 h-6 text-blue-500" />
+                        : <CheckCircle2 className="w-6 h-6 text-emerald-500" />}
+                      {dischargeCase === 'transfer'
+                        ? 'Confirm Transfer'
+                        : dischargeCase === 'ready' ? 'Ready for Discharge' : 'Confirm Discharge'}
                     </DialogTitle>
                   </DialogHeader>
                   <div className="space-y-4 py-2">
-                    <div className={`p-4 rounded-lg border ${dischargeCase === 'ready' ? 'bg-emerald-50 border-emerald-200' : dischargeCase === 'early' ? 'bg-blue-50 border-blue-200' : 'bg-amber-50 border-amber-200'}`}>
+                    <div className={`p-4 rounded-lg border ${dischargeCase === 'ready' ? 'bg-emerald-50 border-emerald-200' : dischargeCase === 'early' || dischargeCase === 'transfer' ? 'bg-blue-50 border-blue-200' : 'bg-amber-50 border-amber-200'}`}>
                       {dischargeCase === 'ready' && (
                         <p className="text-emerald-800 text-sm font-semibold">
                           {children.find(c => c.id === residentId)?.name} has completed all requirements
@@ -2301,7 +2522,14 @@ ${admissionHistorySection}
                       {dischargeCase === 'incomplete' && (
                         <p className="text-amber-800 text-sm font-semibold">
                           {children.find(c => c.id === residentId)?.name} has not yet completed every requirement
-                          of the <strong>Reintegration/Aftercare Program</strong>. Confirm below to discharge anyway.
+                          of the <strong>Reintegration/Aftercare Program</strong>, so this case cannot be closed.
+                        </p>
+                      )}
+                      {dischargeCase === 'transfer' && (
+                        <p className="text-blue-800 text-sm font-semibold">
+                          {children.find(c => c.id === residentId)?.name}'s timeline was force-advanced, so the
+                          programme was not completed. Confirming records the case as <strong>Transferred</strong>,
+                          recommended <strong>For Transfer</strong>.
                         </p>
                       )}
                     </div>
@@ -2350,18 +2578,32 @@ ${admissionHistorySection}
                 </div>
               </div>
               <div className="space-y-2">
-                <h2 className="text-2xl font-black text-emerald-700">Case Closed</h2>
+                <h2 className="text-2xl font-black text-emerald-700">
+                  {dischargeCase === 'transfer' ? 'Case Closed — Transferred' : 'Case Closed'}
+                </h2>
                 <p className="text-gray-600 text-sm">
                   <strong>{children.find(c => c.id === residentId)?.name}</strong> has been
-                  officially discharged from Second Chance Home.
+                  {dischargeCase === 'transfer'
+                    ? ' transferred out of Second Chance Home.'
+                    : ' officially discharged from Second Chance Home.'}
                 </p>
               </div>
               <div className="p-4 bg-gray-50 rounded-xl text-left space-y-1 text-sm text-gray-600">
-                <p>✅ All rehabilitation phases completed</p>
-                <p>✅ Required documents filed and archived</p>
-                <p>✅ Guardian notified of discharge</p>
-                <p>✅ After-care support arranged</p>
-                <p>✅ Child status updated to <strong>Discharged</strong></p>
+                {dischargeCase === 'transfer' ? (
+                  <>
+                    <p>↪ A phase was force-advanced, so the programme was not completed</p>
+                    <p>✅ Record closed and archived</p>
+                    <p>✅ Child status updated to <strong>Transferred</strong></p>
+                  </>
+                ) : (
+                  <>
+                    <p>✅ All rehabilitation phases completed</p>
+                    <p>✅ Required documents filed and archived</p>
+                    <p>✅ Guardian notified of discharge</p>
+                    <p>✅ After-care support arranged</p>
+                    <p>✅ Child status updated to <strong>Discharged</strong></p>
+                  </>
+                )}
               </div>
               <p className="text-xs text-gray-400 italic">
                 The child's record has been preserved and can be accessed in the archives.
@@ -2446,112 +2688,8 @@ ${admissionHistorySection}
         </DialogContent>
       </Dialog>
 
-      {/* DISCHARGE REPORT SIGNATURE */}
-      <Dialog
-        open={isDischargeSignOpen}
-        onOpenChange={(open) => {
-          // Cancelling (Escape / overlay click / the Cancel button all route
-          // through here) discards the draft names and signatures and stops an
-          // in-flight generation from finishing — nothing is saved,
-          // submitted, or written to the report once this fires.
-          if (!open) {
-            dischargeGenerationCancelledRef.current = true;
-            setDischargeSignerName('');
-            setDischargePreparedBySignature('');
-            setDischargeApprovedByName('');
-            setDischargeApprovedBySignature('');
-            setIsGeneratingReport(false);
-          }
-          setIsDischargeSignOpen(open);
-        }}
-      >
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle className="text-[#2F3E46]">Sign the Discharge Report</DialogTitle>
-            <DialogDescription>
-              Two signatures are printed on the report, each above its printed name: the staff who
-              prepared it and the approving authority. Leave a pad blank to print that form with an
-              empty line instead.
-            </DialogDescription>
-          </DialogHeader>
+      {dischargeSignDialog}
 
-          <div className="grid gap-6 py-2 sm:grid-cols-2">
-            <div className="space-y-3">
-              <div className="space-y-1">
-                <Label className="text-sm font-bold" htmlFor="discharge-prepared-by-name">Prepared by — Full Name</Label>
-                <Input
-                  id="discharge-prepared-by-name"
-                  value={dischargeSignerName}
-                  onChange={(e) => setDischargeSignerName(e.target.value)}
-                  placeholder="Enter full name"
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-sm font-bold">Prepared by signature</Label>
-                <div className="h-28 w-full">
-                  <SignaturePadModal
-                    label="Prepared by signature"
-                    value={dischargePreparedBySignature}
-                    onChange={setDischargePreparedBySignature}
-                    hint="Tap to sign"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              <div className="space-y-1">
-                <Label className="text-sm font-bold" htmlFor="discharge-approved-by-name">Approving authority — Full Name</Label>
-                <Input
-                  id="discharge-approved-by-name"
-                  value={dischargeApprovedByName}
-                  onChange={(e) => setDischargeApprovedByName(e.target.value)}
-                  placeholder="Enter full name"
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-sm font-bold">Approving authority signature</Label>
-                <div className="h-28 w-full">
-                  <SignaturePadModal
-                    label="Approving authority signature"
-                    value={dischargeApprovedBySignature}
-                    onChange={setDischargeApprovedBySignature}
-                    hint="Tap to sign"
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <DialogFooter className="gap-2">
-            {/* Always clickable — including while a report is being generated,
-                so Cancel can stop that in-flight generation instead of being
-                greyed out and leaving the user stuck on this screen. */}
-            <Button
-              variant="outline"
-              onClick={() => {
-                dischargeGenerationCancelledRef.current = true;
-                setDischargeSignerName('');
-                setDischargePreparedBySignature('');
-                setDischargeApprovedByName('');
-                setDischargeApprovedBySignature('');
-                setIsGeneratingReport(false);
-                setIsDischargeSignOpen(false);
-              }}
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={() => buildDischargeReport(dischargePreparedBySignature, dischargeApprovedBySignature)}
-              disabled={isGeneratingReport}
-              className="bg-[#2F3E46] text-white gap-2"
-            >
-              {isGeneratingReport ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-              Generate Report
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
           {/* History table */}
           {phaseHistory.length > 0 && (

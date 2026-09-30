@@ -18,6 +18,7 @@ import {
   ChevronDown, ChevronRight, User, Search,
   Activity, ArrowRight, CheckCheck, ListFilter, FileText,
 } from 'lucide-react';
+import { isClosedResident } from '@/utils/residentStatus';
 
 const SEV_BADGE: Record<string, string> = {
   Major: 'bg-orange-100 text-orange-700',
@@ -251,7 +252,7 @@ export function InterventionTracker({ embedded = false }: { embedded?: boolean }
     || report.documentStatus === 'Reassessment'
   );
 
-  const activeChildren = children.filter(c => c.status !== 'Discharged');
+  const activeChildren = children.filter(c => !isClosedResident(c.status));
 
   const displayViolationStatus = (v: any) => {
     if (v?.status === 'Resolved') return 'Resolved';

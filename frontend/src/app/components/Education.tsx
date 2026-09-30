@@ -28,6 +28,7 @@ import {
   User, FileText, BookOpen, Award, X, Download, AlertCircle,
   ChevronDown, ChevronUp, Paperclip, CalendarDays, CheckCircle2,
 } from 'lucide-react';
+import { isActiveResident, isClosedResident } from '@/utils/residentStatus';
 
 // ── TYPES ────────────────────────────────────────────────────────────────────
 
@@ -520,7 +521,7 @@ export function Education() {
   const isPastLearner = (student: Student) => {
     if (!student.residentId) return false;
     const status = residents.find(r => r.id === student.residentId)?.status;
-    return status === 'Discharged' || status === 'Absconded';
+    return !isActiveResident(status);
   };
 
   const pastLearnerCount = students.filter(isPastLearner).length;
@@ -1574,7 +1575,7 @@ export function Education() {
                 }}>
                   <SelectTrigger className="rounded-xl"><SelectValue placeholder="Select resident..." /></SelectTrigger>
                   <SelectContent>
-                    {residents.filter(r => r.status !== 'Discharged').map(r => (
+                    {residents.filter(r => !isClosedResident(r.status)).map(r => (
                       <SelectItem key={r.id} value={r.name}>{r.name} ({r.id})</SelectItem>
                     ))}
                   </SelectContent>

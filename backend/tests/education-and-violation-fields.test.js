@@ -235,10 +235,14 @@ test('the one-month warning excludes discharged and already-managed residents', 
   );
   assert.ok(block, 'the unassigned-residents list was not found');
 
+  // `isClosedResident` covers both ways a case closes — Discharged and
+  // Transferred — because both mean there is no case left to manage. Testing the
+  // string directly would have chased a transferred resident for a Case Load
+  // Manager they cannot be given.
   assert.match(
     block[0],
-    /String\(c\.status \|\| ''\) !== 'Discharged'/,
-    'a discharged resident must not be reported as missing a Case Load Manager'
+    /!isClosedResident\(c\.status\)/,
+    'a closed case must not be reported as missing a Case Load Manager'
   );
   assert.match(
     block[0],

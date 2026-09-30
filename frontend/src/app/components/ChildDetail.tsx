@@ -48,6 +48,7 @@ pdfjs.GlobalWorkerOptions.workerSrc = `/pdf.worker.mjs?v=${pdfjs.version}`;
 import { PhaseProgress } from './PhaseProgress';
 import { PrescriptionList } from './PrescriptionList';
 import IncidentReportModal from './IncidentReportModal';
+import { isClosedResident, isActiveResident } from '@/utils/residentStatus';
 
 interface ViolationGuideRecord {
   id: string;
@@ -1118,7 +1119,7 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
             <CardHeader className="pb-2">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <CardTitle className="text-sm font-medium flex items-center gap-2"><User className="w-4 h-4" /> Basic Information</CardTitle>
-                {canMarkAbscond && !isAbsconded && child.status !== 'Discharged' && (
+                {canMarkAbscond && !isAbsconded && !isClosedResident(child.status) && (
                   <Button type="button" size="sm" variant="outline" className="h-8 border-orange-300 text-orange-700 hover:bg-orange-50" onClick={() => { void handleAbscond(); }}>
                     Abscond
                   </Button>
@@ -1676,7 +1677,7 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
                 </div>
                 <div className="max-h-44 overflow-y-auto p-2">
                   <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
-                    {children.filter(c => c.status !== 'Discharged' && c.status !== 'Absconded' && c.name.toLowerCase().includes(incidentResidentSearch.toLowerCase())).map(c => {
+                    {children.filter(c => isActiveResident(c.status) && c.name.toLowerCase().includes(incidentResidentSearch.toLowerCase())).map(c => {
                       const checked = selectedIncidentResidentIds.includes(c.id);
                       return <label key={c.id} className={`flex cursor-pointer items-start gap-2 rounded-md border px-3 py-2 text-xs transition-colors ${checked ? 'border-[#2F3E46] bg-gray-50' : 'border-transparent hover:bg-gray-50'}`}><input type="checkbox" checked={checked} onChange={() => setSelectedIncidentResidentIds(prev => checked ? prev.filter(x => x !== c.id) : [...prev, c.id])} className="mt-0.5 h-4 w-4 accent-[#2F3E46]" /><span className="min-w-0"><span className="block font-semibold text-[#2F3E46] break-words">{c.name}</span><span className="block text-[10px] text-gray-400">{c.id}{c.id === child.id ? ' · current resident' : ''}</span></span></label>;
                     })}

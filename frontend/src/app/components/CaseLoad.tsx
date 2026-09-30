@@ -11,6 +11,7 @@ import { useData } from '@/app/state/DataContext';
 import { useAuth } from '@/app/state/AuthContext';
 import { daysBetweenDates, formatPHDate } from '@/utils/dateFormatter';
 import { ChildDetail } from './ChildDetail';
+import { isClosedResident } from '@/utils/residentStatus';
 
 interface CaseloadEntry {
   userId: string;
@@ -232,7 +233,7 @@ export function CaseLoad() {
   const unassignedResidents = useMemo(() => {
     const today = manilaToday();
     return (children || [])
-      .filter((c: any) => c && String(c.status || '') !== 'Discharged' && !assignedResidentIds.has(String(c.id)))
+      .filter((c: any) => c && !isClosedResident(c.status) && !assignedResidentIds.has(String(c.id)))
       .map((c: any) => {
         const admitted = dayOf(c.admissionDate || c.createdAt);
         const due = admitted ? caseLoadDueDate(admitted) : '';
@@ -249,7 +250,7 @@ export function CaseLoad() {
   // from another Houseparent.
   const assignableResidents = useMemo(
     () => (children || [])
-      .filter((c: any) => c && String(c.status || '') !== 'Discharged' && !assignedResidentIds.has(String(c.id)))
+      .filter((c: any) => c && !isClosedResident(c.status) && !assignedResidentIds.has(String(c.id)))
       .sort((a: any, b: any) => String(a.name || '').localeCompare(String(b.name || ''))),
     [children, assignedResidentIds]
   );
@@ -451,7 +452,7 @@ export function CaseLoad() {
                         <Badge className="bg-white/10 text-[#FFD100] border-none text-[10px] uppercase font-bold">
                           {child.legalCategory || child.caseType || 'No category'}
                         </Badge>
-                        {child.status === 'Discharged' && (
+                        {isClosedResident(child.status) && (
                           <Badge className="bg-emerald-500/20 text-emerald-300 border-none text-[10px] uppercase font-bold">
                             Case Closed
                           </Badge>

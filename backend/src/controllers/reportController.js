@@ -85,8 +85,8 @@ async function generateQuarterlyReport(year, quarter) {
 
   // Discharges during quarter
   const [[discharges]] = await pool.query(
-    'SELECT COUNT(*) as count FROM children WHERE status = ? AND updatedAt BETWEEN ? AND ?',
-    ['Discharged', startDate, endDate]
+    `SELECT COUNT(*) as count FROM children WHERE status IN ('Discharged', 'Transferred') AND updatedAt BETWEEN ? AND ?`,
+    [startDate, endDate]
   );
 
   // Current active residents

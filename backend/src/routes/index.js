@@ -47,6 +47,7 @@ const { residentRowFor } = require('../controllers/childController');
 const notifications = require('../services/notificationService');
 const { createController } = require('../controllers/baseController');
 const { assignedResidentIds } = require('../utils/residentScope');
+const { isClosedResidentStatus } = require('../utils/residentStatus');
 
 // Public health check endpoint (must be before mounting routes)
 /**
@@ -481,7 +482,9 @@ async function requireResidentInCare(req, res, next) {
     if (!residentId) return next();
     const [rows] = await pool.query('SELECT status FROM children WHERE id = ?', [residentId]);
     const status = rows?.[0]?.status;
-    if (status === 'Discharged' || status === 'Absconded') {
+    // `Transferred` is a closed case too — a resident released without
+    // completing the programme. They are off the Education roll just the same.
+    if (isClosedResidentStatus(status) || status === 'Absconded') {
       throw new ApiError(
         409,
         `This resident is ${String(status).toLowerCase()}, so they are no longer on the Education roll. Their record is kept for history.`,
