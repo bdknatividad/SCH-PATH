@@ -24,7 +24,7 @@ import {
 } from '@/app/components/ui/dialog';
 import { Input } from '@/app/components/ui/input';
 import { Label } from '@/app/components/ui/label';
-import { formatShortDate } from '@/utils/dateFormatter';
+import { formatShortDate, formatShortDateTime } from '@/utils/dateFormatter';
 import { triTrend } from '@/utils/triRating';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import {
@@ -226,6 +226,22 @@ interface AdmissionRecord {
   status?: string;
 }
 
+/**
+ * One row of `GET /resident-assignments/resident/:id`.
+ *
+ * The endpoint returns `residentAssignments.*` joined to the assignee, plus a
+ * `userLabel` the controller resolves from whichever name column the users
+ * table actually has — so the label is read from there rather than rebuilt here
+ * from `userDisplayName`/`userUsername`.
+ */
+interface AssignedRow {
+  id: string;
+  userId: string;
+  assignmentType?: string | null;
+  status?: string | null;
+  userLabel?: string | null;
+}
+
 const PDF_WIDTH = 936;
 const PDF_HEIGHT = 612;
 
@@ -323,6 +339,18 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
   const [phaseRequirements, setPhaseRequirements] = useState<any>(null);
   const [admissions, setAdmissions] = useState<AdmissionRecord[]>([]);
   const [loadingAdmissions, setLoadingAdmissions] = useState(false);
+  /**
+   * The Houseparent assigned to this resident right now — the Case Load
+   * Manager, read from `residentAssignments` rather than off the admission.
+   *
+   * It sits beside "Houseparent on Duty" and is not a duplicate of it. The slip
+   * records who was on duty the day the resident arrived, which never changes;
+   * the assignment moves when the Center Head transfers a caseload. Showing both
+   * is what makes a transfer visible on this card instead of only in the Case
+   * Load module — and they are the same person until one happens, which is why
+   * only one of the two was ever worth printing.
+   */
+  const [assignedHouseparent, setAssignedHouseparent] = useState<string | null>(null);
   const [dischargePlan, setDischargePlan] = useState<DischargePlanData | null>(null);
   const [loadingDischargePlan, setLoadingDischargePlan] = useState(false);
   const [extensionDays, setExtensionDays] = useState('');
@@ -378,6 +406,31 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
     };
 
     loadAdmissions();
+  }, [id]);
+
+  /**
+   * Who is assigned to this resident now.
+   *
+   * One assignment per resident is Active at a time and the type is
+   * `houseparent`; the endpoint returns every assignment this resident has ever
+   * had, ordered by status, so the Active houseparent row has to be picked out
+   * rather than read off the top. A failed read leaves the row as '—' — it is
+   * context beside the admission, not something to block the card on.
+   */
+  useEffect(() => {
+    if (!id) { setAssignedHouseparent(null); return; }
+    let cancelled = false;
+    request<{ success: boolean; data?: AssignedRow[] }>(`/resident-assignments/resident/${id}`)
+      .then((response) => {
+        if (cancelled) return;
+        const active = (response?.data || []).find(
+          (row) => String(row?.assignmentType || '').toLowerCase() === 'houseparent'
+            && String(row?.status || '').toLowerCase() === 'active',
+        );
+        setAssignedHouseparent(active?.userLabel || null);
+      })
+      .catch(() => { if (!cancelled) setAssignedHouseparent(null); });
+    return () => { cancelled = true; };
   }, [id]);
 
   useEffect(() => {
@@ -1100,7 +1153,8 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
                         <div className="flex items-center justify-between border-b py-1.5"><span className="text-gray-500">Legal Category</span><span className="font-semibold text-right max-w-[65%]">{admission.legalCategory || '—'}</span></div>
                         <div className="flex items-center justify-between border-b py-1.5"><span className="text-gray-500">Referring Party</span><span className="font-semibold text-right max-w-[65%]">{admission.referringParty || '—'}</span></div>
                         <div className="flex items-center justify-between border-b py-1.5"><span className="text-gray-500">Contact No. (Referring Party)</span><span className="font-semibold">{admission.referringPartyContact || '—'}</span></div>
-                        <div className="flex items-center justify-between border-b py-1.5 md:col-span-2"><span className="text-gray-500">Houseparent on Duty</span><span className="font-semibold">{admission.houseparentOnDuty || '—'}</span></div>
+                        <div className="flex items-center justify-between border-b py-1.5"><span className="text-gray-500">Houseparent on Duty</span><span className="font-semibold">{admission.houseparentOnDuty || '—'}</span></div>
+                        <div className="flex items-center justify-between border-b py-1.5"><span className="text-gray-500">Assigned Houseparent</span><span className="font-semibold">{assignedHouseparent || '—'}</span></div>
                       </div>
                     </div>
                   ))}
@@ -1114,7 +1168,8 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
                     <div className="flex items-center justify-between border-b py-1.5"><span className="text-gray-500">Legal Category</span><span className="font-semibold">{child.legalCategory || '—'}</span></div>
                     <div className="flex items-center justify-between border-b py-1.5"><span className="text-gray-500">Referring Party</span><span className="font-semibold">—</span></div>
                     <div className="flex items-center justify-between border-b py-1.5"><span className="text-gray-500">Contact No. (Referring Party)</span><span className="font-semibold">—</span></div>
-                    <div className="flex items-center justify-between border-b py-1.5 md:col-span-2"><span className="text-gray-500">Houseparent on Duty</span><span className="font-semibold">—</span></div>
+                    <div className="flex items-center justify-between border-b py-1.5"><span className="text-gray-500">Houseparent on Duty</span><span className="font-semibold">—</span></div>
+                    <div className="flex items-center justify-between border-b py-1.5"><span className="text-gray-500">Assigned Houseparent</span><span className="font-semibold">{assignedHouseparent || '—'}</span></div>
                   </div>
                 </div>
               )}
@@ -1154,7 +1209,7 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
                     </div>
                   ))}
 
-                  <div><h4 className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">Extension History</h4>{(dischargePlan?.history || []).length === 0 ? <p className="text-sm text-gray-400 italic">No extension decisions recorded.</p> : <div className="space-y-2">{(dischargePlan?.history || []).map(item => <div key={item.id} className="rounded-lg border bg-gray-50 p-3"><div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2"><div><p className="font-semibold text-sm">+{item.extensionDays} day{Number(item.extensionDays) === 1 ? '' : 's'} · {formatShortDate(item.previousDischargeDate)} → {formatShortDate(item.newDischargeDate)}</p><p className="text-xs text-gray-600 mt-1">{item.reason}</p></div><p className="text-[10px] text-gray-400">{item.decidedBy} · {item.decidedAt ? new Date(item.decidedAt).toLocaleString() : '—'}</p></div></div>)}</div>}</div>
+                  <div><h4 className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-2">Extension History</h4>{(dischargePlan?.history || []).length === 0 ? <p className="text-sm text-gray-400 italic">No extension decisions recorded.</p> : <div className="space-y-2">{(dischargePlan?.history || []).map(item => <div key={item.id} className="rounded-lg border bg-gray-50 p-3"><div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2"><div><p className="font-semibold text-sm">+{item.extensionDays} day{Number(item.extensionDays) === 1 ? '' : 's'} · {formatShortDate(item.previousDischargeDate)} → {formatShortDate(item.newDischargeDate)}</p><p className="text-xs text-gray-600 mt-1">{item.reason}</p></div><p className="text-[10px] text-gray-400">{item.decidedBy} · {item.decidedAt ? formatShortDateTime(item.decidedAt) : '—'}</p></div></div>)}</div>}</div>
                 </>
               )}
             </CardContent>
@@ -1241,8 +1296,8 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
                 {/* Progress reports, from the Education module. */}
                 {progress.length > 0 && <Card className="border-none shadow-sm"><CardContent className="p-4"><h4 className="font-bold text-[#2F3E46] text-sm mb-3">Progress Reports</h4><div className="space-y-2">{progress.map((p) => (<div key={p.id} className="flex items-center justify-between gap-3 p-3 bg-gray-50 rounded-xl"><div className="min-w-0"><p className="text-xs font-semibold text-[#2F3E46] truncate">{p.subject || 'Progress report'}</p><p className="text-[10px] text-gray-400">{p.month || '—'}</p></div><span className="text-[11px] font-bold text-gray-600 shrink-0">{p.result || '—'}</span></div>))}</div></CardContent></Card>}
 
-                {quarterlyDocs.length > 0 && <Card className="border-none shadow-sm"><CardContent className="p-4"><h4 className="font-bold text-[#2F3E46] text-sm mb-3">Quarterly Reports</h4><div className="space-y-2">{quarterlyDocs.map((d) => { const firstLines = (d.description || '').split('\n').slice(0, 2).join(' '); const badge = d.status === 'Approved' ? { label: 'Pass', cls: 'bg-green-100 text-green-700' } : d.status === 'Rejected' ? { label: 'Fail', cls: 'bg-red-100 text-red-700' } : (d.status as string) === 'Reassessment' ? { label: 'Reassessment', cls: 'bg-yellow-100 text-yellow-700' } : { label: 'Pending Review', cls: 'bg-gray-100 text-gray-600' }; return (<div key={d.id} className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl"><div className="flex-1 min-w-0"><div className="flex items-center gap-2 flex-wrap"><p className="text-xs font-bold text-[#2F3E46] truncate">{firstLines}</p><span className={`px-2 py-0.5 rounded-full font-bold text-[10px] shrink-0 ${badge.cls}`}>{badge.label}</span></div><p className="text-[10px] text-gray-400 mt-0.5">Submitted {d.submittedAt ? new Date(d.submittedAt).toLocaleDateString() : '—'} by {d.uploadedBy || 'Educator'}</p></div></div>); })}</div></CardContent></Card>}
-                {visitDocs.length > 0 && <Card className="border-none shadow-sm"><CardContent className="p-4"><h4 className="font-bold text-[#2F3E46] text-sm mb-3">School Visit Reports</h4><div className="space-y-2">{visitDocs.map((d) => (<div key={d.id} className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl"><div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center shrink-0"><span className="text-sm">🏫</span></div><div className="flex-1 min-w-0"><p className="text-xs text-gray-600">{d.description}</p><p className="text-[10px] text-gray-400 mt-0.5">{d.uploadedAt ? new Date(d.uploadedAt).toLocaleDateString() : ''}</p></div></div>))}</div></CardContent></Card>}
+                {quarterlyDocs.length > 0 && <Card className="border-none shadow-sm"><CardContent className="p-4"><h4 className="font-bold text-[#2F3E46] text-sm mb-3">Quarterly Reports</h4><div className="space-y-2">{quarterlyDocs.map((d) => { const firstLines = (d.description || '').split('\n').slice(0, 2).join(' '); const badge = d.status === 'Approved' ? { label: 'Pass', cls: 'bg-green-100 text-green-700' } : d.status === 'Rejected' ? { label: 'Fail', cls: 'bg-red-100 text-red-700' } : (d.status as string) === 'Reassessment' ? { label: 'Reassessment', cls: 'bg-yellow-100 text-yellow-700' } : { label: 'Pending Review', cls: 'bg-gray-100 text-gray-600' }; return (<div key={d.id} className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl"><div className="flex-1 min-w-0"><div className="flex items-center gap-2 flex-wrap"><p className="text-xs font-bold text-[#2F3E46] truncate">{firstLines}</p><span className={`px-2 py-0.5 rounded-full font-bold text-[10px] shrink-0 ${badge.cls}`}>{badge.label}</span></div><p className="text-[10px] text-gray-400 mt-0.5">Submitted {d.submittedAt ? formatShortDate(d.submittedAt) : '—'} by {d.uploadedBy || 'Educator'}</p></div></div>); })}</div></CardContent></Card>}
+                {visitDocs.length > 0 && <Card className="border-none shadow-sm"><CardContent className="p-4"><h4 className="font-bold text-[#2F3E46] text-sm mb-3">School Visit Reports</h4><div className="space-y-2">{visitDocs.map((d) => (<div key={d.id} className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl"><div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center shrink-0"><span className="text-sm">🏫</span></div><div className="flex-1 min-w-0"><p className="text-xs text-gray-600">{d.description}</p><p className="text-[10px] text-gray-400 mt-0.5">{d.uploadedAt ? formatShortDate(d.uploadedAt) : ''}</p></div></div>))}</div></CardContent></Card>}
                 {!learner && <Card className="border-none shadow-sm"><CardContent className="p-8 text-center"><span className="text-4xl">📚</span><p className="text-gray-400 mt-2 text-sm">No education records found for this resident.</p>{/*
                   Only point at the Education module for someone who can open it.
                   The line used to be unconditional, so a Nurse, a Psychologist or
