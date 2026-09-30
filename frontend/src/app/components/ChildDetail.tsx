@@ -224,6 +224,16 @@ interface AdmissionRecord {
    */
   bodyMarkings?: BodyMarkingEntry[] | null;
   status?: string;
+  /**
+   * Why this admission was closed — `'Absconded'` when the resident ran away,
+   * NULL when they were discharged.
+   *
+   * `status` alone cannot say: `abscond` closes an admission exactly the way a
+   * discharge does, so the card printed "Closed" for a resident who had
+   * absconded. Written by `childController.abscond` and by the re-intake that
+   * closes a still-Active admission for an absconded resident.
+   */
+  closedReason?: string | null;
 }
 
 /**
@@ -1137,8 +1147,12 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
                       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-2">
                         <div className="flex items-center gap-2 flex-wrap">
                           <Badge variant="outline">Admission #{admission.admissionNumber}</Badge>
-                          <Badge className={admission.status === 'Closed' ? 'bg-gray-100 text-gray-700' : 'bg-green-100 text-green-700'}>
-                            {admission.status || 'Active'}
+                          <Badge className={
+                            admission.closedReason === 'Absconded' ? 'bg-orange-100 text-orange-800'
+                              : admission.status === 'Closed' ? 'bg-gray-100 text-gray-700'
+                              : 'bg-green-100 text-green-700'
+                          }>
+                            {admission.closedReason === 'Absconded' ? 'Absconded' : (admission.status || 'Active')}
                           </Badge>
                         </div>
                         <Button type="button" variant="outline" size="sm" className="rounded-lg shrink-0" onClick={() => handlePrintAdmission(admission)}>

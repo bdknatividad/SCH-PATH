@@ -171,6 +171,12 @@ CREATE TABLE admissions (
   status ENUM('Active', 'Closed') NOT NULL DEFAULT 'Active',
   closedDate DATE NULL,
 
+  -- Why the admission was closed. 'Absconded' when the resident ran away;
+  -- NULL when they were discharged. Without it a closed admission cannot say
+  -- which of the two happened, because `abscond` closes one exactly the way a
+  -- discharge does.
+  closedReason VARCHAR(30) NULL,
+
   createdBy VARCHAR(100) NULL,
   modifiedBy VARCHAR(100) NULL,
 

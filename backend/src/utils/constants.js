@@ -64,6 +64,7 @@ const RESOURCES = {
       'admissionStatus',
       'status',
       'closedDate',
+      'closedReason',
       'createdBy',
       'modifiedBy'
     ],

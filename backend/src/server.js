@@ -1458,6 +1458,22 @@ async function runMigrations() {
       console.warn('Migration warning (admissions.expectedDischargeDate):', err.message);
     }
 
+    /*
+     * Why an admission was closed.
+     *
+     * `abscond` closes the admission exactly the way a discharge does — same
+     * `status = 'Closed'`, same `closedDate` — so the row could not say which of
+     * the two had happened, and Case Information printed "Closed" for a
+     * resident who had run away. Only 'Absconded' is written today; NULL means
+     * the admission was not ended by an abscond, which is every admission
+     * created before this column existed.
+     */
+    try {
+      await ensureColumn('admissions', 'closedReason', 'VARCHAR(30) NULL', 'closedDate');
+    } catch (err) {
+      console.warn('Migration warning (admissions.closedReason):', err.message);
+    }
+
     await pool.query(`
       CREATE TABLE IF NOT EXISTS dischargeExtensions (
         id VARCHAR(40) PRIMARY KEY,

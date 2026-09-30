@@ -1101,10 +1101,15 @@ async function abscond(req, res, next) {
     // to 'Active' so an admission that was somehow already closed is left
     // untouched, and so only one row is ever affected — a resident has at
     // most one active admission at a time.
+    //
+    // `closedReason` is what keeps this distinguishable from a discharge. The
+    // two close an admission identically, so without it Case Information
+    // printed "Closed" for a resident who had run away.
     await connection.query(
       `UPDATE admissions
           SET status = 'Closed',
               closedDate = ?,
+              closedReason = 'Absconded',
               modifiedBy = ?
         WHERE residentId = ?
           AND status = 'Active'`,

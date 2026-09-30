@@ -569,6 +569,13 @@
     "extra": ""
    },
    {
+    "name": "closedReason",
+    "type": "varchar(30)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
     "name": "createdBy",
     "type": "varchar(100)",
     "nullable": true,

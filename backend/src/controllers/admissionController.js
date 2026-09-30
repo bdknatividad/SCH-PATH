@@ -395,10 +395,16 @@ async function create(req, res, next) {
         }
 
         if (latestAdmission?.status === 'Active' && reAdmittedFromAbscond) {
+          // `closedReason` for the same reason `childController.abscond` sets
+          // it: this admission ended because the resident ran away, and a bare
+          // 'Closed' cannot say so. Reachable only for a resident whose
+          // admission is still Active while they are Absconded, which is what
+          // the record looked like before `abscond` started closing it.
           await connection.query(
             `UPDATE admissions
                 SET status = 'Closed',
                     closedDate = ?,
+                    closedReason = 'Absconded',
                     modifiedBy = ?
               WHERE id = ?`,
             [admission.admissionDate, req.user?.username || 'System', latestAdmission.id]
