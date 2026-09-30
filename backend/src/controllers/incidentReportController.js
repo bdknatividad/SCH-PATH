@@ -526,8 +526,22 @@ async function canEditIncidentReport(user, report) {
 async function getByViolationId(req, res, next) {
   try {
     const { violationId } = req.params;
+    /*
+     * The linked document's decision travels with the report.
+     *
+     * A Form 08 is approved by the Center Head through the Documents module, so
+     * the *reason* it came back lives on the document (`rejectionReason`, with
+     * who returned it and when) and not on `incidentReports`. The tracker could
+     * only say "Returned by the Center Head — correct it and resubmit" with no
+     * indication of what to correct, which is useless to the person who has to
+     * fix it. Selecting these three here is what lets that row quote the note.
+     */
     const [rows] = await pool.query(
-      `SELECT ir.*, d.status AS documentStatus
+      `SELECT ir.*,
+              d.status AS documentStatus,
+              d.rejectionReason AS documentRejectionReason,
+              d.reviewedBy AS documentReviewedBy,
+              d.reviewedAt AS documentReviewedAt
        FROM incidentReports ir
        LEFT JOIN documents d ON d.id = ir.pdfDocumentId
        WHERE ir.violationId = ?

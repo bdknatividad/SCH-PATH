@@ -357,15 +357,34 @@ export function InterventionTracker({ embedded = false }: { embedded?: boolean }
     loadTrackerRecords();
   }, [children, violations]);
 
+  /**
+   * Whether the Incident Reports have been read yet.
+   *
+   * The Form 08 row is drawn from `incidentReportsByViolation`, and a missing
+   * entry means *either* "this violation has no report" or "the reports have not
+   * arrived". The row cannot tell them apart, so before this flag existed it
+   * offered "Fill Out Incident Report" — the *create* button — for a violation
+   * that already had one, and pressing it opened the modal in create mode
+   * against an existing report. Observed live on the deployed build. The row now
+   * waits for the read instead of guessing.
+   */
+  const [incidentReportsLoaded, setIncidentReportsLoaded] = useState(false);
+
   useEffect(() => {
     const ids = Array.from(new Set(trackerRecords.map(r => r.violationId).filter(Boolean)));
-    if (!ids.length) { setIncidentReportsByViolation({}); return; }
+    if (!ids.length) { setIncidentReportsByViolation({}); setIncidentReportsLoaded(true); return; }
+    let cancelled = false;
     Promise.all(ids.map(async (id) => {
       try {
         const response: any = await request(`/incident-reports/violation/${id}`, { method: 'GET' });
         return [id, response?.success ? response.data : null] as const;
       } catch { return [id, null] as const; }
-    })).then(entries => setIncidentReportsByViolation(Object.fromEntries(entries)));
+    })).then(entries => {
+      if (cancelled) return;
+      setIncidentReportsByViolation(Object.fromEntries(entries));
+      setIncidentReportsLoaded(true);
+    });
+    return () => { cancelled = true; };
   }, [trackerRecords]);
 
   const activeList = useMemo(
@@ -772,6 +791,19 @@ export function InterventionTracker({ embedded = false }: { embedded?: boolean }
                                           ? 'Returned by the Center Head — correct it and resubmit. The intervention stays pending until this report is approved.'
                                           : 'Available after all checklist requirements are completed and before Mark Done.'}
                                       </p>
+                                      {/* Why it came back. The decision lives on the linked document
+                                          (the Center Head approves a Form 08 through Documents), so the
+                                          reason travels with the report and is quoted here — without it
+                                          the row said "correct it" and named nothing to correct. */}
+                                      {form8Section(track).needsRework && form8Section(track).report?.documentRejectionReason && (
+                                        <p className="mt-1 rounded border border-blue-200 bg-white px-2 py-1 text-[10px] text-blue-900">
+                                          <span className="font-bold">Reason: </span>
+                                          {form8Section(track).report.documentRejectionReason}
+                                          {form8Section(track).report.documentReviewedBy
+                                            ? <span className="text-blue-600"> — {form8Section(track).report.documentReviewedBy}</span>
+                                            : null}
+                                        </p>
+                                      )}
                                     </div>
                                     {incidentReportsByViolation[track.violation.id] ? (() => {
                                       const report = incidentReportsByViolation[track.violation.id];
@@ -797,9 +829,13 @@ export function InterventionTracker({ embedded = false }: { embedded?: boolean }
                                       );
                                       return <span className="text-[10px] font-bold text-amber-600">Pending approval</span>;
                                     })() : (
-                                      <Button size="sm" variant="outline" className="h-6 text-[10px] border-blue-300 text-blue-700" onClick={() => { setForm8ViolationId(track.violation.id); setForm8ResidentId(track.violation.residentId); setForm8Mode('create'); }}>
-                                        Fill Out Incident Report
-                                      </Button>
+                                      incidentReportsLoaded ? (
+                                        <Button size="sm" variant="outline" className="h-6 text-[10px] border-blue-300 text-blue-700" onClick={() => { setForm8ViolationId(track.violation.id); setForm8ResidentId(track.violation.residentId); setForm8Mode('create'); }}>
+                                          Fill Out Incident Report
+                                        </Button>
+                                      ) : (
+                                        <span className="text-[10px] font-bold text-blue-400">Checking…</span>
+                                      )
                                     )}
                                   </div>
                                 </li>
