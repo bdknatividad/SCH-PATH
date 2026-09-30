@@ -5,7 +5,7 @@ import { useAuth } from '../state/AuthContext';
 import { usePermissions } from '@/app/hooks/usePermissions';
 import { describeError } from '@/services/api';
 import { systemDialog } from '@/app/components/SystemDialog';
-import { formatShortDate } from '@/utils/dateFormatter';
+import { formatShortDate, getCurrentPHDate } from '@/utils/dateFormatter';
 import { Card, CardContent } from '@/app/components/ui/card';
 import { Button } from '@/app/components/ui/button';
 import { Input } from '@/app/components/ui/input';
@@ -36,6 +36,7 @@ import { Label } from '@/app/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/app/components/ui/select';
 import { Textarea } from '@/app/components/ui/textarea';
 import { Checkbox } from '@/app/components/ui/checkbox';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/app/components/ui/tabs';
 
 // 1. FIXED: Idinagdag ang Interface para mawala ang 'any' errors
 
@@ -54,6 +55,10 @@ export function Activities() {
   );
 
   const [searchTerm, setSearchTerm] = useState('');
+  // The module opens on what is still to come, the way Assessments opens on
+  // Scheduled: the work owed, not the whole history. The other tabs carry their
+  // own counts, so nothing is hidden behind this default.
+  const [activeTab, setActiveTab] = useState('upcoming');
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -217,10 +222,44 @@ export function Activities() {
     setRestrictDialogActivity(null);
   };
 
-  const filteredActivities = activities.filter((a: Activity) => 
-    (a.title || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
-    (a.location && a.location.toLowerCase().includes(searchTerm.toLowerCase()))
+  const searchFiltered = useMemo(
+    () => activities.filter((a: Activity) =>
+      (a.title || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (a.location || '').toLowerCase().includes(searchTerm.toLowerCase())
+    ),
+    [activities, searchTerm]
   );
+
+  /*
+   * "Overdue" means here what it means in Assessments: still open a few days
+   * after the day it was set for. The cutoff comes from the Manila date, not the
+   * browser's — `getCurrentPHDate()` is the house helper, and a device set to
+   * another timezone must not move the boundary. `date` is a bare `YYYY-MM-DD`
+   * on both sides, so comparing the two strings compares the two days.
+   *
+   * Built with `Date.UTC` and formatted by hand rather than through
+   * `toISOString()`, which is the one call this codebase keeps having to undo:
+   * it reads an instant, and every date here is a day. `Date.UTC` rolls a day
+   * underflow (the 2nd, three days back) into the previous month on its own.
+   */
+  const overdueCutoff = useMemo(() => {
+    const [y, m, d] = getCurrentPHDate().split('-').map(Number);
+    const cutoff = new Date(Date.UTC(y, m - 1, d - 3));
+    return `${cutoff.getUTCFullYear()}-${String(cutoff.getUTCMonth() + 1).padStart(2, '0')}-${String(cutoff.getUTCDate()).padStart(2, '0')}`;
+  }, []);
+
+  // A row with no date is never "late" — an empty string sorts below every
+  // date, so without the first test it would land in Overdue on its own.
+  const isOverdue = (a: Activity) => a.status === 'Upcoming' && !!a.date && a.date < overdueCutoff;
+
+  const tabLists = useMemo(() => ({
+    all:       searchFiltered,
+    upcoming:  searchFiltered.filter(a => a.status === 'Upcoming' && !isOverdue(a)),
+    completed: searchFiltered.filter(a => a.status === 'Completed'),
+    overdue:   searchFiltered.filter(a => isOverdue(a)),
+  }), [searchFiltered, overdueCutoff]);
+
+  const displayList = tabLists[activeTab as keyof typeof tabLists] ?? tabLists.all;
 
   return (
     <div className="space-y-6 p-2">
@@ -429,19 +468,56 @@ export function Activities() {
         )}
       </div>
 
-      <div className="relative w-full md:w-96 mb-6">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
-        <Input 
-          className="pl-10 bg-white border-gray-200 text-black" 
-          placeholder="Search activities or location..." 
-          value={searchTerm} 
-          onChange={(e) => setSearchTerm(e.target.value)} 
-        />
+      {/* SEARCH + TABS — the same filter row the Assessments module uses. */}
+      <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between mb-2">
+        <div className="relative w-full md:w-96">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
+          <Input 
+            className="pl-10 bg-white border-gray-200 text-black" 
+            placeholder="Search activities or location..." 
+            value={searchTerm} 
+            onChange={(e) => setSearchTerm(e.target.value)} 
+          />
+        </div>
+        {tabLists.overdue.length > 0 && (
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-red-50 border border-red-200 rounded-lg text-xs text-red-700 font-semibold">
+            <AlertTriangle className="w-3.5 h-3.5" />
+            {tabLists.overdue.length} overdue activit{tabLists.overdue.length > 1 ? 'ies' : 'y'}
+          </div>
+        )}
       </div>
 
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList className="mb-4">
+          <TabsTrigger value="all">All ({tabLists.all.length})</TabsTrigger>
+          <TabsTrigger value="upcoming">Upcoming ({tabLists.upcoming.length})</TabsTrigger>
+          <TabsTrigger value="completed">Completed ({tabLists.completed.length})</TabsTrigger>
+          <TabsTrigger value="overdue" className="relative">
+            Overdue
+            {tabLists.overdue.length > 0 && (
+              <span className="ml-1.5 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+                {tabLists.overdue.length}
+              </span>
+            )}
+          </TabsTrigger>
+        </TabsList>
+
+        {/* One content block driven by the active tab: the card markup below is
+            long and identical for every tab, so repeating it four times would
+            only give the copies room to drift apart. */}
+        <TabsContent value={activeTab}>
       {/* Activities List */}
       <div className="grid gap-4">
-        {filteredActivities.map((item: Activity) => (
+        {displayList.length === 0 ? (
+          <div className="text-center py-12 text-gray-400">
+            <Calendar className="w-10 h-10 mx-auto mb-2 opacity-20" />
+            <p className="text-sm italic">
+              {searchTerm.trim()
+                ? `No activities match "${searchTerm.trim()}".`
+                : 'No activities in this tab.'}
+            </p>
+          </div>
+        ) : displayList.map((item: Activity) => (
           <Card key={item.id} style={{ backgroundColor: '#2F3E46' }} className="border-none shadow-lg overflow-hidden hover:scale-[1.005] transition-all duration-200 rounded-2xl text-white">
             <CardContent className="p-0 flex flex-col md:flex-row">
               <div style={{ backgroundColor: '#FFD100' }} className="w-1.5"></div>
@@ -551,6 +627,8 @@ export function Activities() {
           </Card>
         ))}
       </div>
+        </TabsContent>
+      </Tabs>
 
       {/* Delete Confirmation */}
       <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
