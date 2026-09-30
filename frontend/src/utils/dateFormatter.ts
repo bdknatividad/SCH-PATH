@@ -514,3 +514,27 @@ export function isTodayOrLater(value?: string | null): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return false;
   return day >= getCurrentPHDate();
 }
+
+/**
+ * Whole days from one `YYYY-MM-DD` to another, counted by calendar day.
+ *
+ * Negative when `to` is in the past. `null` when either value is not a date.
+ *
+ * This exists because subtracting two instants and rounding does not answer
+ * "how many days apart are these dates". A deadline of the 28th, read on the
+ * 29th at 17:00, is `-0.7` days — and `Math.ceil(-0.7)` is `-0`, which `=== 0`
+ * is **true** for, so the deadline landed in the "Due today" branch a day after
+ * it passed. Counting whole days from midnight has no such edge, and both ends
+ * are parsed as UTC so a browser in another timezone cannot shift the boundary.
+ */
+export function daysBetweenDates(from?: string | null, to?: string | null): number | null {
+  const parse = (value?: string | null) => {
+    const day = String(value ?? '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return null;
+    return Date.UTC(Number(day.slice(0, 4)), Number(day.slice(5, 7)) - 1, Number(day.slice(8, 10)));
+  };
+  const start = parse(from);
+  const end = parse(to);
+  if (start === null || end === null) return null;
+  return Math.round((end - start) / 86400000);
+}

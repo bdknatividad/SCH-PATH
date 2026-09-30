@@ -16,6 +16,7 @@ import { describeError, request } from '@/services/api';
 import { TriStatistics } from '@/app/components/TriStatistics';
 import { useSystemDialog } from '@/app/components/SystemDialog';
 import { triTrend, ratingForPoints } from '@/utils/triRating';
+import { daysBetweenDates, getCurrentPHDate } from '@/utils/dateFormatter';
 import triLayout from '@/shared/triLayout.json';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import { CaseLoad } from './CaseLoad';
@@ -1916,9 +1917,15 @@ export function Tri() {
           <CardContent className="p-3 sm:p-4">
             {(() => {
               const deadline = getLastMondayOfMonth(form.reportingYear || new Date().getFullYear(), form.reportingMonth || (new Date().getMonth() + 1));
-              const today = new Date();
-              const due = new Date(`${deadline}T23:59:59`);
-              const days = Math.ceil((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+              /*
+               * The day left is counted in calendar days, from Manila's today.
+               *
+               * It used to be `Math.ceil((new Date(`${deadline}T23:59:59`) - new Date()) / 86400000)`.
+               * On the 29th, against a deadline of the 28th, that is `Math.ceil(-0.7)` — and
+               * `Math.ceil` of a small negative is `-0`, which `=== 0` is true for, so a deadline
+               * that had already passed read "Due today". `daysBetweenDates` counts whole days.
+               */
+              const days = daysBetweenDates(getCurrentPHDate(), deadline);
               return (
                 <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                   <div>
@@ -1927,9 +1934,11 @@ export function Tri() {
                       TRI and Anecdotal Report are due by {formatDisplayDate(deadline)}.
                     </p>
                   </div>
-                  <Badge className={days < 0 ? 'bg-red-100 text-red-700' : days <= 3 ? 'bg-orange-100 text-orange-700' : 'bg-white text-amber-800 border border-amber-200'}>
-                    {days < 0 ? 'Overdue' : days === 0 ? 'Due today' : `${days} day${days === 1 ? '' : 's'} left`}
-                  </Badge>
+                  {days !== null && (
+                    <Badge className={days < 0 ? 'bg-red-100 text-red-700' : days <= 3 ? 'bg-orange-100 text-orange-700' : 'bg-white text-amber-800 border border-amber-200'}>
+                      {days < 0 ? 'Overdue' : days === 0 ? 'Due today' : `${days} day${days === 1 ? '' : 's'} left`}
+                    </Badge>
+                  )}
                 </div>
               );
             })()}

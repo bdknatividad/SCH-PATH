@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { request } from '@/services/api';
 import { useData } from '@/app/state/DataContext';
 import { useAuth } from '@/app/state/AuthContext';
-import { formatPHDate } from '@/utils/dateFormatter';
+import { daysBetweenDates, formatPHDate } from '@/utils/dateFormatter';
 import { ChildDetail } from './ChildDetail';
 
 interface CaseloadEntry {
@@ -61,13 +61,6 @@ function caseLoadDueDate(admissionDay: string): string {
   const lastDay = new Date(targetYear, targetMonth, 0).getDate();
   const day = Math.min(d, lastDay);
   return `${targetYear}-${String(targetMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-}
-
-/** Whole days from `from` to `to` (both `YYYY-MM-DD`). */
-function daysBetween(from: string, to: string): number {
-  const a = Date.UTC(Number(from.slice(0, 4)), Number(from.slice(5, 7)) - 1, Number(from.slice(8, 10)));
-  const b = Date.UTC(Number(to.slice(0, 4)), Number(to.slice(5, 7)) - 1, Number(to.slice(8, 10)));
-  return Math.round((b - a) / 86400000);
 }
 
 type AssignTarget =
@@ -243,7 +236,7 @@ export function CaseLoad() {
       .map((c: any) => {
         const admitted = dayOf(c.admissionDate || c.createdAt);
         const due = admitted ? caseLoadDueDate(admitted) : '';
-        const daysLeft = due ? daysBetween(today, due) : null;
+        const daysLeft = due ? daysBetweenDates(today, due) : null;
         return { child: c, admitted, due, daysLeft, overdue: daysLeft !== null && daysLeft < 0 };
       })
       .sort((a, b) => (a.due || '9999-12-31').localeCompare(b.due || '9999-12-31'));
