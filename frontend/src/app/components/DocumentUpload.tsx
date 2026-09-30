@@ -854,6 +854,25 @@ export function DocumentUpload() {
     () => children.find(c => c.id === uploadResidentId) || null,
     [children, uploadResidentId]
   );
+
+  /**
+   * The residents in name order, for every list this module renders.
+   *
+   * The store hands them back in `createdAt` order — the order they were
+   * admitted — so the resident folders and the two pickers were sorted by
+   * nothing a reader can see. Sorted here rather than on `children` itself:
+   * that array is shared with every other module, and this is a presentation
+   * decision about the Documents module's own lists.
+   *
+   * `localeCompare` with `sensitivity: 'base'`, not `<`: a plain string compare
+   * puts every capitalised name before every lower-case one and treats "Ñ"
+   * as a different letter, which is not how a reader expects a roster sorted.
+   */
+  const residentsByName = useMemo(
+    () => [...children].sort((a, b) =>
+      String(a.name || '').localeCompare(String(b.name || ''), undefined, { sensitivity: 'base' })),
+    [children]
+  );
   const residentPhaseRaw = uploadResident?.casePhase || '';
   const residentPhase = PHASE_NAME_MAP[residentPhaseRaw] || residentPhaseRaw;
   const residentPhaseIndex = CASE_PHASES.indexOf(residentPhase);
@@ -1964,7 +1983,7 @@ export function DocumentUpload() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Every Resident</SelectItem>
-                {children.filter(matchesResidentStatus).map((child) => (
+                {residentsByName.filter(matchesResidentStatus).map((child) => (
                   <SelectItem key={child.id} value={child.id}>{child.name}</SelectItem>
                 ))}
               </SelectContent>
@@ -1981,7 +2000,7 @@ export function DocumentUpload() {
         <TabsContent value="folders" className="mt-4">
           <div className="space-y-3">
             {(() => {
-              const filteredChildren = children.filter(c =>
+              const filteredChildren = residentsByName.filter(c =>
                 (filterResident === 'all' || c.id === filterResident)
                 && matchesResidentStatus(c)
               );
@@ -2608,7 +2627,7 @@ export function DocumentUpload() {
               <Select value={uploadResidentId} onValueChange={v => { setUploadResidentId(v); setDocumentTitle(''); setOtherDocumentType(''); }}>
                 <SelectTrigger><SelectValue placeholder="Select resident" /></SelectTrigger>
                 <SelectContent>
-                  {children.map(c => (
+                  {residentsByName.map(c => (
                     <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
                   ))}
                 </SelectContent>

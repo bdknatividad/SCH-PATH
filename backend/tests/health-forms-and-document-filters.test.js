@@ -200,9 +200,20 @@ test('the Documents list filters residents by status and defaults to Active', ()
   );
   assert.match(
     DOCUMENTS,
-    /const filteredChildren = children\.filter\(c =>\s*\n\s*\(filterResident === 'all' \|\| c\.id === filterResident\)\s*\n\s*&& matchesResidentStatus\(c\)/,
+    /const filteredChildren = residentsByName\.filter\(c =>\s*\n\s*\(filterResident === 'all' \|\| c\.id === filterResident\)\s*\n\s*&& matchesResidentStatus\(c\)/,
     'the folder tree does not apply the status filter',
   );
+  // The resident lists are alphabetical. The store hands them back in
+  // `createdAt` order, so the folders and the two pickers were sorted by
+  // nothing a reader can see; `residentsByName` is that order fixed once.
+  assert.match(
+    DOCUMENTS,
+    /const residentsByName = useMemo\(\s*\n\s*\(\) => \[\.\.\.children\]\.sort\(/,
+    'the resident lists are no longer sorted by name',
+  );
+  for (const list of ['residentsByName.filter(matchesResidentStatus)', 'residentsByName.map(c =>']) {
+    assert.ok(DOCUMENTS.includes(list), `the resident picker still reads the unsorted store order: ${list}`);
+  }
   // The queue is named now, so the filter and the list are asserted separately:
   // the filter has to be applied where the queue is built, and the tab has to
   // list that queue. Pinning the old inline `docs={pendingDocs.filter(...)}` only
