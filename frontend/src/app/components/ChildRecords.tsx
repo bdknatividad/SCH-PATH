@@ -772,6 +772,16 @@ const invisibleFieldClass =
   [
     'absolute',
     'z-20',
+    // The theme's coarse-pointer block floors every `input`/`select`/`textarea`
+    // at 44px and every `button` at 40px so a thumb can hit them. That is right
+    // for a form laid out in normal flow and wrong for this one: these boxes are
+    // positioned over the printed slip, a printed line high — about 5px once a
+    // phone has scaled the 936pt page down to its own width. A 44px floor made
+    // each one nine rows tall, so every field overlapped the printed line below
+    // it and the slip became unusable on a touch device. `.pdf-overlay-cell` is
+    // the existing opt-out — TRI, the Anecdotal Report and the Progress Report
+    // all carry it — and this form was the one that did not.
+    'pdf-overlay-cell',
     'm-0',
     'rounded-sm',
     'border-0',
@@ -1016,6 +1026,10 @@ function PdfSignatureField({
         onChange={onChange}
         disabled={disabled}
         hint="Sign here"
+        // Same opt-out as the slip's text fields: the pad's trigger is a
+        // `<button>`, and the coarse-pointer floor would make it 40px tall
+        // inside a box that is 28pt of the printed page.
+        className="pdf-overlay-cell"
       />
     </div>
   );
@@ -1396,9 +1410,27 @@ function AdmissionSlipEditor({
             {/* ==================================================
                 RESIDENT COMPLETE ADDRESS
                 ==================================================
-                
-                Two lines.
-                Ends before resident signature.
+
+                Two lines, ending before the signature block.
+
+                Measured out of `admission-slip.pdf` rather than guessed. On
+                this printed line the blank runs x = 177.91 → 393.07 and
+                "Signature of Resident:" begins at x = 392.91, so the two
+                literally touch. The box was 261.504 wide — the width of the
+                *whole* row — so it ended at 439.41 and painted 46.5pt of itself
+                over the signature label, which is what made the field look like
+                it was running into "Signature of Resident:". It now stops at
+                391.5, a point and a half clear of the label.
+
+                Height 24 is the two printed lines the address is allowed (the
+                line at y = 283.30, and the one below it at 295.30); the next
+                thing printed on the page is the Guardian row at y = 332.50, so
+                the second line has the room it needs. At 14 the second line was
+                clipped by `overflow-hidden` and never visible.
+
+                Same measurement as the Guardian address below, which was
+                already correct — this one had been given the guardian's *row*
+                width instead of its own blank.
                 ================================================== */}
 
             <textarea
@@ -1425,7 +1457,7 @@ function AdmissionSlipEditor({
                 'break-words',
               ].join(' ')}
               style={{
-                ...pdfFieldStyle(177.909, 283.3, 261.504, 14),
+                ...pdfFieldStyle(177.909, 283.3, 213.6, 24),
                 ...unansweredEdge(!form.address.trim()),
                 fontSize: SLIP_ADDRESS_FONT,
                 lineHeight: SLIP_ADDRESS_FONT,
@@ -1505,6 +1537,13 @@ function AdmissionSlipEditor({
 
             {/* ==================================================
                 GUARDIAN ADDRESS
+                ==================================================
+
+                Blank runs x = 177.96 → 387.46 and "Signature of Guardian:"
+                starts at 395.45, so the width was already right. The height is
+                the two printed lines (y = 357.30 and the one below it); at 14
+                the second was clipped, so a two-line address only ever showed
+                its first line.
                 ================================================== */}
 
             <textarea
@@ -1531,7 +1570,7 @@ function AdmissionSlipEditor({
                 'break-words',
               ].join(' ')}
               style={{
-                ...pdfFieldStyle(177.96, 357.33, 209.496, 14),
+                ...pdfFieldStyle(177.96, 357.33, 209.496, 24),
                 ...unansweredEdge(!form.guardianAddress.trim()),
                 fontSize: SLIP_ADDRESS_FONT,
                 lineHeight: SLIP_ADDRESS_FONT,

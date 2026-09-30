@@ -262,6 +262,12 @@ function AspectCells({
 }) {
   const editable = Boolean(section.canEdit) && !disabled;
   const field = [
+    // `.pdf-overlay-cell` opts these out of the theme's coarse-pointer floors
+    // (44px for a field, 40px for a button). A cell here is one printed table
+    // row high — about 5px once a phone has scaled the page to its width — so
+    // the floor would stack each cell over the row below it. TRI and the
+    // Anecdotal Report already carry the class; the cells below did not.
+    'pdf-overlay-cell',
     'absolute z-10 resize-none border-0 bg-transparent p-0 leading-snug text-black',
     'text-[clamp(7px,1.05vw,12px)] outline-none',
     editable
@@ -352,6 +358,8 @@ function NarrativeCell({
       readOnly={disabled}
       placeholder={disabled ? '' : 'Write the report\u2019s closing narrative \u2014 what the six aspects add up to\u2026'}
       className={[
+        // Same opt-out as the aspect cells above, and for the same reason.
+        'pdf-overlay-cell',
         'absolute z-10 h-full w-full resize-none border-0 bg-transparent p-0 leading-snug text-black',
         'text-[clamp(7px,1.05vw,12px)] outline-none',
         disabled
