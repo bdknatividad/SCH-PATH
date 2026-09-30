@@ -165,7 +165,7 @@ test('the returned report stays actionable, not just visible', () => {
   assert.match(section, /Fill Out Again/, 'the returned report can no longer be filled out again');
   assert.match(
     section,
-    /setForm8Mode\('edit'\)/,
+    /openForm8\([^)]*'edit'\)/,
     'the Fill Out Again button no longer opens the report in edit mode',
   );
 

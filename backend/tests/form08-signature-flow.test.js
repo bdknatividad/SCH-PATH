@@ -52,6 +52,8 @@ const SERVER = read('backend/src/server.js');
 const MIGRATION = read('backend/src/database/migrate_incident_reports.sql');
 const MODAL_SRC = read('frontend/src/app/components/IncidentReportModal.tsx');
 const TRACKER_SRC = read('frontend/src/app/components/InterventionTracker.tsx');
+const SIGNING_UTIL_SRC = read('frontend/src/app/utils/form08Signing.ts');
+const NOTIFICATIONS_SRC = read('frontend/src/app/components/Notifications.tsx');
 
 // ── Stubs ───────────────────────────────────────────────────────────────────
 
@@ -571,13 +573,74 @@ test('the incident report asks for no in-modal verification', () => {
   }
 });
 
-test('the Form 08 row offers the pad to the signer whose turn it is', () => {
-  // The tracker is the only surface that signs, so it has to name the line each
-  // role owns and offer the pad only when the API would accept it.
-  assert.match(TRACKER_SRC, /const form8SideForRole = /, 'the tracker no longer maps a role to its line');
-  assert.match(TRACKER_SRC, /case 'socialworker': return 'sw'/, 'the Social Worker line is gone');
-  assert.match(TRACKER_SRC, /case 'psychologist': return 'psych'/, 'the Psychological Staff line is gone');
-  assert.match(TRACKER_SRC, /case 'centerhead': return 'ch'/, 'the Center Head line is gone');
+test('the Form 08 row offers the report to the signer whose turn it is', () => {
+  // The tracker no longer signs: it says whose turn it is and opens the report,
+  // where the pad sits on that signer's own line. The role-to-line map lives in
+  // one shared module so the row and the form cannot disagree about it.
+  assert.match(SIGNING_UTIL_SRC, /export function form8SideForRole/, 'the shared role-to-line map is gone');
+  assert.match(SIGNING_UTIL_SRC, /case 'socialworker':\n(?:.*\n)*?\s+return 'sw';/, 'the Social Worker line is gone');
+  assert.match(SIGNING_UTIL_SRC, /case 'psychologist':\n(?:.*\n)*?\s+return 'psych';/, 'the Psychological Staff line is gone');
+  assert.match(SIGNING_UTIL_SRC, /case 'centerhead':\n(?:.*\n)*?\s+return 'ch';/, 'the Center Head line is gone');
+
+  assert.match(TRACKER_SRC, /from '@\/app\/utils\/form08Signing'/, 'the tracker no longer reads the shared map');
   assert.match(TRACKER_SRC, /signatures\?\.nextSide === mySide/, "the tracker no longer waits for the caller's turn");
-  assert.match(TRACKER_SRC, /\/incident-reports\/\$\{report\.id\}\/verify/, 'the tracker no longer calls the signing endpoint');
+  assert.match(
+    TRACKER_SRC,
+    /openForm8\(track\.violation\.id, track\.violation\.residentId, 'sign'\)/,
+    'the row no longer opens the report for signing',
+  );
+  assert.match(TRACKER_SRC, /mode=\{form8Mode\}/, 'the tracker no longer passes the mode to the report');
+});
+
+test('the report itself is where a signature is drawn', () => {
+  // The requirement: a signer opens the incident report — the way the TRI opens
+  // for review — and signs on their own printed line, not in a dialog over it.
+  assert.match(MODAL_SRC, /'create' \| 'view' \| 'edit' \| 'sign'/, 'the report has no signing mode');
+  assert.match(MODAL_SRC, /const signBoxKey = mySide \? FORM08_SIDE_BOX_KEY\[mySide\] : null/, 'the report does not resolve the line to sign');
+  assert.match(MODAL_SRC, /data-form08-sign-slot=\{key\}/, 'the pad is not placed on the form itself');
+  assert.match(MODAL_SRC, /form8SideEntry\(report, mySide\)/, 'the report does not read the signing state the API derived');
+  assert.match(MODAL_SRC, /request\(`\/incident-reports\/\$\{report\.id\}\/verify`/, 'the report does not send the signature');
+
+  // And the pad is only ever drawn for the caller's own line: the other two keep
+  // showing what is already on them.
+  const padBlock = MODAL_SRC.slice(
+    MODAL_SRC.indexOf('{SIGNER_SIGNATURE_KEYS.map'),
+    MODAL_SRC.indexOf('{SIGNER_SIGNATURE_KEYS.map') + 1800,
+  );
+  assert.match(padBlock, /const isMine = signBoxKey === key;/, 'the pad is not scoped to one line');
+  assert.match(padBlock, /if \(isMine && signReady\)/, 'the pad is drawn for a line that is not the caller\'s turn');
+});
+
+test('a Form 08 notification opens the report, and reaches all three signers', () => {
+  // Opening the tracker alone left the signer hunting for the row; the notice
+  // carries the report id so the tracker opens that Form 08 ready to sign.
+  assert.match(
+    NOTIFICATIONS_SRC,
+    /\/intervention-tracker\?incidentReportId=\$\{encodeURIComponent\(relatedRecordId\)\}/,
+    'the signing notice no longer deep-links to the report',
+  );
+  assert.match(TRACKER_SRC, /get\('incidentReportId'\)/, 'the tracker ignores the deep link');
+  assert.match(
+    TRACKER_SRC,
+    /setForm8Mode\('sign'\)/,
+    'the deep link no longer opens the report ready to sign',
+  );
+
+  // All three signers are told when a Form 08 is filed — including the Center
+  // Head, who is told his turn comes last rather than being left to discover it.
+  assert.match(
+    CONTROLLER_SRC,
+    /await accountsFor\(STAGE_ONE_SIDES\.map\(\(side\) => VERIFICATION_SIDES\[side\]\.role\)\)/,
+    'the Stage-1 signers are no longer notified on submission',
+  );
+  assert.match(
+    CONTROLLER_SRC,
+    /await accountsFor\(\[VERIFICATION_SIDES\[FINAL_SIDE\]\.role\]\)/,
+    'the Center Head is no longer notified when a Form 08 is filed',
+  );
+  assert.match(
+    CONTROLLER_SRC,
+    /your signature is the approval/,
+    'the Center Head is no longer told that his signature is the approval',
+  );
 });

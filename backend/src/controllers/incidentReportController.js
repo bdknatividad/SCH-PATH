@@ -462,29 +462,47 @@ async function create(req, res, next) {
 
     const [rows] = await pool.query('SELECT * FROM incidentReports WHERE id = ?', [newId]);
 
-    // Form 08 starts at Stage 1: the Social Worker and the Psychological Support
-    // Staff read it and sign their own lines, and only then does it reach the
-    // Center Head. Both are told, one row each so read state stays per person —
-    // and the filer is left out, because `notifyUsers` does not skip the actor and
-    // a Houseparent who filed the report should not be asked to sign it.
+    /*
+     * Form 08 starts at Stage 1: the Social Worker and the Psychological Support
+     * Staff read it and sign their own lines, and only then does it reach the
+     * Center Head. All three are told — a signer who is not told the form exists
+     * cannot sign it — but they are told different things, so this is two sends
+     * rather than one: `notifyUsers` delivers a single payload to everyone on its
+     * list, and the Center Head's notice has to say that his turn comes last.
+     *
+     * The filer is left out of both. `notifyUsers` does not skip the actor, and a
+     * Houseparent who filed the report should not be asked to sign it.
+     */
     try {
-      const stageOne = await notifications.usersWithAnyRole(
-        STAGE_ONE_SIDES.map((side) => VERIFICATION_SIDES[side].role),
-      );
-      const recipients = stageOne
-        .filter((account) => String(account.username) !== String(uploader))
-        .map((account) => account.id);
-      await notifications.notifyUsers(recipients, {
+      const base = {
         type: 'Incident Report',
         residentId,
-        title: `Incident Report (Form 08) to sign - ${childName}`,
-        message: `${uploader} filed the Form 08 Incident Report for ${childName}. It needs the Social Worker's and the Psychological Support Staff's signatures.`,
         priority: 'High',
-        actionRequired: 'Read the incident report, correct it if it needs correcting, and sign your line.',
         relatedRecordType: 'incidentReports',
         relatedRecordId: newId,
         actorUsername: uploader,
-        dedupeKey: `incident-report:${newId}:submitted`,
+      };
+      const accountsFor = async (roles) => (await notifications.usersWithAnyRole(roles))
+        .filter((account) => String(account.username) !== String(uploader))
+        .map((account) => account.id);
+
+      await notifications.notifyUsers(
+        await accountsFor(STAGE_ONE_SIDES.map((side) => VERIFICATION_SIDES[side].role)),
+        {
+          ...base,
+          title: `Incident Report (Form 08) to sign - ${childName}`,
+          message: `${uploader} filed the Form 08 Incident Report for ${childName}. It needs the Social Worker's and the Psychological Support Staff's signatures.`,
+          actionRequired: 'Open the report, correct it if it needs correcting, and sign your line.',
+          dedupeKey: `incident-report:${newId}:submitted`,
+        },
+      );
+
+      await notifications.notifyUsers(await accountsFor([VERIFICATION_SIDES[FINAL_SIDE].role]), {
+        ...base,
+        title: `Incident Report (Form 08) filed - ${childName}`,
+        message: `${uploader} filed the Form 08 Incident Report for ${childName}. It reaches you once the Social Worker and the Psychological Support Staff have signed it — your signature is the approval.`,
+        actionRequired: 'Read the report. You sign it last, after the Social Worker and the Psychological Support Staff.',
+        dedupeKey: `incident-report:${newId}:submitted-ch`,
       });
     } catch (notifyErr) {
       console.error('[IncidentReportController] Submission notification failed (non-fatal):', notifyErr.message);

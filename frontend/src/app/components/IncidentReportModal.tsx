@@ -9,6 +9,7 @@ import { request } from '@/services/api';
 import { useAuth } from '../state/AuthContext';
 import { SignaturePadModal } from '@/app/components/SignaturePad';
 import { getCurrentPHDateTime } from '@/utils/dateFormatter';
+import { form8SideForRole, form8SideEntry, FORM08_SIDE_BOX_KEY } from '@/app/utils/form08Signing';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 
@@ -114,7 +115,12 @@ export interface IncidentReportData {
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  mode: 'create' | 'view' | 'edit';
+  /**
+   * `sign` is the reviewer's screen: the same full-screen form, read-only, with a
+   * pad on the one line this account owns. It is what a Form 08 notification
+   * opens, so a signer reads the report they are signing rather than a dialog.
+   */
+  mode: 'create' | 'view' | 'edit' | 'sign';
   violationId: string | null;
   residentId?: string;
   residentIds?: string[];
@@ -171,11 +177,25 @@ function Form08Editor({
   form,
   editable,
   onChange,
+  signBoxKey = null,
+  signValue = '',
+  onSignChange,
+  signReady = false,
 }: {
   residentName: string;
   form: typeof emptyForm;
   editable: boolean;
   onChange: (key: keyof typeof emptyForm, value: string | string[]) => void;
+  /**
+   * The line the person looking at this form is signing, if any — the overlay key
+   * (`checkedBy`, `notedBy`, `psychStaff`). A pad is drawn on that line and only
+   * that line; the other two signer lines show what is already on them.
+   */
+  signBoxKey?: 'checkedBy' | 'notedBy' | 'psychStaff' | null;
+  signValue?: string;
+  onSignChange?: (value: string) => void;
+  /** False when the API would refuse the signature — someone else's turn, or done. */
+  signReady?: boolean;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const [pageWidth, setPageWidth] = useState(760);
@@ -359,9 +379,42 @@ function Form08Editor({
             );
           })}
 
+          {/*
+            The three signer lines.
+
+            Normally they are shown, never signed here: "Checked by", the psych
+            line and "Noted by" belong to the people who own them, and a pad for
+            everyone would let whoever filed the report sign on their behalf.
+
+            The exception is the one person looking at this form *to sign it* —
+            they get a pad on their own line and nowhere else. The other two keep
+            showing what is already on them, so the signer can see the form they
+            are adding to, which is the point of opening the report rather than a
+            dialog.
+          */}
           {SIGNER_SIGNATURE_KEYS.map((key) => {
             const box = SIGNATURE_BOXES[key];
             const drawn = String((form as Record<string, unknown>)[`${key}Signature`] || '');
+            const isMine = signBoxKey === key;
+
+            if (isMine && signReady) {
+              return (
+                <div
+                  key={key}
+                  data-form08-sign-slot={key}
+                  className="absolute z-30"
+                  style={fieldStyle(box.x, box.top, box.width, box.height, scale)}
+                >
+                  <SignaturePadModal
+                    label={`${SIGNATURE_LABELS[key]} signature`}
+                    value={signValue}
+                    onChange={(value) => onSignChange?.(value)}
+                    hint="Sign here"
+                  />
+                </div>
+              );
+            }
+
             if (!drawn) return null;
             return (
               <div
@@ -394,6 +447,10 @@ export default function IncidentReportModal({
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  /** The signature being drawn in `sign` mode, and its in-flight flag. */
+  const [signValue, setSignValue] = useState('');
+  const [signing, setSigning] = useState(false);
+  const [signError, setSignError] = useState<string | null>(null);
 
   const role = String(user?.role || '').toLowerCase();
   // The four roles the specification names as filers. The Psychological Staff
@@ -415,8 +472,10 @@ export default function IncidentReportModal({
       });
       return;
     }
-    if ((mode === 'view' || mode === 'edit') && violationId) {
+    if ((mode === 'view' || mode === 'edit' || mode === 'sign') && violationId) {
       setLoading(true);
+      setSignValue('');
+      setSignError(null);
       request(`/incident-reports/violation/${violationId}`, { method: 'GET' })
         .then((res: any) => {
           if (res?.success && res.data) {
@@ -542,7 +601,72 @@ export default function IncidentReportModal({
     }
   }
 
-  const title = mode === 'create' ? 'Incident Report' : mode === 'edit' ? 'Fill Out Incident Report Again' : `Incident Report${report?.status ? ` · ${report.statusLabel || report.status}` : ''}`;
+  /*
+   * The signing state for `sign` mode.
+   *
+   * The API decides everything — which line this account owns, whether it is
+   * that line's turn, and whether this signature completes the form — so this
+   * only decides what to draw: a pad on the caller's own line when the form is
+   * waiting on them, and a plain reading of the form otherwise.
+   */
+  const mySide = mode === 'sign' ? form8SideForRole(role) : null;
+  const signBoxKey = mySide ? FORM08_SIDE_BOX_KEY[mySide] : null;
+  const myLine = form8SideEntry(report, mySide);
+  const signReady = Boolean(mode === 'sign' && mySide && !myLine?.signed && report?.signatures?.nextSide === mySide);
+  const waitingOn = form8SideEntry(report, report?.signatures?.nextSide);
+  const signBlockedReason = (() => {
+    if (mode !== 'sign' || !report) return null;
+    if (!mySide) return 'Your role has no line to sign on Form 08.';
+    if (myLine?.signed) return `You have already signed this report (${myLine.by}).`;
+    if (report.status === 'Verified' || report.signatures?.complete) return 'This report has all three signatures.';
+    if (!signReady) {
+      return waitingOn
+        ? `Waiting for the ${waitingOn.label} signature first — the form reaches you after that.`
+        : 'This report is not ready for your signature yet.';
+    }
+    return null;
+  })();
+
+  /**
+   * Sign this account's own line.
+   *
+   * The signature goes to the Incident Report, not to the document: the report is
+   * the record, and the endpoint is what decides whether this caller's line is
+   * the one the form is waiting on and whether this signature completes it. On
+   * the third signature the linked document becomes 'Approved', which is what
+   * unlocks `Mark Done` — so the caller is asked to refresh afterwards.
+   */
+  async function handleSign() {
+    if (!report?.id) return;
+    if (!signValue) {
+      setSignError('Draw your signature first.');
+      return;
+    }
+    setSigning(true);
+    setSignError(null);
+    try {
+      const response: any = await request(`/incident-reports/${report.id}/verify`, {
+        method: 'POST',
+        body: JSON.stringify({ signature: signValue }),
+      });
+      if (!response?.success) throw new Error(response?.message || 'Unable to sign the Incident Report.');
+      setSignValue('');
+      onOpenChange(false);
+      onSaved?.();
+    } catch (err: any) {
+      setSignError(err?.message || 'The signature was not recorded. Please try again.');
+    } finally {
+      setSigning(false);
+    }
+  }
+
+  const title = mode === 'create'
+    ? 'Incident Report'
+    : mode === 'edit'
+      ? 'Fill Out Incident Report Again'
+      : mode === 'sign'
+        ? `Incident Report · Sign the “${SIGNATURE_LABELS[signBoxKey || 'checkedBy']}” line`
+        : `Incident Report${report?.status ? ` · ${report.statusLabel || report.status}` : ''}`;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -563,25 +687,45 @@ export default function IncidentReportModal({
         {saveError && <div className="mx-4 mt-3 shrink-0"><Alert variant="destructive"><AlertDescription>{saveError}</AlertDescription></Alert></div>}
 
         {/*
-          No verification bar.
-
-          A Form 08 used to ask for two signatures — the Psychological Support
-          Staff's and the Social Worker's — before it counted as approved. Those
-          two verifications belong to a newly *logged incident* (the violation),
-          which is where they still are; asking for them again on the report
-          meant three separate approvals for one incident, and the second
-          signature was the step nobody could complete, so the report sat
-          unapproved with no way forward.
-
-          The Center Head's decision on the report's own document — the same
-          Approve / Return it already gives through the Documents module — is now
-          the only approval, and it is what the Intervention Tracker reads.
+          This form is where Form 08 is both filled in and signed.
+          `create`/`edit` draw the filer's own two lines; `sign` opens the same
+          form read-only with a pad on the one line the signed-in account owns, so
+          a signer reads the report they are signing instead of a dialog over it.
+          The three signatures arrive in two stages — the Social Worker and the
+          Psychological Support Staff first, in either order, then the Center Head
+          — and the form is approved on the third. The API enforces all of that;
+          this screen only draws what it allows.
         */}
+
+        {/*
+          The signing banner. It states whose turn it is before the signer hunts
+          for their line, and states the refusal plainly when it is not theirs —
+          the API answers 409 for the same cases, but a signer who opened the
+          report from a notification deserves to know why there is no pad.
+        */}
+        {mode === 'sign' && report && (
+          <div className={`mx-4 mt-3 shrink-0 rounded-lg border px-3 py-2 text-xs ${signReady ? 'border-green-200 bg-green-50 text-green-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
+            {signReady
+              ? <>Draw your signature on the “{SIGNATURE_LABELS[signBoxKey || 'checkedBy']}” line below, then press Sign. {report.signatures?.nextSide === 'ch' ? 'This is the last signature — the report is approved once you sign.' : ''}</>
+              : signBlockedReason}
+          </div>
+        )}
+
+        {signError && <div className="mx-4 mt-3 shrink-0"><Alert variant="destructive"><AlertDescription>{signError}</AlertDescription></Alert></div>}
 
         {loading ? (
           <div className="flex min-h-0 flex-1 items-center justify-center bg-slate-100 text-sm text-gray-500"><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Loading Incident Report…</div>
         ) : (
-          <Form08Editor residentName={residentName || report?.residentId || ''} form={form} editable={!isReadOnly && (mode === 'create' || mode === 'edit')} onChange={update} />
+          <Form08Editor
+            residentName={residentName || report?.residentId || ''}
+            form={form}
+            editable={!isReadOnly && (mode === 'create' || mode === 'edit')}
+            onChange={update}
+            signBoxKey={signBoxKey}
+            signValue={signValue}
+            onSignChange={setSignValue}
+            signReady={signReady}
+          />
         )}
 
         <DialogFooter className="shrink-0 border-t bg-white px-4 py-3">
@@ -590,6 +734,18 @@ export default function IncidentReportModal({
               <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>Cancel</Button>
               <Button onClick={handleSave} disabled={saving || !form.incidentDateTime} className="bg-[#2F3E46]">
                 {saving ? <><Loader2 className="mr-1 h-4 w-4 animate-spin" /> Saving…</> : <><Save className="mr-1 h-4 w-4" /> {mode === 'edit' ? 'Fill Out Again & Resubmit' : 'Save Incident Report'}</>}
+              </Button>
+            </>
+          ) : mode === 'sign' ? (
+            <>
+              <Button variant="outline" onClick={() => onOpenChange(false)} disabled={signing}>Close</Button>
+              <Button
+                onClick={handleSign}
+                disabled={signing || !signValue || !signReady}
+                className="bg-[#2F3E46]"
+                title={signReady ? undefined : signBlockedReason || undefined}
+              >
+                {signing ? <><Loader2 className="mr-1 h-4 w-4 animate-spin" /> Signing…</> : <><ShieldCheck className="mr-1 h-4 w-4" /> Sign this report</>}
               </Button>
             </>
           ) : (

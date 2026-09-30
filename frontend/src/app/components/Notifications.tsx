@@ -242,12 +242,15 @@ export function Notifications() {
       // Form 08 and the intervention it belongs to both live in the Violations
       // module, which every role that can act on them holds.
       case 'incidentreports':
-        // A notice asking for a signature opens the tracker: that is where the
-        // Form 08 row is, and where the pad for the signer's own line lives.
-        // Landing on the Behavioral tab showed the recipient the incident without
-        // the action the notice named.
+        // A notice asking for a signature opens the report itself, not just the
+        // tracker: `incidentReportId` makes the tracker open that Form 08 with a
+        // pad on the signer's own line, which is the action the notice names.
+        // Landing on the Behavioral tab showed the incident without the action;
+        // landing on the tracker alone left the signer to find the row.
         if (FORM08_SIGNING_ALERT_TYPES.has(String(alert.type || '').toLowerCase())) {
-          target = '/intervention-tracker';
+          target = relatedRecordId
+            ? `/intervention-tracker?incidentReportId=${encodeURIComponent(relatedRecordId)}`
+            : '/intervention-tracker';
           break;
         }
         target = childTab('behavioral') || '/violations';

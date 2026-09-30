@@ -5,7 +5,7 @@ import { usePermissions } from '@/app/hooks/usePermissions';
 import { useNavigate } from 'react-router-dom';
 import { describeError, request } from '@/services/api';
 import { systemDialog } from '@/app/components/SystemDialog';
-import { SignaturePadModal } from '@/app/components/SignaturePad';
+import { form8SideForRole, form8SideEntry } from '@/app/utils/form08Signing';
 import { formatShortDate, getCurrentPHDateTime } from '@/utils/dateFormatter';
 import IncidentReportModal from './IncidentReportModal';
 import { Card, CardContent, CardHeader, CardTitle } from '@/app/components/ui/card';
@@ -77,30 +77,6 @@ const formatDateValue = (value: any) => {
   return Number.isNaN(parsed.getTime()) ? String(value) : formatShortDate(parsed);
 };
 
-/**
- * The Form 08 line a role signs, or `null` if it signs none.
- *
- * Mirrors `VERIFICATION_SIDES` in `incidentReportController`, which is the
- * authority — it refuses a signature for a line the caller does not own. This
- * only decides whether the row offers the pad.
- */
-const form8SideForRole = (role: string): string | null => {
-  switch (role) {
-    case 'socialworker': return 'sw';
-    case 'psychologist': return 'psych';
-    case 'centerhead': return 'ch';
-    default: return null;
-  }
-};
-
-/**
- * One entry of the report's `signatures.sides`, as the API derived it — including
- * the printed line each signer owns. Read from the payload rather than kept as a
- * second copy here, so the row and the form cannot disagree about who signs what.
- */
-const form8Side = (report: any, side: string | null) =>
-  (report?.signatures?.sides || []).find((entry: any) => entry.side === side) || null;
-
 export function InterventionTracker({ embedded = false }: { embedded?: boolean } = {}) {
   const { children, violations, refreshData } = useData();
   const { user } = useAuth();
@@ -126,20 +102,14 @@ export function InterventionTracker({ embedded = false }: { embedded?: boolean }
   const [completingReqId, setCompletingReqId] = useState<string | null>(null);
   const [incidentReportsByViolation, setIncidentReportsByViolation] = useState<Record<string, any>>({});
   const [form8ViolationId, setForm8ViolationId] = useState<string | null>(null);
-  const [form8Mode, setForm8Mode] = useState<'create' | 'edit'>('create');
-  const [form8ResidentId, setForm8ResidentId] = useState<string | null>(null);
   /**
-   * Signing one's own line on a Form 08.
-   *
-   * The pad lives here rather than in `IncidentReportModal` because the three
-   * signer lines are not the filer's: the Social Worker, the Psychological
-   * Support Staff and the Center Head each sign from this tracker, in their own
-   * session, and the form is approved only when all three have signed.
+   * `sign` opens the same full-screen Form 08 read-only, with a pad on the one
+   * line this account owns. That is what a Form 08 notification opens, and it is
+   * where the three signatures are drawn — reading the report you are signing is
+   * the point of opening it rather than a dialog over it.
    */
-  const [signTarget, setSignTarget] = useState<any | null>(null);
-  const [signValue, setSignValue] = useState('');
-  const [signing, setSigning] = useState(false);
-  const [signError, setSignError] = useState<string | null>(null);
+  const [form8Mode, setForm8Mode] = useState<'create' | 'edit' | 'sign'>('create');
+  const [form8ResidentId, setForm8ResidentId] = useState<string | null>(null);
   const [scheduleTarget, setScheduleTarget] = useState<any | null>(null);
   const [scheduleValue, setScheduleValue] = useState('');
   const [schedulingId, setSchedulingId] = useState<string | null>(null);
@@ -465,46 +435,39 @@ export function InterventionTracker({ embedded = false }: { embedded?: boolean }
   };
 
   /**
-   * Sign the Form 08 line this role owns.
+   * Open a Form 08 on screen — to fill in, to correct, or to sign.
    *
-   * The signature goes to the Incident Report, not to the document: the report is
-   * the record, and the endpoint is what decides whether this caller's line is
-   * the one the form is waiting for and whether this signature completes it. On
-   * the third signature the linked document becomes 'Approved' — which is what
-   * unlocks `Mark Done` — so the tracker is re-read afterwards.
+   * `sign` is the reviewer's view: the same full-screen report, read-only, with a
+   * pad on the one line this account owns. The signature itself is sent by the
+   * modal, because that is where the pad and the report it belongs to both live.
    */
-  const handleSignForm8 = async () => {
-    const report = signTarget;
-    if (!report) return;
-    if (!signValue) {
-      setSignError('Draw your signature first.');
-      return;
-    }
-    setSigning(true);
-    setSignError(null);
-    try {
-      const response: any = await request(`/incident-reports/${report.id}/verify`, {
-        method: 'POST',
-        body: JSON.stringify({ signature: signValue }),
-      });
-      if (!response?.success) throw new Error(response?.message || 'Unable to sign the Incident Report.');
-
-      // Re-read this violation's report so the row shows the new count and whose
-      // turn it is next, and the tracker rows so the button state is current.
-      try {
-        const refreshed: any = await request(`/incident-reports/violation/${report.violationId}`, { method: 'GET' });
-        setIncidentReportsByViolation(prev => ({ ...prev, [report.violationId]: refreshed?.data || null }));
-      } catch { /* the refresh is cosmetic; the signature is already recorded */ }
-      setSignTarget(null);
-      setSignValue('');
-      await loadTrackerRecords();
-      void systemDialog.success('Signature recorded', response.message || 'The form has been passed on.');
-    } catch (err) {
-      setSignError(describeError(err, 'The signature was not recorded. Please try again.'));
-    } finally {
-      setSigning(false);
-    }
+  const openForm8 = (violationId: string, residentId: string | undefined, mode: 'create' | 'edit' | 'sign') => {
+    setForm8ViolationId(violationId);
+    setForm8ResidentId(residentId || null);
+    setForm8Mode(mode);
   };
+
+  /*
+   * A Form 08 notification deep-links here with `?incidentReportId=`, and this
+   * opens that report ready to sign.
+   *
+   * The alert carries the incident report's id rather than the violation's — the
+   * report is what the notice is about — so the violation is found by matching
+   * the loaded reports. That is why this waits for `incidentReportsLoaded`: the
+   * lookup cannot succeed before the reports arrive, and running it once against
+   * an empty map would silently do nothing.
+   */
+  useEffect(() => {
+    const wanted = new URLSearchParams(window.location.search).get('incidentReportId');
+    if (!wanted || !incidentReportsLoaded) return;
+    const match = Object.entries(incidentReportsByViolation)
+      .find(([, report]) => report && String(report.id) === String(wanted));
+    if (!match) return;
+    const [violationId, report] = match;
+    setForm8ViolationId(violationId);
+    setForm8ResidentId(report?.residentId || null);
+    setForm8Mode('sign');
+  }, [incidentReportsLoaded, incidentReportsByViolation]);
 
   return (
     <div className="space-y-6">
@@ -900,7 +863,7 @@ export function InterventionTracker({ embedded = false }: { embedded?: boolean }
                                       if (failed) return (
                                         <div className="flex items-center gap-2">
                                           <span className="text-[10px] font-bold text-yellow-700 bg-yellow-100 border border-yellow-200 rounded-full px-2 py-0.5">Failed</span>
-                                          <Button size="sm" variant="outline" className="h-6 text-[10px] border-yellow-300 text-yellow-800 hover:bg-yellow-50" onClick={() => { setForm8ViolationId(track.violation.id); setForm8ResidentId(track.violation.residentId); setForm8Mode('edit'); }}>
+                                          <Button size="sm" variant="outline" className="h-6 text-[10px] border-yellow-300 text-yellow-800 hover:bg-yellow-50" onClick={() => openForm8(track.violation.id, track.violation.residentId, 'edit')}>
                                             Fill Out Again
                                           </Button>
                                         </div>
@@ -908,7 +871,7 @@ export function InterventionTracker({ embedded = false }: { embedded?: boolean }
                                       if (reassessment) return (
                                         <div className="flex items-center gap-2">
                                           <span className="text-[10px] font-bold text-yellow-700 bg-yellow-100 border border-yellow-200 rounded-full px-2 py-0.5">For Reassessment</span>
-                                          <Button size="sm" variant="outline" className="h-6 text-[10px] border-yellow-300 text-yellow-800 hover:bg-yellow-50" onClick={() => { setForm8ViolationId(track.violation.id); setForm8ResidentId(track.violation.residentId); setForm8Mode('edit'); }}>
+                                          <Button size="sm" variant="outline" className="h-6 text-[10px] border-yellow-300 text-yellow-800 hover:bg-yellow-50" onClick={() => openForm8(track.violation.id, track.violation.residentId, 'edit')}>
                                             Fill Out Again
                                           </Button>
                                         </div>
@@ -930,7 +893,7 @@ export function InterventionTracker({ embedded = false }: { embedded?: boolean }
                                       const total = signatures?.total ?? 3;
                                       const mySide = form8SideForRole(role);
                                       const myTurn = Boolean(mySide) && signatures?.nextSide === mySide;
-                                      const waitingOn = form8Side(report, signatures?.nextSide);
+                                      const waitingOn = form8SideEntry(report, signatures?.nextSide);
                                       return (
                                         <div className="flex items-center gap-2">
                                           <span className="text-[10px] font-bold text-amber-600">
@@ -942,7 +905,7 @@ export function InterventionTracker({ embedded = false }: { embedded?: boolean }
                                               size="sm"
                                               variant="outline"
                                               className="h-6 text-[10px] border-green-300 text-green-800 hover:bg-green-50"
-                                              onClick={() => { setSignTarget(report); setSignValue(''); setSignError(null); }}
+                                              onClick={() => openForm8(track.violation.id, track.violation.residentId, 'sign')}
                                             >
                                               Sign my line
                                             </Button>
@@ -951,7 +914,7 @@ export function InterventionTracker({ embedded = false }: { embedded?: boolean }
                                       );
                                     })() : (
                                       incidentReportsLoaded ? (
-                                        <Button size="sm" variant="outline" className="h-6 text-[10px] border-blue-300 text-blue-700" onClick={() => { setForm8ViolationId(track.violation.id); setForm8ResidentId(track.violation.residentId); setForm8Mode('create'); }}>
+                                        <Button size="sm" variant="outline" className="h-6 text-[10px] border-blue-300 text-blue-700" onClick={() => openForm8(track.violation.id, track.violation.residentId, 'create')}>
                                           Fill Out Incident Report
                                         </Button>
                                       ) : (
@@ -1026,40 +989,10 @@ export function InterventionTracker({ embedded = false }: { embedded?: boolean }
         </DialogContent>
       </Dialog>
 
-      {/* Signing one's own line on a Form 08 — reached from the Form 08 row by the
-          signer whose turn it is. The third signature is what approves the form
-          and unlocks `Mark Done`. */}
-      <Dialog open={!!signTarget} onOpenChange={(open) => { if (!open) { setSignTarget(null); setSignValue(''); setSignError(null); } }}>
-        <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>Sign the Incident Report (Form 08)</DialogTitle></DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="rounded-lg bg-gray-50 border p-3 text-sm">
-              <p className="font-semibold text-[#2F3E46]">
-                {children.find(c => c.id === signTarget?.residentId)?.name || signTarget?.residentId}
-              </p>
-              <p className="text-xs text-gray-500 mt-1">
-                Your signature is printed on the “{form8Side(signTarget, form8SideForRole(role))?.line || 'your'}” line of the form.
-                {signTarget?.signatures?.nextSide === 'ch'
-                  ? ' This is the last signature — the report is approved once you sign.'
-                  : ''}
-              </p>
-            </div>
-            {signError && <p className="text-xs text-red-600">{signError}</p>}
-            <SignaturePadModal label="Your signature" value={signValue} onChange={setSignValue} hint="Sign here" />
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => { setSignTarget(null); setSignValue(''); setSignError(null); }}>Cancel</Button>
-            <Button
-              style={{ backgroundColor: '#FFD100', color: '#2F3E46' }}
-              className="font-bold"
-              disabled={signing || !signValue}
-              onClick={handleSignForm8}
-            >
-              {signing ? 'Signing…' : 'Sign'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Signing is done inside the report itself — `IncidentReportModal` in
+          `sign` mode, opened from the Form 08 row or from a notification. There
+          is deliberately no dialog here: a signer should read the form they are
+          signing, and the pad belongs on the line it fills. */}
 
       <IncidentReportModal
         open={Boolean(form8ViolationId)}
