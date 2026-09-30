@@ -735,8 +735,16 @@ test('the Nurse resolves identically from stored grants and from the matrix', ()
 // As with the Psychologist and the Nurse, these assert the *effective* snapshot
 // so they keep holding if the definition is ever restructured.
 
-/** The modules the specification grants, verbatim. */
-const HOUSEPARENT_MODULES = ['Dashboard', 'Activities', 'Assessments', 'Houseparent', 'Violations'];
+/**
+ * The modules the specification grants, verbatim.
+ *
+ * `Child Records` was added by the Center Head on 2026-10-01, read-only. The
+ * Houseparent opens a resident profile from the module itself now; the profile
+ * viewer that used to hang off the Case Load card is gone, and Case Load is a
+ * roster plus an assign/transfer control. The medical-summary redaction that
+ * used to cover the role moved with the module — see 4d below.
+ */
+const HOUSEPARENT_MODULES = ['Dashboard', 'Child Records', 'Activities', 'Assessments', 'Houseparent', 'Violations'];
 
 test('the Houseparent holds exactly the modules the specification lists', () => {
   const snapshot = rbac.buildAccessSnapshot({ role: 'houseparent' });
@@ -745,9 +753,10 @@ test('the Houseparent holds exactly the modules the specification lists', () => 
 
   // Everything the "cannot" list names must be absent, not merely unmentioned:
   // an over-granted module is a visible sidebar entry *and* a reachable page.
-  // Child Records matters most — its Medical tab is "cannot access Medical
-  // records/modules", and the Reports module is not in the access list at all.
-  for (const withheld of ['Child Records', 'Court Records', 'Documents', 'Health', 'Education', 'Reports', 'Account Management']) {
+  // Health matters most — the Child Records Medical tab reads the same data, but
+  // through the tab, and the role holds no Health module of its own. Reports and
+  // Account Management are not in the access list at all.
+  for (const withheld of ['Court Records', 'Documents', 'Health', 'Education', 'Reports', 'Account Management']) {
     assert.equal(
       rbac.hasModuleAccess(snapshot, withheld),
       false,
@@ -791,9 +800,10 @@ test("the Houseparent's own module declares all three of its tabs", () => {
 
 test('every module the Houseparent holds declares its tabs, so none default open', () => {
   // The resolver treats a module with *no* declared subModules entry as "all
-  // tabs". The Houseparent entry used to declare a five-tab `Child Records` list
-  // for a module the role does not hold — inert, but a trap: adding Child
-  // Records to the role would have opened all five tabs, Medical included.
+  // tabs". The Houseparent used to hold five modules and declare two tab lists;
+  // Child Records is now the third, and it has to be declared too — otherwise
+  // the role would silently pick up every Child Records tab the module ever
+  // gains, Medical included, without anyone deciding it.
   const definition = rbac.getRoleDefinition('houseparent');
   const declared = definition.subModules || {};
 
@@ -841,6 +851,10 @@ test('the Houseparent grants no capability the specification withholds, on any m
 
   const allowed = {
     Dashboard: ['view'],
+    // Read-only. The Center Head opened the module on 2026-10-01 so the role
+    // could read a resident profile directly; writing one is still the Social
+    // Worker's and the Educator's work, not the Houseparent's.
+    'Child Records': ['view'],
     Activities: ['view', 'export'],
     Assessments: ['view', 'export'],
     Houseparent: ['view', 'create', 'edit', 'export'],
@@ -2225,15 +2239,18 @@ test('the Houseparent may still reach Activities and the assessment schedule', a
   });
 });
 
-test('the resident payload withholds the medical summary from the Houseparent', async () => {
+test('the resident payload redacts the medical summary for the roles with no Medical tab', async () => {
   // `children.medicalRecords` and `children.lastCheckup` ride along on the
   // resident row instead of behind a route of their own, so no module gate
   // covers them. `GET /children` therefore has to redact them for a role that
-  // does not hold Child Records — otherwise the API is a direct path to the
-  // very data "cannot access Medical records/modules" withholds.
+  // cannot reach the Medical tab — otherwise the API is a direct path to the
+  // very data that role withholds.
   //
-  // The Nurse is the control: it holds Child Records, so its payload must be
-  // untouched.
+  // The Houseparent changed side on 2026-10-01: it holds Child Records now, so it
+  // reads the same summary the Nurse does and the redaction no longer covers it.
+  // The Nurse is the other role that must see it. The Educator is the control
+  // that still holds — it holds Child Records too, but declares no Medical tab,
+  // so the summary stays out of its payload.
   const childRow = {
     id: 'CH1',
     name: 'Resident One',
@@ -2257,7 +2274,7 @@ test('the resident payload withholds the medical summary from the Houseparent', 
   }
 
   for (const [role, medical, checkup] of [
-    ['houseparent', [], null],
+    ['houseparent', childRow.medicalRecords, '2026-01-05'],
     ['nurse', childRow.medicalRecords, '2026-01-05'],
     // The control that matters for the Educator: it HOLDS Child Records, so a
     // module-level rule would leave the medical summary in its payload even
@@ -2278,10 +2295,13 @@ test('the resident payload withholds the medical summary from the Houseparent', 
   }
 });
 
-test('the single-resident payload withholds the medical summary and the health records', async () => {
+test('the single-resident payload redacts the medical summary and the health records', async () => {
   // The same two fields appear again on `GET /children/:id`, which additionally
   // embeds the resident's `healthRecords` rows — the Health module's table. That
   // mount is now gated, so this embedding would otherwise be a second door.
+  //
+  // The Houseparent holds Child Records and its Medical tab since 2026-10-01, so
+  // it takes the same payload the Nurse does. The Educator still gets neither.
   const childRow = {
     id: 'CH1',
     name: 'Resident One',
@@ -2305,7 +2325,7 @@ test('the single-resident payload withholds the medical summary and the health r
   }
 
   for (const [role, medical, checkup, health] of [
-    ['houseparent', [], null, []],
+    ['houseparent', childRow.medicalRecords, '2026-01-05', [healthRow]],
     ['nurse', childRow.medicalRecords, '2026-01-05', [healthRow]],
     // Holds Child Records, must still see no medical summary and no health rows.
     ['educator', [], null, []],

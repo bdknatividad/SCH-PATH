@@ -6,15 +6,17 @@
  * and what is scheduled today. It is a *work queue*, not a facility overview —
  * so this page shows no facility-wide figure at all.
  *
- * ## Everything on it is caseload-scoped, by the server
+ * ## Everything on it is caseload-scoped
  *
- * `children` arrives from `/api/store` already narrowed to the residents this
- * Houseparent is assigned (the store applies the same boundary `GET /children`
- * does — see the note on `rowResidentIds` in `routes/index.js`). `/tri` and
- * `/anecdotal-reports` scope themselves the same way: both filter to the
- * caller's active assignments server-side. Nothing here re-filters by
- * assignment, because a second copy of that rule is how a page starts showing a
- * resident the API would refuse.
+ * `residents` arrives already narrowed to this Houseparent's active assignments.
+ * It used to come straight from `/api/store`, which narrowed `children` for the
+ * role; since 2026-10-01 the store returns every resident — Child Records and the
+ * Violations module are facility-wide for the role now — so `Dashboard.tsx`
+ * applies the boundary before handing the list over (see
+ * `houseparentResidentIds` there). `/tri` and `/anecdotal-reports` scope
+ * themselves the same way: both filter to the caller's active assignments.
+ * Nothing here re-filters by assignment, because a second copy of that rule is
+ * how a page starts showing a resident the API would refuse.
  *
  * ## No resident profile links
  *

@@ -140,7 +140,7 @@ async function getRequirements(req, res, next) {
 async function getByResident(req, res, next) {
   try {
     const { residentId } = req.params;
-    if (!await canAccessResident(req.user, residentId)) {
+    if (!await canAccessResident(req.user, residentId, { area: 'child-records' })) {
       throw new ApiError(403, 'You are not assigned to this resident');
     }
     const [rows] = await pool.query(
@@ -178,7 +178,7 @@ async function getByResident(req, res, next) {
 async function getCurrent(req, res, next) {
   try {
     const { residentId } = req.params;
-    if (!await canAccessResident(req.user, residentId)) {
+    if (!await canAccessResident(req.user, residentId, { area: 'child-records' })) {
       throw new ApiError(403, 'You are not assigned to this resident');
     }
     const [rows] = await pool.query(
@@ -245,7 +245,7 @@ async function getById(req, res, next) {
   try {
     const [rows] = await pool.query('SELECT residentId FROM phaseProgress WHERE id = ?', [req.params.id]);
     if (!rows.length) throw new ApiError(404, 'Phase record not found');
-    if (!await canAccessResident(req.user, rows[0].residentId)) {
+    if (!await canAccessResident(req.user, rows[0].residentId, { area: 'child-records' })) {
       throw new ApiError(403, 'You are not assigned to this resident');
     }
     return baseController.getById(req, res, next);
@@ -259,7 +259,7 @@ async function validate(req, res, next) {
     const { id } = req.params;
     const [rows] = await pool.query('SELECT * FROM phaseProgress WHERE id = ?', [id]);
     if (rows.length === 0) throw new ApiError(404, 'Phase record not found');
-    if (!await canAccessResident(req.user, rows[0].residentId)) {
+    if (!await canAccessResident(req.user, rows[0].residentId, { area: 'child-records' })) {
       throw new ApiError(403, 'You are not assigned to this resident');
     }
 
@@ -287,7 +287,7 @@ async function validate(req, res, next) {
 async function validateByResident(req, res, next) {
   try {
     const { residentId } = req.params;
-    if (!await canAccessResident(req.user, residentId)) {
+    if (!await canAccessResident(req.user, residentId, { area: 'child-records' })) {
       throw new ApiError(403, 'You are not assigned to this resident');
     }
     const [rows] = await pool.query(
@@ -649,7 +649,7 @@ async function toggleTask(req, res, next) {
       // Return empty success so frontend doesn't crash
       return res.json({ success: true, tasksCompleted: [task].filter(() => completed), allTasksDone: false });
     }
-    if (!await canAccessResident(req.user, rows[0].residentId)) {
+    if (!await canAccessResident(req.user, rows[0].residentId, { area: 'child-records' })) {
       throw new ApiError(403, 'You are not assigned to this resident');
     }
 

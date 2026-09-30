@@ -185,6 +185,11 @@ export const DEFAULT_MODULE_ACCESS: Record<string, string[]> = {
   ],
   houseparent: [
     'Dashboard',
+    // The Center Head opened Child Records to the Houseparent on 2026-10-01 so
+    // the role reads a resident profile from the module itself instead of
+    // through the Case Load card. Case Load is now a roster plus an
+    // assign/transfer control. The role matrix grants the module read-only.
+    'Child Records',
     'Violations',
     'Activities',
     'Assessments',

@@ -2815,6 +2815,60 @@ async function runMigrations() {
   await ensureIndex('phaseProgress', 'idx_phaseProgress_admission', 'admissionId');
   await backfillPhaseProgressAdmissions();
   await repairWorkflowDocuments();
+  await grantChildRecordsToHouseparents();
+}
+
+/**
+ * Gives every Houseparent account already on file the Child Records module.
+ *
+ * `users.accessibleModules` is the storage-shaped grant list, and a stored list
+ * *replaces* the role default rather than merging with it (`buildAccessSnapshot`:
+ * "An account with no stored grant list falls back to the role's matrix"). So
+ * declaring the module in `rbac.definition.json` opens it for newly created
+ * accounts and for any account whose list was never written — but every
+ * Houseparent already on file carries the old five-module list and would keep
+ * failing `canOpenModule('Child Records')` forever, with no symptom other than a
+ * missing sidebar entry. The Center Head opened Child Records to the role on
+ * 2026-10-01; this backfills the accounts that predate it.
+ *
+ * Idempotent: a row that already names the module is skipped, so a second boot
+ * writes nothing. A row whose list cannot be parsed is skipped too — a broken
+ * grant list is a different problem, and replacing it with a guessed one would
+ * silently hand the account every module the role used to hold.
+ */
+async function grantChildRecordsToHouseparents() {
+  try {
+    const [rows] = await pool.query(
+      `SELECT id, accessibleModules FROM users WHERE LOWER(TRIM(role)) = 'houseparent'`
+    );
+    let granted = 0;
+    for (const row of rows) {
+      let modules = row.accessibleModules;
+      if (typeof modules === 'string') {
+        try {
+          modules = JSON.parse(modules);
+        } catch {
+          continue;
+        }
+      }
+      if (!Array.isArray(modules)) continue;
+      const already = modules.some(
+        (module) => String(module || '').trim().toLowerCase() === 'child records'
+      );
+      if (already) continue;
+      modules.push('Child Records');
+      await pool.query('UPDATE users SET accessibleModules = ? WHERE id = ?', [
+        JSON.stringify(modules),
+        row.id,
+      ]);
+      granted += 1;
+    }
+    if (granted) {
+      console.log(`Migration: Child Records granted to ${granted} Houseparent account(s).`);
+    }
+  } catch (err) {
+    console.warn('Migration warning (Houseparent Child Records backfill):', err.message);
+  }
 }
 
 /**

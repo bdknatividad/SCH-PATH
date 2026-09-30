@@ -467,15 +467,23 @@
     "houseparent": {
       "label": "Houseparent",
       "fullAccess": false,
-      "description": "Day-to-day resident care for the assigned caseload: TRI records, anecdotal reports, activities and assessments. No medical, health, court or administrative access.",
+      "description": "Day-to-day resident care: Child Records (read), violations and interventions for every active resident, TRI records and anecdotal reports for the assigned caseload, activities and assessments. No medical, health, court or administrative access.",
       "modules": [
         "Dashboard",
+        "Child Records",
         "Activities",
         "Assessments",
         "Houseparent",
         "Violations"
       ],
       "subModules": {
+        "Child Records": [
+          "Personal Info",
+          "Phase Timeline",
+          "Education",
+          "Medical",
+          "Behavioral"
+        ],
         "Violations": [
           "Violation List",
           "Intervention Tracker"
@@ -488,6 +496,9 @@
       },
       "permissions": {
         "*": [
+          "view"
+        ],
+        "Child Records": [
           "view"
         ],
         "Violations": [

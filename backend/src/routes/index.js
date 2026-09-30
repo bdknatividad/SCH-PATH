@@ -323,14 +323,18 @@ router.get('/store', authenticate, async (req, res, next) => {
           if (config.sortInApplication) rows = sortRows(rows, orderBy);
         }
 
-        // Houseparents have a strict resident caseload boundary. The store
-        // endpoint must enforce the same boundary as the individual controllers
-        // so a direct store request cannot expose another resident's records.
+        // Houseparents have a strict resident caseload boundary — in the areas
+        // that still have one. Child Records and the Violations module were
+        // opened to every active resident on 2026-10-01, so `children`,
+        // `admissions`, `healthRecords`, `phaseProgress` and `violations` are no
+        // longer filtered here. What is left is the list of resources the Center
+        // Head chose to keep caseload-bound: the Dashboard's Activities and
+        // Assessments, their evaluations, and the Court records. TRI and
+        // Anecdotal Reports never came through this endpoint.
         if (String(req.user?.role || '').toLowerCase() === 'houseparent') {
           const assignedIds = new Set((await assignedResidentIds(req.user)).map(String));
           const residentScopedResources = new Set([
-            'children', 'admissions', 'activities', 'assessments', 'healthRecords',
-            'activityEvaluations', 'violations', 'phaseProgress', 'courtRecords'
+            'activities', 'assessments', 'activityEvaluations', 'courtRecords'
           ]);
           if (residentScopedResources.has(resourceName)) {
             rows = rows.filter(row => rowResidentIds(resourceName, row).some(id => assignedIds.has(String(id))));

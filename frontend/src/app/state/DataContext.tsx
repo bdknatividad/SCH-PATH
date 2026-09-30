@@ -533,7 +533,7 @@ export function DataProvider({ children: childrenProp }: { children: ReactNode }
       // A newer load started while this one was in flight — its data is at
       // least as fresh, so writing this response would move the UI backwards.
       if (generation !== loadGeneration.current) return;
-      let loadedChildren = Array.isArray(store.children) ? store.children.map((c: any) => ({
+      const loadedChildren = Array.isArray(store.children) ? store.children.map((c: any) => ({
         ...c,
         behavioralLogs: Array.isArray(c.behavioralLogs) ? c.behavioralLogs : [],
         assessments: Array.isArray(c.assessments) ? c.assessments : [],
@@ -541,29 +541,20 @@ export function DataProvider({ children: childrenProp }: { children: ReactNode }
         lastCheckup: c.lastCheckup || null,
       })) : [];
 
-      // Houseparent resident lists are refreshed directly from the active
-      // assignment source. This keeps Child Records, TRI and Anecdotal Report
-      // in sync even when the bulk store was loaded before an assignment was
-      // changed or when a legacy assignment is linked through staff.userId.
-      if (String(user?.role || '').trim().toLowerCase().replace(/[_-]/g, ' ') === 'houseparent') {
-        try {
-          const assigned = await request<{ success: boolean; data?: any[] }>('/resident-assignments/my-residents');
-          if (assigned?.success && Array.isArray(assigned.data)) {
-            loadedChildren = assigned.data.map((c: any) => ({
-              ...c,
-              behavioralLogs: Array.isArray(c.behavioralLogs) ? c.behavioralLogs : [],
-              assessments: Array.isArray(c.assessments) ? c.assessments : [],
-              medicalRecords: Array.isArray(c.medicalRecords) ? c.medicalRecords : [],
-              lastCheckup: c.lastCheckup || null,
-            }));
-          }
-        } catch (assignmentError) {
-          console.warn('[DataContext] Unable to refresh Houseparent assigned residents:', assignmentError);
-        }
-      }
-
-      // The Houseparent branch above awaits a second request, so re-check the
-      // generation before touching any state.
+      // `children` is no longer narrowed for a Houseparent.
+      //
+      // It used to be replaced here with GET /resident-assignments/my-residents,
+      // which kept Child Records, TRI and Anecdotal Report aligned with the case
+      // load even when the bulk store was loaded before an assignment changed.
+      // On 2026-10-01 the Center Head opened Child Records and the Violations
+      // module to every active resident, so narrowing the shared list would have
+      // hidden exactly the residents those two modules now exist to reach.
+      //
+      // TRI and Anecdotal are not loosened by this: each applies its own caseload
+      // filter where it reads the list (`Tri.tsx` `activeResidents`,
+      // `AnecdotalReport.tsx` / `AnecdotalReports.tsx` via
+      // /resident-assignments/my-residents), so they stay restricted without the
+      // shared list being trimmed for every role.
       if (generation !== loadGeneration.current) return;
 
       setChildren(loadedChildren);

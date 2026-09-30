@@ -38,34 +38,35 @@ function canVerify(req) {
 }
 
 /**
- * Get all violations, scoped for Houseparents to only their assigned
- * residents. The generic base controller has no concept of req.user, so
- * violations were previously visible across a Houseparent's whole facility
- * rather than just their own caseload — this mirrors the same scoping
- * childController.getAll already applies for the Child Records list.
+ * Get all violations.
+ *
+ * Facility-wide for every role that holds the module, Houseparents included. The
+ * Center Head opened the Violation List and the Intervention Tracker to every
+ * active resident on 2026-10-01: a Houseparent on duty has to be able to log an
+ * incident against whichever resident is in front of them, not only the ones on
+ * their case load. This used to INNER JOIN `residentAssignments` on the caller's
+ * own rows, which is the boundary that was lifted. TRI Records and Anecdotal
+ * Reports keep theirs.
  *
  * Columns are prefixed with v. throughout (rather than reusing the shared
- * buildWhereClause helper) because that helper emits unprefixed column
- * names, which would be ambiguous here: residentAssignments also has its
- * own status column, and an unprefixed "status = ?" against this two-table
- * join would fail or silently filter on the wrong table's column.
+ * buildWhereClause helper) because that helper emits unprefixed column names.
  *
  * The `Pending Review` rows are the verification queue, and they are withheld
- * from any caller who does not hold `Violations:verify`. Hiding the "For
- * Verification" tab and its tile in the SPA is not enough on its own: without
- * this, a Houseparent could read the same queue straight off `GET /api/violations`
- * — the route is gated on the module, which the role legitimately holds. The
- * filter is applied here, in the query, so the withheld rows never leave the
- * database rather than being trimmed out of the response afterwards.
+ * from any caller who does not hold `Violations:verify` — which is the rule that
+ * keeps the queue away from a Houseparent now that the caseload join is gone.
+ * Hiding the "For Verification" tab and its tile in the SPA is not enough on its
+ * own: without this filter a Houseparent could read the same queue straight off
+ * `GET /api/violations`, because the route is gated on the module, which the role
+ * legitimately holds. The filter is applied here, in the query, so the withheld
+ * rows never leave the database rather than being trimmed out of the response.
  */
 async function getAll(req, res, next) {
   try {
-    const isHouseparent = String(req.user?.role || '').toLowerCase() === 'houseparent';
     const mayVerify = canVerify(req);
 
     const allowedFilters = new Set(RESOURCES.violations.columns);
     const conditions = [];
-    const values = isHouseparent ? [req.user.id] : [];
+    const values = [];
 
     for (const [key, value] of Object.entries(req.query || {})) {
       if (allowedFilters.has(key) && value !== undefined && value !== null && value !== '') {
@@ -79,18 +80,10 @@ async function getAll(req, res, next) {
       values.push('Pending Review');
     }
 
-    // The Houseparent is scoped to its caseload; every other role reads the
-    // whole table, exactly as the base controller did.
-    const scope = isHouseparent
-      ? "INNER JOIN residentAssignments ra ON ra.residentId = v.residentId WHERE ra.userId = ? AND ra.status = 'Active'"
-      : '';
-    const where = conditions.length
-      ? `${isHouseparent ? 'AND' : 'WHERE'} ${conditions.join(' AND ')}`
-      : '';
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
     const query = `
       SELECT v.* FROM violations v
-      ${scope}
       ${where}
       ORDER BY v.${RESOURCES.violations.orderBy}`;
 
@@ -113,7 +106,7 @@ async function getById(req, res, next) {
     if (isHouseparent || !canVerify(req)) {
       const [rows] = await pool.query('SELECT residentId, status FROM violations WHERE id = ?', [id]);
       if (rows.length === 0) throw new ApiError(404, 'Violation not found');
-      if (isHouseparent && !await canAccessResident(req.user, rows[0].residentId)) {
+      if (isHouseparent && !await canAccessResident(req.user, rows[0].residentId, { area: 'violations' })) {
         throw new ApiError(403, 'You are not assigned to this resident');
       }
       // Fetching one record by id is the other way round the list filter: the
@@ -573,7 +566,11 @@ async function create(req, res, next) {
       throw new ApiError(400, 'Violation type is required.');
     }
 
-    if (!await canAccessResident(req.user, residentId)) {
+    // A Houseparent logs an incident against any active resident — the Violations
+    // module is facility-wide for them (2026-10-01), so the caseload check is
+    // made in the open `violations` area and lets them through. It still refuses
+    // a resident that is not active, and still bounds every other area.
+    if (!await canAccessResident(req.user, residentId, { area: 'violations' })) {
       throw new ApiError(403, 'You are not assigned to this resident');
     }
 
@@ -1322,9 +1319,11 @@ async function markDone(req, res, next) {
     );
     if (!rows.length) throw new ApiError(404, 'Violation not found');
 
-    // Houseparents may complete only interventions belonging to their own
-    // assigned residents. Other authorized roles keep the existing workflow.
-    if (!await canAccessResident(req.user, rows[0].residentId)) {
+    // Marking an intervention done lives in the Violations module, which is
+    // facility-wide for a Houseparent (2026-10-01) — the intervention they were
+    // notified about may belong to a resident who is not on their case load.
+    // Other authorized roles keep the existing workflow.
+    if (!await canAccessResident(req.user, rows[0].residentId, { area: 'violations' })) {
       throw new ApiError(403, 'You are not assigned to this resident');
     }
 

@@ -136,7 +136,7 @@ async function recommendationForTri(req, res, next) {
 async function getResidentPlan(req, res, next) {
   try {
     const residentId = req.params.residentId;
-    if (!await canAccessResident(req.user, residentId)) throw new ApiError(403, 'You are not assigned to this resident.');
+    if (!await canAccessResident(req.user, residentId, { area: 'child-records' })) throw new ApiError(403, 'You are not assigned to this resident.');
     const admission = await getActiveAdmission(residentId);
     const [history] = await pool.query(
       `SELECT de.*, dr.recommendationNote, dr.majorCount, dr.minorCount, dr.thresholdType

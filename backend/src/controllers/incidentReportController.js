@@ -689,7 +689,11 @@ async function resubmit(req, res, next) {
 async function canEditIncidentReport(user, report) {
   const role = normalizeRole(user?.role);
   if (!['socialworker', 'centerhead', 'houseparent', 'admin', 'psychologist'].includes(role)) return false;
-  return await canAccessResident(user, report.residentId);
+  // Form 08 is filed from the Intervention Tracker, which is facility-wide for a
+  // Houseparent (2026-10-01), so the report it produces has to be reachable on
+  // the same terms — otherwise the incident they just logged is the one they
+  // cannot correct.
+  return await canAccessResident(user, report.residentId, { area: 'violations' });
 }
 
 /**

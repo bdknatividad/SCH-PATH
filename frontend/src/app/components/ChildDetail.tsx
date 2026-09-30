@@ -276,10 +276,14 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
    * specification does not grant.
    */
   const rbacChildRecordTabs = useSubModuleTabs('Child Records');
-  // Houseparents reach this viewer from their own Houseparent caseload, so the
-  // resident page always exposes the five requested tabs even when an older
-  // per-account Child Records grant omitted them. The backend still enforces
-  // the resident assignment and every write capability.
+  // Houseparents have held Child Records since 2026-10-01, and the role matrix
+  // now declares all five tabs for them — so this list is what the resolver
+  // returns anyway. It stays because a *stored* per-account grant wins over the
+  // matrix: every Houseparent account created before that date carries an
+  // `accessibleModules` / legacy `childRecordTabs` value that predates the
+  // module. `grantChildRecordsToHouseparents()` backfills the module at boot;
+  // this keeps the tab strip whole for an account whose stored tab list is
+  // partial. The backend still enforces every read and write capability.
   const childRecordTabs = isHouseparent
     ? [
         { key: 'personal', label: 'Personal Info', subModule: 'Personal Info' },

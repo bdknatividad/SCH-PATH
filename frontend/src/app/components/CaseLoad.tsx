@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/app/components/ui/card';
 import { Badge } from '@/app/components/ui/badge';
 import { Button } from '@/app/components/ui/button';
-import { Users, ChevronRight, ArrowLeft, User, Calendar, AlertCircle, Eye, Search, UserPlus, Repeat } from 'lucide-react';
+import { Users, ChevronRight, ArrowLeft, User, Calendar, AlertCircle, Search, UserPlus, Repeat } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/app/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/app/components/ui/select';
 import { request } from '@/services/api';
@@ -482,17 +482,12 @@ export function CaseLoad() {
                       </div>
                     </div>
 
-                    {/* HP action: exactly the Child Records View action, with all edit/delete actions removed. */}
+                    {/* HP action: the transfer control, and nothing else. The
+                        per-resident "View" button that used to sit here opened
+                        the full resident profile inline; resident records are
+                        opened from the Child Records module now, so Case Load
+                        is a roster plus an assignment control. */}
                     <div className="flex items-center gap-2 pt-4 md:pt-0 border-t md:border-t-0 md:border-l md:pl-6 border-white/10">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="text-white hover:bg-white/10 gap-2"
-                        onClick={() => setViewingChildId(child.id)}
-                      >
-                        <Eye size={16} className="text-[#FFD100]" />
-                        View
-                      </Button>
                       {canAssignCaseLoad && (
                         <Button
                           variant="ghost"
@@ -523,10 +518,10 @@ export function CaseLoad() {
 
   if (isHouseparent) {
     // Keep the HP Case Load overview visually identical to the reference:
-    // always show the complete roster of active Houseparents.  Only the signed-in
-    // Houseparent's card contains resident names and has an active View
-    // residents action; other HP cards remain visible but their residents
-    // cannot be opened.
+    // always show the complete roster of active Houseparents. Resident names are
+    // listed on every card and nothing here opens a resident — a Houseparent
+    // reads a record from the Child Records module, and only the Center Head and
+    // the Social Worker assign or transfer a case load.
     const sortedHPs = [...filteredData].sort((a, b) =>
       String(a.label).localeCompare(String(b.label), undefined, { numeric: true, sensitivity: 'base' })
     );
@@ -564,8 +559,7 @@ export function CaseLoad() {
                   <CardContent>
                     <div className="flex items-end justify-between gap-4 min-h-[58px]">
                       <div className="min-w-0 flex-1">
-                        {/* The assignment list is visible for every HP; only
-                            the signed-in HP's own residents can be opened. */}
+                        {/* The assignment list is visible for every HP. */}
                         {hp.residents?.length > 0 ? (
                           <p className="max-w-full whitespace-normal break-words text-[11px] leading-4 text-gray-500">
                             {hp.residents.map(r => (
@@ -576,19 +570,9 @@ export function CaseLoad() {
                           <p className="text-[11px] italic text-gray-400">No residents assigned</p>
                         )}
                         {!isOwn && hp.residents?.length > 0 && (
-                          <p className="mt-1 text-[10px] text-gray-400">Records open only to their assigned Houseparent.</p>
+                          <p className="mt-1 text-[10px] text-gray-400">Open a resident from the Child Records module.</p>
                         )}
                       </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        disabled={!isOwn}
-                        className={`shrink-0 gap-1 font-normal ${isOwn ? 'text-[#2F3E46] hover:bg-gray-50' : 'text-[#2F3E46] opacity-100'}`}
-                        onClick={() => { if (isOwn) setSelectedHP(hp); }}
-                      >
-                        View residents
-                        <ChevronRight className="w-3.5 h-3.5" />
-                      </Button>
                     </div>
                   </CardContent>
                 </Card>

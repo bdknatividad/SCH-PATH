@@ -1,18 +1,28 @@
 /**
- * `/store` must apply the Houseparent caseload boundary — the same one
- * `GET /children` applies — rather than a stricter one that hides everything.
+ * `/store` must apply the Houseparent caseload boundary to the resources that
+ * still have one, and must *not* apply it to the ones the Center Head opened.
  *
- * The bulk store resolves a row's resident ids through `rowResidentIds()` in
- * routes/index.js. That helper read `row.residentId` and then scanned a small
- * set of JSON columns, but a `children` row IS the resident: it is keyed by
- * `id` and has no `residentId`. So the helper returned `[]` for every resident,
- * the Houseparent filter matched nothing, and `/store` answered
- * `children: []` for a Houseparent who held four assigned residents.
+ * This file has now pinned both sides of the same line, so the history is worth
+ * keeping:
  *
- * Nothing errored and no screen broke — `DataContext` re-reads
- * `/resident-assignments/my-residents` for Houseparents and overwrote the
- * empty list — which is exactly why this needs a test rather than a smoke
- * check. The failure mode is a silently wrong list.
+ *  1. The bulk store resolves a row's resident ids through `rowResidentIds()` in
+ *     routes/index.js. That helper read `row.residentId` and then scanned a small
+ *     set of JSON columns, but a `children` row IS the resident: it is keyed by
+ *     `id` and has no `residentId`. So the helper returned `[]` for every
+ *     resident, the Houseparent filter matched nothing, and `/store` answered
+ *     `children: []` for a Houseparent who held four assigned residents.
+ *
+ *  2. On 2026-10-01 the Center Head opened Child Records and the Violations
+ *     module to every active resident, so `children`, `admissions`,
+ *     `healthRecords`, `phaseProgress` and `violations` left the caseload filter.
+ *     The Dashboard's Activities and Assessments, their evaluations, and the
+ *     Court records stayed scoped — and that is the boundary this file asserts
+ *     now. TRI Records and Anecdotal Reports never came through `/store`.
+ *
+ * Nothing errored and no screen broke in either case — `DataContext` re-reads
+ * `/resident-assignments/my-residents` for Houseparents and overwrote the empty
+ * list — which is exactly why this needs a test rather than a smoke check. The
+ * failure mode is a silently wrong list.
  */
 
 const test = require('node:test');
@@ -40,11 +50,12 @@ function purgeSrcModules() {
 /**
  * A pool stub that answers only what this contract needs.
  *
- * `assignedIds` is what the Houseparent is actually assigned to, and
- * `childrenRows` is the whole resident table — the store has to narrow the
- * second to the first.
+ * `assignedIds` is what the Houseparent is actually assigned to, `childrenRows`
+ * is the whole resident table, and `activityRows` is the whole activities table
+ * — the store has to narrow the activities to the caseload, and leave the
+ * residents alone.
  */
-function createPoolStub({ role, userId, assignedIds, childrenRows }) {
+function createPoolStub({ role, userId, assignedIds, childrenRows, activityRows = [] }) {
   const seen = [];
 
   async function query(sql, params) {
@@ -67,6 +78,7 @@ function createPoolStub({ role, userId, assignedIds, childrenRows }) {
     const tableMatch = text.match(/^SELECT \* FROM `(\w+)`/);
     if (tableMatch) {
       if (tableMatch[1] === 'children') return [childrenRows];
+      if (tableMatch[1] === 'activities') return [activityRows];
       return [[]];
     }
     return [[]];
@@ -132,6 +144,11 @@ const CHILDREN = [
   { id: 'CH002', name: 'Someone Else', status: 'Active' },
 ];
 
+const ACTIVITIES = [
+  { id: 'ACT001', residentId: 'CH001', title: 'Assigned activity' },
+  { id: 'ACT002', residentId: 'CH002', title: 'Someone else activity' },
+];
+
 async function getStore(base, role) {
   const response = await fetch(`${base}/api/store`, {
     headers: { Authorization: `Bearer ${tokenFor(role)}` },
@@ -140,12 +157,16 @@ async function getStore(base, role) {
   return { status: response.status, body };
 }
 
-test('a Houseparent gets their assigned residents from /store, not an empty list', async () => {
+test('a Houseparent receives every resident from /store, not their caseload', async () => {
+  // Child Records is facility-wide for the role since 2026-10-01: the module is
+  // how a Houseparent opens a resident profile, so the resident list cannot be
+  // narrowed to their case load.
   const pool = createPoolStub({
     role: 'houseparent',
     userId: 'U-HP',
     assignedIds: ['CH001'],
     childrenRows: CHILDREN,
+    activityRows: ACTIVITIES,
   });
   const app = loadApp(pool);
 
@@ -156,43 +177,53 @@ test('a Houseparent gets their assigned residents from /store, not an empty list
     const children = body?.data?.children;
     assert.ok(Array.isArray(children), 'the store payload must carry a children array');
 
-    // The regression: this came back as [] for every Houseparent.
     assert.deepEqual(
       children.map((child) => child.id),
-      ['CH001'],
-      'a Houseparent must receive exactly their assigned residents',
+      ['CH001', 'CH002'],
+      'a Houseparent must receive every resident',
     );
   });
 });
 
-test('the Houseparent boundary still withholds an unassigned resident', async () => {
+test('the store still withholds another resident’s activities from a Houseparent', async () => {
+  // Activities stayed caseload-bound on purpose. This is the half of the old
+  // contract that survived, and it is the reason the filter was not deleted
+  // outright when the resident list was opened.
   const pool = createPoolStub({
     role: 'houseparent',
     userId: 'U-HP',
     assignedIds: ['CH001'],
     childrenRows: CHILDREN,
+    activityRows: ACTIVITIES,
   });
   const app = loadApp(pool);
 
   await withServer(app, async (base) => {
     const { body } = await getStore(base, 'houseparent');
-    const ids = (body?.data?.children || []).map((child) => child.id);
-    assert.ok(!ids.includes('CH002'), 'an unassigned resident must not appear in the store payload');
+    const ids = (body?.data?.activities || []).map((activity) => activity.id);
+    assert.deepEqual(ids, ['ACT001'], 'only the assigned resident’s activities may appear');
   });
 });
 
-test('a Houseparent with no assignments still gets nothing', async () => {
+test('a Houseparent with no assignments still gets no activities', async () => {
   const pool = createPoolStub({
     role: 'houseparent',
     userId: 'U-HP',
     assignedIds: [],
     childrenRows: CHILDREN,
+    activityRows: ACTIVITIES,
   });
   const app = loadApp(pool);
 
   await withServer(app, async (base) => {
     const { body } = await getStore(base, 'houseparent');
-    assert.deepEqual(body?.data?.children, [], 'an unassigned Houseparent must see no residents');
+    assert.deepEqual(body?.data?.activities, [], 'an unassigned Houseparent must see no activities');
+    // But the residents are still there — the two rules are independent now.
+    assert.deepEqual(
+      (body?.data?.children || []).map((child) => child.id),
+      ['CH001', 'CH002'],
+      'the resident list is not caseload-scoped',
+    );
   });
 });
 
@@ -202,6 +233,7 @@ test('a Center Head is not caseload-scoped', async () => {
     userId: 'U-CH',
     assignedIds: [],
     childrenRows: CHILDREN,
+    activityRows: ACTIVITIES,
   });
   const app = loadApp(pool);
 

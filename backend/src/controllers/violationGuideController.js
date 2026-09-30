@@ -672,7 +672,7 @@ async function getResidentInterventions(req, res, next) {
   try {
     const { residentId } = req.params;
     const { status } = req.query;
-    if (!await canAccessResident(req.user, residentId)) {
+    if (!await canAccessResident(req.user, residentId, { area: 'violations' })) {
       throw new ApiError(403, 'You are not assigned to this resident');
     }
     
@@ -732,7 +732,7 @@ async function updateInterventionStatus(req, res, next) {
     );
     if (!existing.length) throw new ApiError(404, 'Intervention not found');
     const rec = existing[0];
-    if (!await canAccessResident(req.user, rec.residentId)) {
+    if (!await canAccessResident(req.user, rec.residentId, { area: 'violations' })) {
       throw new ApiError(403, 'You are not assigned to this resident');
     }
 
@@ -850,7 +850,7 @@ async function getInterventionRequirements(req, res, next) {
        ORDER BY r.createdAt DESC`,
       [id]
     );
-    if (rows.length > 0 && !await canAccessResident(req.user, rows[0].residentId)) {
+    if (rows.length > 0 && !await canAccessResident(req.user, rows[0].residentId, { area: 'violations' })) {
       throw new ApiError(403, 'You are not assigned to this resident');
     }
     res.json({ success: true, data: rows, count: rows.length });
@@ -895,7 +895,7 @@ async function updateRequirement(req, res, next) {
     const [existing] = await pool.query('SELECT * FROM intervention_requirements WHERE id = ?', [id]);
     if (existing.length === 0) throw new ApiError(404, 'Requirement not found');
     const rec = existing[0];
-    if (!await canAccessResident(req.user, rec.residentId)) {
+    if (!await canAccessResident(req.user, rec.residentId, { area: 'violations' })) {
       throw new ApiError(403, 'You are not assigned to this resident');
     }
 

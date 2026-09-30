@@ -570,32 +570,14 @@ export function Violations() {
     });
   };
 
-  // A Houseparent may add an incident only for residents assigned to them.
-  // Their choices come from the server's own list (GET
-  // /resident-assignments/my-residents — the signed-in HP's active Case Load,
-  // by account id), not from whatever the page happens to have cached.
-  const [myAssignedResidents, setMyAssignedResidents] = useState<Child[] | null>(null);
-  /**
-   * Whether the Case Load request itself failed, as opposed to succeeding and
-   * returning nobody.
-   *
-   * Both outcomes leave the picker empty, and the empty-state copy below sends
-   * the Houseparent to a Center Head to have residents assigned — the wrong
-   * remedy, and a confusing one, when the real cause was a failed request. The
-   * two outcomes are kept apart so each can say something true.
-   */
-  const [myAssignedResidentsError, setMyAssignedResidentsError] = useState(false);
-  const loadMyAssignedResidents = async () => {
-    try {
-      const result = await request<{ success: boolean; data?: Child[] }>('/resident-assignments/my-residents');
-      setMyAssignedResidents((result?.data || []).filter((c) => c && c.status === 'Active'));
-      setMyAssignedResidentsError(false);
-    } catch {
-      setMyAssignedResidents([]);
-      setMyAssignedResidentsError(true);
-    }
-  };
-  const residentChoices: Child[] = isHouseparentUser ? (myAssignedResidents || []) : children;
+  // Logging an incident is facility-wide for every role that holds Violations,
+  // Houseparents included (2026-10-01). The picker used to be narrowed for a
+  // Houseparent to GET /resident-assignments/my-residents — their own Case Load —
+  // which meant an incident could only be logged against the residents already
+  // assigned to them. A Houseparent on duty has to be able to log against
+  // whichever resident is in front of them, so the list is now the one every
+  // other role already used, and the server no longer refuses the write.
+  const residentChoices: Child[] = children;
   const filteredResidentChoices = residentChoices.filter((child) =>
     child.name.toLowerCase().includes(residentSearch.trim().toLowerCase()) ||
     child.id.toLowerCase().includes(residentSearch.trim().toLowerCase())
@@ -953,14 +935,13 @@ export function Violations() {
             Psychological Staff's specification withholds it: they verify incidents,
             they do not raise them. The backend already refuses the call, so the
             button is removed rather than left to fail. */}
-        {/* Houseparents always get Add Incident (for their own residents);
-            the explicit role test keeps it visible even with an older cached
-            permission snapshot. The API scopes it to their Case Load. */}
+        {/* Houseparents get Add Incident for every active resident; the explicit
+            role test keeps it visible even with an older cached permission
+            snapshot. The API accepts the same scope. */}
         {(can('Violations', 'create') || isHouseparentUser) && (
         <Button
         className="flex items-center gap-2 bg-[#2F3E46]"
         onClick={async () => {
-          if (isHouseparentUser) await loadMyAssignedResidents();
           const loaded = await loadGuideMatrix();
           if (loaded) {
             setIncidentDateTime(localDateTimeInput());
@@ -1389,16 +1370,6 @@ export function Violations() {
                 </div>
                 <div className="max-h-44 overflow-y-auto p-2">
                   <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
-                    {isHouseparentUser && myAssignedResidents !== null && residentChoices.length === 0 && (
-                      myAssignedResidentsError ? (
-                        <div className="col-span-full flex flex-wrap items-center gap-2 px-1 py-2">
-                          <p className="text-xs text-red-600">Your assigned residents could not be loaded, so this list is empty. This is a loading failure, not a missing assignment.</p>
-                          <Button type="button" variant="outline" className="h-7 px-2 text-xs" onClick={() => { void loadMyAssignedResidents(); }}>Retry</Button>
-                        </div>
-                      ) : (
-                        <p className="col-span-full px-1 py-2 text-xs text-gray-500">No residents are assigned to you yet. A Center Head or Social Worker assigns them in Houseparent → Case Load.</p>
-                      )
-                    )}
                     {filteredResidentChoices.map((child) => {
                       const checked = selectedResidentIds.includes(child.id);
                       return (

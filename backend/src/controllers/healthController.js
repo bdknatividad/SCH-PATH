@@ -477,7 +477,7 @@ async function remove(req, res, next) {
 async function getByResident(req, res, next) {
   try {
     const { residentId } = req.params;
-    if (!await canAccessResident(req.user, residentId)) {
+    if (!await canAccessResident(req.user, residentId, { area: 'child-records' })) {
       throw new ApiError(403, 'You are not assigned to this resident');
     }
     
@@ -503,7 +503,7 @@ async function getByResident(req, res, next) {
 async function getLatest(req, res, next) {
   try {
     const { residentId } = req.params;
-    if (!await canAccessResident(req.user, residentId)) {
+    if (!await canAccessResident(req.user, residentId, { area: 'child-records' })) {
       throw new ApiError(403, 'You are not assigned to this resident');
     }
     

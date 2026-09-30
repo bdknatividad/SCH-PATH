@@ -197,7 +197,7 @@ async function findResidentByName(connection, name) {
 async function getLatestForResident(req, res, next) {
   try {
     const { residentId } = req.params;
-    if (!await canAccessResident(req.user, residentId)) {
+    if (!await canAccessResident(req.user, residentId, { area: 'child-records' })) {
       throw new ApiError(403, 'You are not assigned to this resident');
     }
 
@@ -222,7 +222,7 @@ async function getLatestForResident(req, res, next) {
 async function getByResident(req, res, next) {
   try {
     const { residentId } = req.params;
-    if (!await canAccessResident(req.user, residentId)) {
+    if (!await canAccessResident(req.user, residentId, { area: 'child-records' })) {
       throw new ApiError(403, 'You are not assigned to this resident');
     }
 

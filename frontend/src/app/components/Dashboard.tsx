@@ -1503,6 +1503,40 @@ export function Dashboard() {
 
   const userRole = user?.role?.toLowerCase() || '';
 
+  /**
+   * The Houseparent's own caseload, as a set of resident ids.
+   *
+   * This page used to inherit the boundary rather than ask for it: `/api/store`
+   * narrowed `children` to the caller's assignments before the data ever arrived,
+   * and `HouseparentDashboard` is written against that promise ("your residents").
+   * Since 2026-10-01 the store returns every resident — Child Records and the
+   * Violations module are facility-wide for the role now — so the boundary has to
+   * be re-applied here instead of assumed.
+   *
+   * `null` means "not loaded yet", which is deliberately not the same as "loaded
+   * and empty": the page shows an empty state for the second and, until this
+   * resolves, an empty list rather than every resident on the facility.
+   */
+  const [houseparentResidentIds, setHouseparentResidentIds] = useState<Set<string> | null>(null);
+
+  useEffect(() => {
+    if (userRole !== 'houseparent') {
+      setHouseparentResidentIds(null);
+      return;
+    }
+    let cancelled = false;
+    request<{ success: boolean; data?: Array<{ id?: string }> }>('/resident-assignments/my-residents')
+      .then((result) => {
+        if (cancelled) return;
+        const ids = (result?.data || []).map((child) => String(child?.id || '')).filter(Boolean);
+        setHouseparentResidentIds(new Set(ids));
+      })
+      .catch(() => {
+        if (!cancelled) setHouseparentResidentIds(new Set());
+      });
+    return () => { cancelled = true; };
+  }, [userRole]);
+
   const roleLabels: Record<string, string> = {
     centerhead:   'CENTER HEAD',
     admin:        'CENTER HEAD',
@@ -1884,19 +1918,25 @@ export function Dashboard() {
 
   /**
    * The Houseparent's own page: the case load and the day's paperwork, and
-   * nothing facility-wide. `children` is already scoped to their assignments by
-   * `/api/store`, so the page inherits the caseload boundary rather than
-   * re-deriving it.
+   * nothing facility-wide.
+   *
+   * `children` is the whole facility now, so the caseload boundary is applied
+   * here — see `houseparentResidentIds` above. The figures that come from the
+   * store's `activities` and `assessments` need no equivalent: the server still
+   * scopes those two resources to the caller's case load.
    *
    * Every hook above has already run, so returning early is safe.
    */
   if (userRole === 'houseparent') {
+    const ownResidents = houseparentResidentIds === null
+      ? []
+      : children.filter((child) => houseparentResidentIds.has(String(child.id)));
     return (
       <Suspense fallback={<RouteFallback />}>
         <HouseparentDashboard
           displayRole={displayRole}
-          residents={children}
-          activeCount={activeCount}
+          residents={ownResidents}
+          activeCount={ownResidents.filter((child) => !child.status || child.status === 'Active').length}
           todayActivities={todayActivities}
           todayAssessments={todayAssessments}
           onOpen={(path: string) => navigate(path)}

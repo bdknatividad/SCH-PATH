@@ -145,15 +145,24 @@ test('the list filter cannot be widened by asking for the withheld status', asyn
   assert.ok(call.sql.indexOf('v.status = ?') < call.sql.indexOf('v.status <>'), 'both conditions are ANDed');
 });
 
-test('the Houseparent list stays scoped to its own caseload', async () => {
+test('the Houseparent list is facility-wide, and still withholds the verification queue', async () => {
   queries.length = 0;
   const res = makeRes();
   await drive(violationController.getAll, makeReq('houseparent'), res);
 
   const call = lastListQuery();
-  assert.match(call.sql, /INNER JOIN residentAssignments ra ON ra\.residentId = v\.residentId/);
-  assert.match(call.sql, /ra\.userId = \? AND ra\.status = 'Active'/);
-  assert.equal(call.params[0], 'U-TEST', 'the caseload owner must be the authenticated user');
+  // The caseload INNER JOIN was lifted on 2026-10-01: a Houseparent on duty logs
+  // an incident against whichever resident is in front of them, so the Violation
+  // List and the Intervention Tracker are facility-wide for the role. The
+  // verification filter is what keeps the queue away from them now — which is
+  // why the two tests above still matter more than they did before.
+  assert.doesNotMatch(
+    call.sql,
+    /residentAssignments/,
+    'the Houseparent list is no longer joined to the caseload',
+  );
+  assert.match(call.sql, /v\.status <>\s*\?/);
+  assert.ok(call.params.includes('Pending Review'));
 });
 
 test('a role that holds Violations:verify still reads the whole queue', async () => {

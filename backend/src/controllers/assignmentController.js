@@ -2,6 +2,7 @@ const { pool } = require('../config/database');
 const { insertWithGeneratedId, toMysqlDateTime } = require('../utils/helpers');
 const { ApiError } = require('../middleware/errorHandler');
 const { normalizeRole, isManager, hasRole } = require('../utils/authorization');
+const { caseloadScopedIn } = require('../utils/residentScope');
 const notifications = require('../services/notificationService');
 
 function roleOf(user) {
@@ -32,13 +33,34 @@ const MANUAL_ASSIGNMENT_SOURCES = ['caseload', 'manual'];
 
 const CENTER_HEAD_ONLY_MESSAGE = 'Only the Center Head or a Social Worker can assign or transfer a resident\'s Houseparent Case Load Manager.';
 
-async function canAccessResident(user, residentId) {
+/**
+ * May this user reach records belonging to `residentId`?
+ *
+ * A Houseparent is bounded by their caseload — except in the areas the Center
+ * Head opened to every active resident, which the caller names explicitly:
+ *
+ *     await canAccessResident(req.user, residentId, { area: 'violations' })
+ *
+ * The area is opt-in on purpose. `canAccessResident` is the shared gate behind
+ * TRI, Anecdotal Reports, Assessments, Documents and the Court records, and all
+ * of those stay caseload-bound; a call site that names no area keeps exactly the
+ * behaviour it had before Child Records and Violations were opened. See
+ * `CASELOAD_OPEN_AREAS` in `utils/residentScope`.
+ *
+ * @param {{id?:string, role?:string}} user
+ * @param {string} residentId
+ * @param {{area?:string}} [options]
+ */
+async function canAccessResident(user, residentId, options = {}) {
   if (canManage(user)) return true;
 
   // Houseparents are the only role with a resident-level caseload boundary.
   // Other staff roles (Nurse, Educator, Psychological Staff, etc.) use their module
   // permissions rather than a houseparent assignment to read resident records.
   if (roleOf(user) !== 'houseparent') return true;
+
+  // An open area skips the caseload check entirely.
+  if (!caseloadScopedIn(user, options.area)) return true;
 
   // Primary source: the explicit residentAssignments row created by the
   // Center Head assignment UI.

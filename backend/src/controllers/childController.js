@@ -16,9 +16,9 @@ const {
 const { ApiError } = require('../middleware/errorHandler');
 const { PHASE_REQUIREMENTS, RESOURCES } = require('../utils/constants');
 const { canAccessResident } = require('./assignmentController');
-const { assignedResidentIds, loadResidentScope } = require('../utils/residentScope');
+const { loadAreaScope } = require('../utils/residentScope');
 const { loadDocumentScope, documentVisibleTo } = require('./documentController');
-const { isManager, normalizeRole } = require('../utils/authorization');
+const { isManager } = require('../utils/authorization');
 const notifications = require('../services/notificationService');
 const { buildAccessSnapshot, hasModuleAccess, hasSubModuleAccess, can } = require('../config/rbac');
 const { activeAdmissionIdFor } = require('../services/admissionLink');
@@ -74,16 +74,12 @@ function mayReadResidentMedicalSummary(user) {
  */
 function roleCanReachMedicalTab(role) {
   try {
-    // The Houseparent holds no Child Records module — they reach a resident
-    // through their own Case Load, which renders the same `ChildDetail` viewer
-    // with the same Medical tab — so the module test below cannot be the whole
-    // rule for them. Their reach stays bounded by `canAccessResident` on
-    // `GET /children/:id` and by the caseload filter on the store, so this
-    // grants the summary for their own residents and nobody else's. They are
-    // notified to review a resident's medical record; withholding the summary
-    // left the very tab they were sent to looking empty.
-    if (normalizeRole(role) === 'houseparent') return true;
-
+    // The Houseparent used to need a special case here: it reached the Medical
+    // tab through the Case Load viewer without holding the Child Records module,
+    // so the module test below would have refused it. Since 2026-10-01 the role
+    // holds Child Records and declares the Medical tab, so the generic path
+    // answers for it and the workaround is gone. `canAccessResident` and the
+    // resident list are what bound its reach now, not this predicate.
     const { getRoleDefinition } = require('../config/rbac');
     const definition = getRoleDefinition(role);
     if (!definition) return false;
@@ -313,7 +309,7 @@ async function getById(req, res, next) {
   try {
     const { id } = req.params;
     
-    if (!await canAccessResident(req.user, id)) throw new ApiError(403, 'You are not assigned to this resident');
+    if (!await canAccessResident(req.user, id, { area: 'child-records' })) throw new ApiError(403, 'You are not assigned to this resident');
 
     // Get child data
     const [rows] = await pool.query(
@@ -381,18 +377,13 @@ async function getAll(req, res, next) {
     const { status, casePhase, documentsComplete } = req.query;
     let query = 'SELECT * FROM children WHERE 1=1';
     const params = [];
-    if (String(req.user?.role || '').toLowerCase() === 'houseparent') {
-      // Use the same assignment resolver as the store endpoint and individual
-      // resident access checks. This keeps Child Records aligned with TRI,
-      // Anecdotal Reports, and the Houseparent Case Load, including legacy
-      // admissions whose assignment predates residentAssignments.
-      const ids = await assignedResidentIds(req.user);
-      if (ids.length === 0) {
-        return res.json({ success: true, data: [], count: 0 });
-      }
-      query += ` AND id IN (${ids.map(() => '?').join(', ')})`;
-      params.push(...ids);
-    }
+    // The resident list is facility-wide for every role that holds Child
+    // Records, Houseparents included. They were caseload-filtered here until
+    // 2026-10-01, when the Center Head gave the role the module itself: the
+    // profile viewer that used to hang off the Case Load card is gone, so the
+    // module is the only way to reach a resident. TRI Records and Anecdotal
+    // Reports keep their own caseload boundary — see `CASELOAD_OPEN_AREAS` in
+    // `utils/residentScope`.
 
     if (status) {
       query += ' AND status = ?';
@@ -1187,8 +1178,10 @@ async function educationForResident(req, res, next) {
 
     const snapshot = buildAccessSnapshot(req.user);
     const holdsEducationTab = hasSubModuleAccess(snapshot, 'Child Records', 'Education');
-    // `null` means the role has no caseload concept — not "no restriction".
-    const caseload = await loadResidentScope(req.user);
+    // `null` means the role has no caseload concept — not "no restriction". Read
+    // in the open `child-records` area, so a Houseparent's caseload no longer
+    // narrows this tab: they hold it, and they may open any active resident.
+    const caseload = await loadAreaScope(req.user, 'child-records');
     const inCaseload = caseload !== null && caseload.includes(residentId);
     if (!holdsEducationTab && !inCaseload) {
       throw new ApiError(403, 'You do not have access to this resident’s education record.');
