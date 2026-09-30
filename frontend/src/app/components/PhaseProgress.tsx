@@ -420,8 +420,20 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
     }
   }, [children, residentId, currentPhase, tasksInitialized]);
 
-  // Keep localTasksCompleted in sync with child record (for tab switching persistence)
+  /**
+   * Adopt the child record's copy of the current checklist, for the roles whose
+   * writes land there.
+   *
+   * **Not for a Houseparent.** `PUT /children` is deliberately forbidden to
+   * them, so `handleToggleTask` never mirrors their tick into the child record —
+   * the server writes it in `phaseProgress.toggleTask` instead, and this page
+   * only learns about it on the next store refresh. Adopting the record's copy
+   * in the meantime put the old list back and the box unticked itself about half
+   * a second after it was ticked, which is what made a single checkbox feel like
+   * a page reload. Their local state is the truth between refreshes.
+   */
   useEffect(() => {
+    if (isHouseparent) return;
     const child = children.find(c => c.id === residentId);
     if (child && tasksInitialized) {
       const saved = child?.phaseTasksCompleted?.[currentPhase] || [];
@@ -438,7 +450,7 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
         return () => clearTimeout(timer);
       }
     }
-  }, [children, residentId, currentPhase, tasksInitialized, localTasksCompleted]);
+  }, [children, residentId, currentPhase, tasksInitialized, localTasksCompleted, isHouseparent]);
 
   // Reset when phase changes OR when phaseTasksCompleted is wiped (re-admit)
   useEffect(() => {
@@ -557,12 +569,20 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
         const updated = { ...existing, [targetPhase]: newTasks };
         await updateChild(residentId, { phaseTasksCompleted: updated });
       }
-      // Reload history so displayRecord reflects saved state — quietly. The
-      // page-wide loading flag renders a spinner in place of the whole timeline,
-      // so a plain `loadData()` here blanked the page on every tick of a
-      // checkbox. The tick is already shown optimistically above, so this only
-      // has to catch the server up.
-      await loadData({ background: true });
+      // Re-read only when a *past* phase is on screen. That checklist is drawn
+      // from the stored row (`displayRecord`), so nothing local reflects the
+      // tick and the row has to be read back. The current phase's checklist is
+      // driven by `localTasksCompleted`, which already shows the tick.
+      //
+      // The current phase used to re-read too, and it was the whole problem: the
+      // call replaced `history`, `currentRecord` and `requirements` on every
+      // tick — re-rendering the entire timeline for a checkbox — and, because
+      // the child record's mirror is only refreshed by the store, the sync
+      // effect below then restored the *old* list and the tick vanished a moment
+      // after it was made. The write has been persisted by the request above;
+      // the pills' missing-requirement hints catch up on the next refresh, which
+      // this page does on focus and once a minute.
+      if (viewingPhase) await loadData({ background: true });
     } catch (error) {
       console.error('[PhaseProgress] Failed to save checklist task:', error);
       // Revert on error
