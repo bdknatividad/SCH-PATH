@@ -1288,23 +1288,41 @@ ${admissionHistorySection}
    * time, and the panel showed the programme already finished the moment they
    * were readmitted.
    *
-   * Scoped by the same rule as documents: a row linked to an admission the
-   * closed history already names is history, and a row with no link falls back
-   * to the readmission cutoff — the row written for this admission carries the
-   * readmission date as its `enteredAt`.
+   * Scoped by position in the list, not by date and not by the admission link.
+   *
+   * A re-admission always opens with a fresh 'Admission Phase' row — both intake
+   * paths insert one — so the newest such row is where this stay began, and
+   * every row before it belongs to an earlier one. The rows arrive ordered
+   * (`enteredAt ASC, id ASC`), so "before it" is just a slice.
+   *
+   * Position is the only signal that survives the two ways the other two lie:
+   *
+   *   · two admissions on the same calendar day share every date. All of this
+   *     resident's rows carry `enteredAt` = the readmission date, so a date
+   *     comparison keeps the lot — which is exactly how a returning resident
+   *     arrived with every phase already unlocked and the programme apparently
+   *     finished;
+   *   · `admissionId` is not on the row the client receives (`phaseProgress`'s
+   *     `columns` in `constants.js` omits it, and `mapRow` emits only declared
+   *     columns), and even in the database it cannot be trusted here: a row
+   *     written before the column existed is swept into whichever admission is
+   *     created next, so it can name this admission while describing an earlier
+   *     one.
+   *
+   * The order of the rows is the one thing a re-admission cannot get wrong,
+   * because it is the order they were written in.
    */
   const phaseHistory = useMemo(() => {
     if (!isReadmitted) return history;
-    return history.filter((h) => {
-      const linked = String((h as { admissionId?: string }).admissionId ?? '').trim();
-      if (linked) return !knownAdmissionIds.has(linked);
-      const entered = String(h.enteredAt || '').slice(0, 10);
-      if (!entered) return false;
-      // `>=`, unlike the document fallback: this admission's own Admission Phase
-      // row is stamped with the readmission date itself.
-      return docCutoffDate ? entered >= docCutoffDate : true;
-    });
-  }, [history, isReadmitted, knownAdmissionIds, docCutoffDate]);
+
+    let start = -1;
+    for (let i = history.length - 1; i >= 0; i -= 1) {
+      if (history[i].phaseName === CASE_PHASES[0]) { start = i; break; }
+    }
+    // No Admission Phase row at all: nothing to slice on, so show the list as
+    // it came rather than blanking a resident's timeline.
+    return start < 0 ? history : history.slice(start);
+  }, [history, isReadmitted]);
 
   // displayPhase: the phase whose content is shown — switches when user clicks a phase pill
   const displayPhase = viewingPhase || currentPhase;
