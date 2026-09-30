@@ -124,11 +124,21 @@ test('the reminder goes to the assigned Houseparent, not to a role', () => {
 });
 
 test('the dedupe key includes the state so a period sends due then overdue, but never twice', () => {
+  // The key names the report as well as the period and the state. Without the
+  // state the overdue notice would be swallowed by the earlier due notice, or the
+  // daily run would nag; without the report the TRI's notice would swallow the
+  // Anecdotal Report's for the same resident and period.
   assert.match(
     SERVICE,
-    /dedupeKey: `tri:\$\{resident\.residentId\}:\$\{reportYear\}-\$\{reportMonth\}:\$\{verdict\.state\}`/,
+    /dedupeKey: `\$\{kind\.key\}:\$\{resident\.residentId\}:\$\{reportYear\}-\$\{reportMonth\}:\$\{verdict\.state\}`/,
     'the dedupe key changed shape — without the state in it, the overdue notice would be ' +
       'swallowed by the earlier due notice, or the daily run would nag'
+  );
+  assert.match(
+    SERVICE,
+    /key: 'anecdotal'/,
+    'the Anecdotal Report is no longer chased alongside the TRI — it is due on the same day ' +
+      'and had no reminder at all'
   );
 });
 

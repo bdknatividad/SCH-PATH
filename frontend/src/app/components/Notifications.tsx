@@ -199,6 +199,15 @@ export function Notifications() {
       case 'tri':
         target = `/tri?residentId=${encodeURIComponent(resident || '')}`;
         break;
+      // The monthly Anecdotal Report reminder, which goes to the Houseparent who
+      // owes it and opens the tab they fill it in on. The `anecdotal report` case
+      // below is the *reviewer's* destination — the Social Worker's Needs Review
+      // queue — and a Houseparent cannot reach it, so routing the reminder there
+      // bounced them to their landing page instead of the form they were told
+      // about.
+      case 'houseparent':
+        target = '/tri?tab=anecdotal';
+        break;
       // "Anecdotal Report needs review" opens the Social Worker's Needs Review
       // tab with the submitted report already loaded.
       case 'anecdotal report':

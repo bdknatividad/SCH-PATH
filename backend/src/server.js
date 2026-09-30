@@ -249,26 +249,29 @@ cron.schedule('55 23 31 3,6,9,12 *', async () => {
   timezone: 'Asia/Manila',
 });
 
-// TRI deadline reminders. A TRI is due on the last Monday of its reporting month;
-// this checks each morning and tells the responsible Houseparent when one is
-// coming up or already late. Deduped per resident+period+state, so the daily run
-// cannot nag — the same period sends at most one "due" and one "overdue" notice.
+// Monthly report deadline reminders. A TRI and an Anecdotal Report are both due
+// on the last Monday of their reporting month; this checks each morning and tells
+// the responsible Houseparent when one is coming up or already late. Deduped per
+// report+resident+period+state, so the daily run cannot nag — the same period
+// sends at most one "due" and one "overdue" notice for each report.
 cron.schedule('0 7 * * *', async () => {
-  console.log('Running TRI deadline reminders...');
+  console.log('Running monthly report deadline reminders...');
   try {
     const { runTriDeadlineReminders } = require('./services/triDeadlineService');
     const result = await runTriDeadlineReminders();
     if (!result.state) {
-      console.log(`TRI deadlines: nothing due (period ${result.period}, deadline ${result.deadline}).`);
+      console.log(`Report deadlines: nothing due (period ${result.period}, deadline ${result.deadline}).`);
     } else {
-      console.log(
-        `TRI deadlines (${result.state}, ${result.period}): ${result.outstanding} outstanding, ` +
-        `${result.notified} notified, ${result.skipped} already reminded` +
-        (result.unassigned.length ? `, unassigned: ${result.unassigned.join(', ')}` : '')
-      );
+      for (const report of result.reports) {
+        console.log(
+          `${report.label} deadlines (${result.state}, ${result.period}): ${report.outstanding} outstanding, ` +
+          `${report.notified} notified, ${report.skipped} already reminded` +
+          (report.unassigned.length ? `, unassigned: ${report.unassigned.join(', ')}` : '')
+        );
+      }
     }
   } catch (error) {
-    console.error('TRI deadline reminders failed:', error.message);
+    console.error('Report deadline reminders failed:', error.message);
   }
 }, {
   scheduled: true,
