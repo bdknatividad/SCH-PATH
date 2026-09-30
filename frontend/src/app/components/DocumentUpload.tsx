@@ -9,7 +9,7 @@ import { Badge } from '@/app/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/app/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/app/components/ui/dialog';
 import { AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle, AlertDialogDescription, AlertDialogFooter, AlertDialogAction, AlertDialogCancel } from '@/app/components/ui/alert-dialog';
-import { Upload, X, CheckCircle, FileText, Image, FileSpreadsheet, File, Lock, AlertTriangle, Folder, FolderOpen, ChevronDown, ChevronRight as ChevronRightIcon, Download, Archive, Filter, Eye, Printer, Search, Loader2, PenLine } from 'lucide-react';
+import { Upload, X, CheckCircle, FileText, Image, FileSpreadsheet, File, Lock, AlertTriangle, Folder, FolderOpen, ChevronDown, ChevronRight as ChevronRightIcon, Download, Archive, Filter, Eye, Printer, Search, Loader2, PenLine, RotateCcw } from 'lucide-react';
 import JSZip from 'jszip';
 import DOMPurify from 'dompurify';
 import { useData, DocumentWithApproval } from '../state/DataContext';
@@ -510,28 +510,38 @@ interface FolderDocumentRowProps {
   doc: DocumentWithApproval & { canView?: boolean; accessRequestStatus?: string; accessRequestNote?: string };
   canApprove: boolean;
   canDelete: boolean;
+  /** The caller may upload a corrected copy of a returned document. */
+  canReplace: boolean;
   getStatusBadge: (status: string) => React.ReactNode;
   onView: () => void;
   onApprove: () => void;
   onFailed: () => void;
   onReassessment: () => void;
+  onReplace: () => void;
   onDelete: () => void;
   onHistory: () => void;
   onRequestAccess: () => void;
 }
 
 function FolderDocumentRow({
-  doc, canApprove, canDelete, getStatusBadge,
-  onView, onApprove, onFailed, onReassessment, onDelete, onHistory, onRequestAccess,
+  doc, canApprove, canDelete, canReplace, getStatusBadge,
+  onView, onApprove, onFailed, onReassessment, onReplace, onDelete, onHistory, onRequestAccess,
 }: FolderDocumentRowProps) {
   // The most recent review outcome. A rejection is kept on the row even after a
   // resubmission, so `status` decides which of the two the reader is looking at
   // while the other stays in the audit trail.
   const isRejected = doc.status === 'Rejected';
-  const decidedBy = isRejected
+  // A reassessment is a return, not an approval. It used to fall through to the
+  // "approved" branch, so a document the Center Head had just sent back read
+  // "APPROVED BY centerhead" with an empty approval date — the opposite of what
+  // had actually happened to it, and on the one screen the uploader was told to
+  // go and look at.
+  const isReassessment = doc.status === 'Reassessment';
+  const isReturned = isRejected || isReassessment;
+  const decidedBy = isReturned
     ? (doc.rejectedBy || doc.reviewedBy)
     : (doc.approvedBy || doc.reviewedBy);
-  const decidedAt = isRejected
+  const decidedAt = isReturned
     ? (doc.rejectedAt || doc.reviewedAt)
     : (doc.approvedAt || doc.reviewedAt);
   const submittedBy = doc.submittedBy || doc.uploadedBy;
@@ -573,13 +583,22 @@ function FolderDocumentRow({
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-3 gap-y-1.5 mt-2">
             {field('Date Submitted', submittedAt ? formatShortDate(submittedAt) : '')}
             {field('Submitted By', submittedBy)}
-            {field(isRejected ? 'Rejected By' : 'Approved By', decidedBy, isRejected ? 'text-red-600' : 'text-green-700')}
-            {field(isRejected ? 'Rejection Date' : 'Approval Date', decidedAt ? formatShortDate(decidedAt) : '')}
+            {field(
+              isRejected ? 'Rejected By' : isReassessment ? 'Returned By' : 'Approved By',
+              decidedBy,
+              isReturned ? 'text-red-600' : 'text-green-700',
+            )}
+            {field(
+              isRejected ? 'Rejection Date' : isReassessment ? 'Returned On' : 'Approval Date',
+              decidedAt ? formatShortDate(decidedAt) : '',
+            )}
           </div>
 
-          {isRejected && doc.rejectionReason && (
+          {isReturned && doc.rejectionReason && (
             <div className="mt-2 rounded-md border border-red-200 bg-red-50 px-2 py-1.5">
-              <p className="text-[10px] uppercase tracking-wide text-red-500 font-semibold">Reason for rejection</p>
+              <p className="text-[10px] uppercase tracking-wide text-red-500 font-semibold">
+                {isReassessment ? 'Reason for reassessment' : 'Reason for rejection'}
+              </p>
               <p className="text-xs text-red-800 whitespace-pre-line">{doc.rejectionReason}</p>
             </div>
           )}
@@ -618,6 +637,21 @@ function FolderDocumentRow({
               <Button variant="outline" size="sm" className="h-7 px-2 text-xs text-red-500" onClick={onFailed} title="Reject">✕ Reject</Button>
               <Button variant="outline" size="sm" className="h-7 px-2 text-xs text-yellow-600" onClick={onReassessment} title="Reassessment">↺ Reassessment</Button>
             </>
+          )}
+          {/* The one action a returned document is waiting on. Without it the
+              uploader could see the reason but had nowhere to act on it — the
+              only way to file a corrected copy was the Phase Timeline's upload
+              box, which made a second document and left this one orphaned. */}
+          {canReplace && isReturned && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-2 text-xs text-amber-700 border-amber-300 hover:bg-amber-50"
+              onClick={onReplace}
+              title="Upload a corrected copy of this document"
+            >
+              <Upload className="w-3 h-3 mr-1" /> Replace
+            </Button>
           )}
           {/* The folder view must honour the same capability as the flat list —
               the delete button used to be unconditional here, letting any role
@@ -723,6 +757,20 @@ export function DocumentUpload() {
   const [wordPreviewError, setWordPreviewError] = useState<string | null>(null);
   const [documentToDelete, setDocumentToDelete] = useState<DocumentWithApproval | null>(null);
 
+  /**
+   * The returned document being corrected, and the file replacing it.
+   *
+   * The row and the viewer both open this dialog, so the action lives in one
+   * place. The uploader's note is optional here — the reviewer's reason is
+   * already on the document, and the audit trail keeps it — so the form asks for
+   * a file, not a justification.
+   */
+  const [replaceTarget, setReplaceTarget] = useState<DocumentWithApproval | null>(null);
+  const [replaceFile, setReplaceFile] = useState<File | null>(null);
+  const [replaceNote, setReplaceNote] = useState('');
+  const [replaceError, setReplaceError] = useState<string | null>(null);
+  const [isReplaceSaving, setIsReplaceSaving] = useState(false);
+
   const [filterResident, setFilterResident] = useState('all');
   /**
    * Which residents the list is drawn from. Closing a case does not delete its
@@ -732,6 +780,14 @@ export function DocumentUpload() {
    */
   const [residentStatusFilter, setResidentStatusFilter] = useState<'Active' | 'Discharged' | 'all'>('Active');
   const [filterCategory, setFilterCategory] = useState('all');
+  /**
+   * Show only the documents returned for correction.
+   *
+   * They are hidden from the child's folder on purpose, so this is the way back
+   * to one after the notification is gone — the same list, narrowed, rather than
+   * a screen of its own that could drift from it.
+   */
+  const [returnedOnly, setReturnedOnly] = useState(false);
   // Search-by-name for the Documents Module (Folder and All Documents views).
   const [documentSearch, setDocumentSearch] = useState('');
   // Per-resident search inside each expanded folder card (Folder view), keyed
@@ -1029,8 +1085,23 @@ export function DocumentUpload() {
       list = list.filter(d => deriveDocumentCategory(d) === filterCategory);
     }
     list = list.filter(matchesDocumentSearch);
+    // The "Needs revision" view.
+    //
+    // A returned document is deliberately kept out of the child's folder — it is
+    // work in progress, not something the resident holds — so this is where the
+    // uploader finds it again after the notification has been dismissed. Same
+    // rows, one filter, no separate screen to keep in step.
+    if (returnedOnly) {
+      list = list.filter(d => d.status === 'Rejected' || d.status === 'Reassessment');
+    }
     return list;
-  }, [documentsForDisplay, filterResident, filterCategory, matchesDocumentSearch, matchesResidentStatusForDocument]);
+  }, [documentsForDisplay, filterResident, filterCategory, matchesDocumentSearch, matchesResidentStatusForDocument, returnedOnly]);
+
+  /** How many documents are waiting on the caller to correct them. */
+  const returnedCount = useMemo(
+    () => documentsForDisplay.filter(d => d.status === 'Rejected' || d.status === 'Reassessment').length,
+    [documentsForDisplay],
+  );
 
   /**
    * How many documents the folder view has to show for the current resident
@@ -1665,6 +1736,72 @@ export function DocumentUpload() {
     }
   };
 
+  /**
+   * File a corrected copy over a returned document.
+   *
+   * One row, not two. The PUT goes through the same resubmission path the backend
+   * already had: it moves the document back to `Under Review`, advances the
+   * revision, clears the previous approval, and notifies the reviewers — so the
+   * reviewer's reason and the old file stay in the audit trail while the folder
+   * keeps a single live document. The Phase Timeline's upload box made a second
+   * document instead, which is what left returned files orphaned in the record.
+   */
+  const handleReplaceSubmit = async () => {
+    if (!replaceTarget || !replaceFile) return;
+    const document = replaceTarget;
+    const file = replaceFile;
+    const note = replaceNote.trim();
+    setIsReplaceSaving(true);
+    setReplaceError(null);
+
+    let fileData: string;
+    try {
+      fileData = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(String(reader.result || ''));
+        reader.onerror = () => reject(new Error('The file could not be read.'));
+        reader.readAsDataURL(file);
+      });
+    } catch (err) {
+      setReplaceError(describeError(err, 'The file could not be read.'));
+      setIsReplaceSaving(false);
+      return;
+    }
+
+    // Close this dialog *before* the write, not after it. The success dialog is
+    // opened from this same handler, and leaving this Radix layer mounted while
+    // the next one opens makes Radix inline `pointer-events: none` on it — the
+    // OK button stops responding and only Esc gets out. See ui/modalLayer.ts.
+    setReplaceTarget(null);
+    setReplaceFile(null);
+    setReplaceNote('');
+
+    try {
+      await updateDocument(document.id, {
+        status: 'Submitted' as any,
+        fileData,
+        fileName: file.name,
+        fileSize: file.size,
+        fileType: file.type || 'application/pdf',
+        submittedBy: user?.username,
+        submittedAt: new Date().toISOString(),
+        ...(note ? { description: note } : {}),
+      } as any);
+      await refreshData();
+      await dialog.success(
+        'Corrected copy filed.',
+        `“${document.title}” is back in Pending Review for the Center Head and the Social Worker. The earlier version and the reason it came back stay in its History.`,
+      );
+    } catch (err) {
+      await dialog.failure(
+        'Could not file the corrected copy',
+        describeError(err, 'The corrected copy was not filed. Please try again.'),
+      );
+    } finally {
+      setIsReplaceSaving(false);
+    }
+  };
+
   const handleReject = async () => {
     if (!rejectTarget) return;
     const document = rejectTarget;
@@ -1733,6 +1870,25 @@ export function DocumentUpload() {
   // Psychological Staff, whose spec forbids deleting documents outright.
   const canApprove = can('Documents', 'approve');
   const canDeleteDocuments = can('Documents', 'delete');
+
+  /**
+   * Who may file a corrected copy over a returned document.
+   *
+   * Mirrors `requireDocumentEdit` on `PUT /documents/:id`: the Documents `edit`
+   * capability, or the person who filed it. A returned document is waiting on
+   * its uploader, and the Educator holds Documents read-only — requiring `edit`
+   * outright would leave a returned education report with no way back, which is
+   * the dead end this whole flow exists to remove.
+   */
+  const canEditDocuments = can('Documents', 'edit');
+  const canReplaceDocument = (doc: {
+    status?: string; uploadedBy?: string; submittedBy?: string; createdBy?: string;
+  }) => {
+    if (doc.status !== 'Rejected' && doc.status !== 'Reassessment') return false;
+    if (canEditDocuments) return true;
+    const owner = String(doc.uploadedBy || doc.submittedBy || doc.createdBy || '').trim().toLowerCase();
+    return !!owner && owner === String(user?.username || '').trim().toLowerCase();
+  };
   const pendingDocs = documents.filter(isPendingReview);
 
   /**
@@ -1868,11 +2024,13 @@ export function DocumentUpload() {
                 doc={doc}
                 canApprove={canApprove && !admissionClosed}
                 canDelete={canDeleteDocuments && !admissionClosed}
+                canReplace={canReplaceDocument(doc) && !admissionClosed}
                 getStatusBadge={getStatusBadge}
                 onView={() => handleView(doc)}
                 onApprove={() => handleApprove(doc)}
                 onFailed={() => { setReviewTarget(doc); setReviewDecision('Failed'); setReviewNotes(''); setIsReviewDialogOpen(true); }}
                 onReassessment={() => { setReviewTarget(doc); setReviewDecision('Reassessment'); setReviewNotes(''); setIsReviewDialogOpen(true); }}
+                onReplace={() => { setReplaceTarget(doc); setReplaceFile(null); setReplaceNote(''); setReplaceError(null); }}
                 onDelete={() => { setDocumentToDelete(doc); setIsDeleteDialogOpen(true); }}
                 onHistory={() => openHistory(doc)}
                 onRequestAccess={() => openAccessRequest(doc)}
@@ -2046,8 +2204,20 @@ export function DocumentUpload() {
                 byName[key].push(c);
               });
 
+              // A returned document is not part of the child's file.
+              //
+              // The folder is the record of what the resident actually holds. A
+              // Rejected or For Reassessment document is work in progress — the
+              // phase requirement it was filed against counts only `Approved` —
+              // so leaving it beside the approved ones made the folder read as
+              // though the resident held something they do not.
+              //
+              // Nothing is lost: the uploader's notification opens it, its row in
+              // All Documents carries the Replace action, and its whole history
+              // stays on the document.
               const visibleDocs = documentsForDisplay
                 .filter(d => filteredChildren.some(c => c.id === d.residentId))
+                .filter(d => d.status !== 'Rejected' && d.status !== 'Reassessment')
                 .filter(matchesDocumentSearch);
 
               if (Object.keys(byName).length === 0) {
@@ -2299,6 +2469,15 @@ export function DocumentUpload() {
                 </SelectContent>
               </Select>
             </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className={`text-xs ${returnedOnly ? 'border-amber-400 bg-amber-50 text-amber-800' : ''}`}
+              onClick={() => setReturnedOnly(v => !v)}
+              title="Documents returned for correction are kept out of the child's folder"
+            >
+              {returnedOnly ? 'Showing needs revision' : `Needs revision${returnedCount ? ` (${returnedCount})` : ''}`}
+            </Button>
             <Button
               variant="outline"
               size="sm"
@@ -2917,6 +3096,28 @@ export function DocumentUpload() {
                 >
                   <X className="w-4 h-4 mr-2" /> Reject
                 </Button>
+                {/*
+                  The third outcome, and the one the reviewer had to leave the
+                  file to reach. A notification deep-links straight to this
+                  dialog, so all three decisions belong on it: sending the
+                  submitter back for correction is as much a decision as
+                  approving or rejecting, and closing the preview to find the row
+                  was the only way to make it.
+                */}
+                <Button
+                  variant="outline"
+                  className="border-yellow-300 text-yellow-700 hover:bg-yellow-50"
+                  onClick={() => {
+                    const doc = selectedDocument;
+                    setIsViewDialogOpen(false);
+                    setReviewTarget(doc);
+                    setReviewDecision('Reassessment');
+                    setReviewNotes('');
+                    setIsReviewDialogOpen(true);
+                  }}
+                >
+                  <RotateCcw className="w-4 h-4 mr-2" /> Reassessment
+                </Button>
                 <Button
                   className="bg-[#2F3E46] text-white hover:bg-[#243038]"
                   onClick={() => {
@@ -2928,6 +3129,27 @@ export function DocumentUpload() {
                   <CheckCircle className="w-4 h-4 mr-2" /> Approve
                 </Button>
               </>
+            )}
+            {/*
+              The uploader's half of the same flow. A returned document is waiting
+              on the person who filed it, and until now this dialog — the only
+              thing the decision notification opens — offered them Close and
+              Download. Nothing on any screen let them file a corrected copy.
+            */}
+            {selectedDocument && canReplaceDocument(selectedDocument) && (
+              <Button
+                className="bg-[#2F3E46] text-white hover:bg-[#243038]"
+                onClick={() => {
+                  const doc = selectedDocument;
+                  setIsViewDialogOpen(false);
+                  setReplaceTarget(doc);
+                  setReplaceFile(null);
+                  setReplaceNote('');
+                  setReplaceError(null);
+                }}
+              >
+                <Upload className="w-4 h-4 mr-2" /> Replace &amp; Resubmit
+              </Button>
             )}
             {/*
               A report that was approved before its reviewer's signature could be
@@ -3138,6 +3360,88 @@ export function DocumentUpload() {
               className="bg-red-600 hover:bg-red-700 text-white"
             >
               Confirm Rejection
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/*
+        Replace & Resubmit — the uploader's answer to a returned document.
+
+        One row, not two: the PUT goes through the resubmission path the backend
+        already had, so the document keeps its identity, advances its revision and
+        goes back into Pending Review. The reviewer's reason stays on the record
+        and the superseded file stays in the History, which is why nothing here
+        asks the uploader to restate it.
+      */}
+      <Dialog open={!!replaceTarget} onOpenChange={(open) => { if (!open) { setReplaceTarget(null); setReplaceFile(null); setReplaceNote(''); setReplaceError(null); } }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Upload className="w-4 h-4" /> Replace &amp; Resubmit
+            </DialogTitle>
+            <DialogDescription>
+              Upload the corrected copy. It goes back to the Center Head and the Social Worker for review.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            {replaceTarget && (
+              <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-1">
+                <p className="text-sm text-gray-800">
+                  <strong>{replaceTarget.title}</strong>
+                  {replaceTarget.residentName ? <span className="text-gray-500"> — {replaceTarget.residentName}</span> : null}
+                </p>
+                <p className="text-[11px] text-gray-500">
+                  Current file: {replaceTarget.fileName || 'none'}
+                  {Number(replaceTarget.revision) > 1 ? ` · revision ${replaceTarget.revision}` : ''}
+                </p>
+                {replaceTarget.rejectionReason && (
+                  <p className="text-[11px] text-red-700 whitespace-pre-line">
+                    Returned: {replaceTarget.rejectionReason}
+                  </p>
+                )}
+              </div>
+            )}
+            <div className="space-y-1">
+              <Label className="text-xs">Corrected file *</Label>
+              <input
+                type="file"
+                accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+                onChange={e => { setReplaceFile(e.target.files?.[0] || null); setReplaceError(null); }}
+                className="block w-full text-sm text-gray-600 file:mr-3 file:rounded-md file:border-0 file:bg-[#2F3E46] file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-white hover:file:bg-[#243038]"
+              />
+              {replaceFile && (
+                <p className="text-xs text-gray-500">{replaceFile.name} · {formatFileSize(replaceFile.size)}</p>
+              )}
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Note for the reviewer (optional)</Label>
+              <Textarea
+                value={replaceNote}
+                onChange={e => setReplaceNote(e.target.value)}
+                placeholder="e.g. Added the missing signature on page 2."
+                rows={2}
+                className="text-sm"
+              />
+            </div>
+            {replaceError && (
+              <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">{replaceError}</p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => { setReplaceTarget(null); setReplaceFile(null); setReplaceNote(''); setReplaceError(null); }}
+              disabled={isReplaceSaving}
+            >
+              Cancel
+            </Button>
+            <Button
+              className="bg-[#2F3E46] text-white hover:bg-[#243038]"
+              onClick={handleReplaceSubmit}
+              disabled={!replaceFile || isReplaceSaving}
+            >
+              {isReplaceSaving ? 'Filing…' : 'File corrected copy'}
             </Button>
           </DialogFooter>
         </DialogContent>

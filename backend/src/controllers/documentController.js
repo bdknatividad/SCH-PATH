@@ -994,6 +994,53 @@ async function create(req, res, next) {
       }
     }
 
+    /**
+     * Tell the reviewers an ordinary upload is waiting.
+     *
+     * `create` used to notify nobody unless the document happened to be one of
+     * the three special cases above, so a psychologist's file — or a nurse's, an
+     * educator's, a Social Worker's — landed in the folder and the Center Head
+     * and the Social Worker were never told it existed. The phase requirement it
+     * was filed against then read as unmet and the uploader waited on a review
+     * nobody knew they owed.
+     *
+     * The rule is the document's own outcome, not its category: anything that
+     * ended up `Submitted` is by definition waiting on a reviewer, and anything
+     * auto-approved on the way in (an Admission Slip, a system-wide uploader's
+     * own paperwork, a medical record filed already approved) is not. The two
+     * cases above are skipped because they already alert the same reviewers, and
+     * a second notice would only be noise.
+     *
+     * Addressed one row per user against `APPROVER_ROLES` — the same constant
+     * `update()` consults to decide who may approve — so the people told and the
+     * people permitted cannot drift apart. `actorUsername` keeps it out of the
+     * uploader's own list.
+     */
+    const alreadyAlerted = (docTitle === 'Psychological Assessment' && uploaderRole === 'psychologist')
+      || isProgressReport(rows[0]);
+    if (rows[0].status === 'Submitted' && !alreadyAlerted) {
+      try {
+        const reviewers = await notifications.usersWithAnyRole(APPROVER_ROLES);
+        const childName = rows[0].residentId ? await notifications.residentName(rows[0].residentId) : null;
+        const label = rows[0].title || rows[0].documentType || 'Document';
+        await notifications.notifyUsers(reviewers.map((reviewer) => reviewer.id), {
+          type: 'Document Uploaded',
+          residentId: rows[0].residentId || null,
+          title: `New document awaiting approval — ${label}`,
+          message: `${req.user?.fullName || req.user?.username || 'Staff'} uploaded "${label}"${childName ? ` for ${childName}` : ''}. Open it to read the file and approve it, reject it, or send it back for reassessment.`,
+          priority: 'High',
+          actionRequired: 'Open the file and approve, reject or return it.',
+          relatedRecordType: 'documents',
+          relatedRecordId: newId,
+          actorUsername: req.user?.username || null,
+          dedupeKey: `document:${newId}:uploaded`,
+        });
+      } catch (alertErr) {
+        // The document is already filed; a failed alert must not undo it.
+        console.error('[DocumentController] Upload alert failed (non-fatal):', alertErr.message);
+      }
+    }
+
     res.status(201).json({ success: true, data: mapRow('documents', rows[0]) });
   } catch (error) {
     next(error);

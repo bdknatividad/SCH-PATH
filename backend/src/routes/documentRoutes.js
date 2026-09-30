@@ -11,6 +11,7 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const { authorize, authorizeNonHouseparent } = require('../middleware/auth');
 const { requirePermission, requireSubModule, snapshotFor } = require('../middleware/rbac');
 const { hasModuleAccess, hasPermission } = require('../config/rbac');
+const { pool } = require('../config/database');
 
 /**
  * The module each generated quarterly Progress Report is filed from.
@@ -54,6 +55,57 @@ function requireDocumentCreate(req, res, next) {
     }
   }
   return requirePermission('Documents', 'create')(req, res, next);
+}
+
+/**
+ * Editing a document needs `Documents: edit` — except for the uploader putting
+ * their own returned document back into review.
+ *
+ * A Rejected / For Reassessment document is waiting on exactly one person: the
+ * one who filed it. That person is not always a role holding `Documents: edit` —
+ * the Educator files its quarterly reports through the create exemption above and
+ * holds Documents read-only, so a returned education report had no way back. The
+ * screen showed the reason and nothing to do about it, and the Phase Timeline's
+ * upload box — the only other route — files a *second* document and leaves the
+ * returned one orphaned in the record.
+ *
+ * The exemption is deliberately narrow; all three must hold:
+ *   - the caller IS the uploader, by the same username identity the rest of the
+ *     document workflow uses;
+ *   - the document is in a returned state (`Rejected` / `Reassessment`);
+ *   - the body asks only to put it back into review (`Submitted`).
+ *
+ * A different person, a document that is not returned, or any other target
+ * status still goes through `Documents: edit`. So this cannot rewrite an
+ * approved file, and it cannot decide anything: `Approved`, `Rejected` and
+ * `Reassessment` all fall through to the permission check, and the controller
+ * refuses them again for a caller without the approval capability.
+ */
+async function requireDocumentEdit(req, res, next) {
+  const snapshot = snapshotFor(req);
+  if (hasPermission(snapshot, 'Documents', 'edit')) return next();
+
+  const fallback = () => requirePermission('Documents', 'edit')(req, res, next);
+
+  if (String(req.body?.status || '') !== 'Submitted') return fallback();
+
+  try {
+    const [rows] = await pool.query(
+      'SELECT uploadedBy, submittedBy, createdBy, status FROM documents WHERE id = ? LIMIT 1',
+      [req.params.id],
+    );
+    const document = rows[0];
+    if (!document) return fallback();
+    if (!['Rejected', 'Reassessment'].includes(String(document.status || ''))) return fallback();
+
+    const owner = String(document.uploadedBy || document.submittedBy || document.createdBy || '').toLowerCase();
+    const caller = String(req.user?.username || '').toLowerCase();
+    if (!owner || owner !== caller) return fallback();
+
+    return next();
+  } catch (error) {
+    return next(error);
+  }
 }
 
 /**
@@ -118,8 +170,11 @@ router.post('/', authorizeNonHouseparent, requireDocumentCreate, asyncHandler(do
 /**
  * PUT /api/documents/:id
  * Update document
+ *
+ * `requireDocumentEdit` is `Documents: edit` with one exemption, for the uploader
+ * returning their own returned document to review — see there for why.
  */
-router.put('/:id', authorizeNonHouseparent, requirePermission('Documents', 'edit'), asyncHandler(documentController.update));
+router.put('/:id', authorizeNonHouseparent, requireDocumentEdit, asyncHandler(documentController.update));
 
 /**
  * POST /api/documents/:id/submit

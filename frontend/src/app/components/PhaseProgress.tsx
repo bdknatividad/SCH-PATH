@@ -202,7 +202,7 @@ interface PhaseReqWithOptional {
 
 export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Props) {
   const { user } = useAuth();
-  const { addDocument, deleteDocument, documents: allDocuments, updateChild, children, generateReport, refreshData } = useData();
+  const { addDocument, deleteDocument, documents: allDocuments, updateChild, updateDocument, children, generateReport, refreshData } = useData();
   const isCenterHead = user?.role === 'centerhead';
   // An absconded resident's Phase Timeline is frozen: shown as it stood, with
   // every action disabled (the API refuses them too). Nothing is removed.
@@ -1064,39 +1064,69 @@ ${admissionHistorySection}
     setIsConfirmingDischarge(false);
   };
 
-  const handleInlineUpload = async (doc: string, file: File) => {
+  /**
+   * Upload a required document for the phase on screen.
+   *
+   * `existing` is the document the row is currently showing, when it has one —
+   * the strongest submission for that title and phase. A returned one is
+   * **corrected, not duplicated**: this button used to always file a new row, so
+   * a document the reviewer had sent back stayed Rejected and orphaned in the
+   * record while the corrected copy lived beside it, and the phase requirement —
+   * which reads only `Approved` — went on counting the one that could never be
+   * approved. The PUT goes through the same resubmission path the Documents
+   * module uses: same row, revision advanced, back into Pending Review.
+   */
+  const handleInlineUpload = async (
+    doc: string,
+    file: File,
+    existing?: { id?: string; status?: string },
+  ) => {
     setUploadingDoc(doc);
     try {
       const base64Data = await readFileAsDataUrl(file);
 
       const child = children.find(c => c.id === residentId);
       const now = new Date().toISOString();
-      // Save through the same Documents API/state used by the Documents module.
-      // The residentId is the actual child folder key, so this upload is visible
-      // in Documents → Folders by Child after the server confirms it.
-      //
-      // Filed against the phase being *viewed*, not the resident's current one.
-      // The row this button sits on is matched with `d.phase === displayPhase`, so
-      // stamping `currentPhase` filed the document under whatever phase the
-      // resident had reached and the row it was uploaded from could never see it —
-      // a required document uploaded from a past phase stayed "Missing" forever,
-      // however many times it was uploaded. The free-form upload below already
-      // uses `displayPhase`, and the backend permits a past phase.
-      await addDocument({
-        residentId,
-        residentName: child?.name || '',
-        category: `${displayPhase} - Required`,
-        title: doc,
-        phase: displayPhase,
-        fileName: file.name,
-        fileSize: file.size,
-        fileData: base64Data,
-        fileType: file.type || 'application/octet-stream',
-        status: 'Submitted',
-        uploaderRole: user?.role || 'socialworker',
-        uploadedBy: user?.username || 'System',
-        uploadedAt: now,
-      });
+      const isReturned = existing?.status === 'Rejected' || existing?.status === 'Reassessment';
+
+      if (isReturned && existing?.id) {
+        await updateDocument(existing.id, {
+          status: 'Submitted' as any,
+          fileData: base64Data,
+          fileName: file.name,
+          fileSize: file.size,
+          fileType: file.type || 'application/octet-stream',
+          submittedBy: user?.username || 'System',
+          submittedAt: now,
+        } as any);
+      } else {
+        // Save through the same Documents API/state used by the Documents module.
+        // The residentId is the actual child folder key, so this upload is visible
+        // in Documents → Folders by Child after the server confirms it.
+        //
+        // Filed against the phase being *viewed*, not the resident's current one.
+        // The row this button sits on is matched with `d.phase === displayPhase`, so
+        // stamping `currentPhase` filed the document under whatever phase the
+        // resident had reached and the row it was uploaded from could never see it —
+        // a required document uploaded from a past phase stayed "Missing" forever,
+        // however many times it was uploaded. The free-form upload below already
+        // uses `displayPhase`, and the backend permits a past phase.
+        await addDocument({
+          residentId,
+          residentName: child?.name || '',
+          category: `${displayPhase} - Required`,
+          title: doc,
+          phase: displayPhase,
+          fileName: file.name,
+          fileSize: file.size,
+          fileData: base64Data,
+          fileType: file.type || 'application/octet-stream',
+          status: 'Submitted',
+          uploaderRole: user?.role || 'socialworker',
+          uploadedBy: user?.username || 'System',
+          uploadedAt: now,
+        });
+      }
 
       // Re-read the authoritative server state so Documents and Phase Timeline
       // cannot diverge after an upload.
@@ -1768,7 +1798,7 @@ ${admissionHistorySection}
                                 accept=".pdf,.doc,.docx,.jpg,.jpeg,.png,.xls,.xlsx"
                                 onChange={async (e) => {
                                   const file = e.target.files?.[0];
-                                  if (file) await handleInlineUpload(doc, file);
+                                  if (file) await handleInlineUpload(doc, file, uploaded);
                                   if (e.target) e.target.value = '';
                                 }}
                               />

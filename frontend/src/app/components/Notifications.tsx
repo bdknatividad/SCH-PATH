@@ -234,7 +234,7 @@ export function Notifications() {
       case 'educationrecords':
         target = childTab('education') || '/education';
         break;
-      case 'documents':
+      case 'documents': {
         // A document alert names the exact file, so open it rather than the
         // folder list. `DocumentUpload` reads `docId` and opens that record's
         // preview; without one it simply stays on the list.
@@ -243,11 +243,21 @@ export function Notifications() {
         // notice used to land on the folder list with the file's details dialog,
         // which is not where the work is: the reviewer has to read the form and
         // put their signature on it. `sign=1` sends them straight to that screen.
+        //
+        // **A returned document opens the All Documents tab.** Rejected and For
+        // Reassessment files are kept out of the child's folder on purpose — they
+        // are work in progress, not something the resident holds — so a decision
+        // notice pointed at a folder that no longer listed the file. The dialog
+        // still opened over it, but the list behind read as though the document
+        // had been deleted.
+        const decision = ['document rejected', 'document for reassessment']
+          .includes(String(alert.type || '').toLowerCase());
         target = relatedRecordId
-          ? `/documents?tab=folders&docId=${encodeURIComponent(relatedRecordId)}`
+          ? `/documents?tab=${decision ? 'all' : 'folders'}&docId=${encodeURIComponent(relatedRecordId)}`
             + (String(alert.type || '').toLowerCase() === 'progress-report-submitted' ? '&sign=1' : '')
           : '/documents';
         break;
+      }
       // Form 08 and the intervention it belongs to both live in the Violations
       // module, which every role that can act on them holds.
       case 'incidentreports':
