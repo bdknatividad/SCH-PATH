@@ -1212,7 +1212,7 @@ export function Violations() {
                       <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide">Resident(s) Involved</th>
                       <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide w-24">Severity</th>
                       <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide w-24">Date</th>
-                      <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide w-24">Status</th>
+                      <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide w-40">Status</th>
                       <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide w-24">View</th>
                     </tr>
                   </thead>
@@ -1240,14 +1240,21 @@ export function Violations() {
                             )}
                           </td>
                           <td className="px-4 py-3">
-                            <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            {/* `whitespace-nowrap` is the fix, not decoration: a
+                                table cell wraps its content *before* the table
+                                grows, so with the column squeezed the pill broke
+                                mid-word — "Reviewed" printed as "Reviewe" over
+                                "d" inside the capsule. Refusing to wrap makes
+                                the column take the pill's real width, and the
+                                table scrolls inside its own box instead. */}
+                            <span className={`inline-flex whitespace-nowrap px-2 py-0.5 rounded-full text-[10px] font-bold ${
                                                             violation.severity === 'Major'    ? 'bg-orange-100 text-orange-700' :
                                                                   'bg-yellow-100 text-yellow-700'
                             }`}>{violation.severity}</span>
                           </td>
                           <td className="px-4 py-3 text-xs text-gray-500">{formatShortDate(violation.date)}</td>
                           <td className="px-4 py-3">
-                            <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            <span className={`inline-flex whitespace-nowrap px-2 py-0.5 rounded-full text-[10px] font-bold ${
                               violation.status === 'Resolved' ? 'bg-green-100 text-green-700' :
                               violation.status === 'Reviewed' ? 'bg-blue-100 text-blue-700' :
                               violation.status === 'Under Investigation' ? 'bg-purple-100 text-purple-700' :
