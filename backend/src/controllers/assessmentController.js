@@ -12,11 +12,32 @@ const { canAccessResident } = require('./assignmentController');
 // today; `toISOString()` gives UTC's, which is a different day for eight hours
 // of every day here.
 const { manilaToday } = require('../utils/triPeriod');
+const { notifyScheduleCreated } = require('../utils/scheduledWork');
 
 const baseController = createController('assessments');
 
 function isHouseparent(user) {
   return String(user?.role || '').toLowerCase() === 'houseparent';
+}
+
+/**
+ * `POST /assessments` — the base write, plus the audience that has to know.
+ *
+ * Scheduling an assessment used to notify nobody, so the Center Head, the Social
+ * Worker, the Psychological Staff and the resident's Houseparents only found out
+ * by opening the module and looking. The row is announced from the response the
+ * base controller already built rather than a second read of the table, and the
+ * send is not awaited: a slow alert must not hold up the save.
+ */
+async function create(req, res, next) {
+  const originalJson = res.json.bind(res);
+  res.json = (payload) => {
+    if (payload?.success !== false && payload?.data?.id) {
+      void notifyScheduleCreated({ resource: 'assessments', row: payload.data, actor: req.user });
+    }
+    return originalJson(payload);
+  };
+  return baseController.create(req, res, next);
 }
 
 /**
@@ -343,7 +364,7 @@ async function complete(req, res, next) {
 module.exports = {
   getAll,
   getById,
-  create: baseController.create,
+  create,
   update: baseController.update,
   delete: baseController.delete,
   getByResident,

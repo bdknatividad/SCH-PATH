@@ -21,6 +21,7 @@ const notifications = require('../services/notificationService');
 const { assertResidentNotAbsconded } = require('../utils/abscond');
 const { canAccessResident } = require('./assignmentController');
 const { pointsForSeverity } = require('../utils/violationPoints');
+const { notifyScheduleCreated } = require('../utils/scheduledWork');
 
 const baseController = createController('violations');
 
@@ -1108,6 +1109,10 @@ async function review(req, res, next) {
         [status, reviewer, guide.category, pointsForSeverity(guide.category), guide.id, id]
       );
     }
+    // Assessments raised by this verification are announced **after** the
+    // commit, not during it: a rollback would otherwise leave an alert pointing
+    // at a row that was never written.
+    const scheduledAssessments = [];
     if (status === 'Reviewed') {
       const residentName = await getResidentName(violation.residentId);
       const [existing] = await connection.query('SELECT id FROM intervention_tracker WHERE violationId = ?', [id]);
@@ -1218,6 +1223,18 @@ async function review(req, res, next) {
                   reviewer,
                 ]
               );
+
+              // A real assessment now exists on the schedule, so the same people
+              // a hand-scheduled one reaches are told about it. Before this the
+              // row appeared silently: the Center Head, the Social Worker, the
+              // Psychological Staff and the resident's Houseparents only found it
+              // by opening the Assessments module.
+              scheduledAssessments.push({
+                id: assessmentId,
+                title: `${linkedActivityTypes.length ? linkedActivityTypes.join(', ') : assessmentType} — ${residentName}`,
+                date: datePart || null,
+                forResidents: JSON.stringify([violation.residentId]),
+              });
             }
           }
         }
@@ -1229,6 +1246,12 @@ async function review(req, res, next) {
     // out of every other reviewer's list.
     await notifications.markRelatedRead(req.user, 'violation', id, connection);
     await connection.commit();
+
+    // The verification is durable, so the assessments it raised can be announced.
+    for (const assessment of scheduledAssessments) {
+      void notifyScheduleCreated({ resource: 'assessments', row: assessment, actor: req.user });
+    }
+
     const [updated] = await pool.query('SELECT * FROM violations WHERE id = ?', [id]);
     res.json({ success: true, data: mapRow('violations', updated[0]), message: status === 'Reviewed' ? 'Violation verified and interventions assigned.' : 'Violation rejected.' });
   } catch (error) { try { await connection.rollback(); } catch {} next(error); }

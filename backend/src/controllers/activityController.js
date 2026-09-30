@@ -12,12 +12,32 @@ const { assignedResidentIds } = require('../utils/residentScope');
 // today; `toISOString()` gives UTC's, which is a different day for eight hours
 // of every day here.
 const { manilaToday } = require('../utils/triPeriod');
+const { notifyScheduleCreated } = require('../utils/scheduledWork');
 
 const baseController = createController('activities');
 
 
 function isHouseparent(user) {
   return String(user?.role || '').toLowerCase() === 'houseparent';
+}
+
+/**
+ * `POST /activities` — the base write, plus the audience that has to know.
+ *
+ * Same gap the Assessments module had: an activity was created and nobody was
+ * told. The Center Head, the Social Worker, the Psychological Staff and the
+ * Houseparents of the residents named on it are addressed from the response the
+ * base controller already built, and the send is not awaited.
+ */
+async function create(req, res, next) {
+  const originalJson = res.json.bind(res);
+  res.json = (payload) => {
+    if (payload?.success !== false && payload?.data?.id) {
+      void notifyScheduleCreated({ resource: 'activities', row: payload.data, actor: req.user });
+    }
+    return originalJson(payload);
+  };
+  return baseController.create(req, res, next);
 }
 
 function parseResidentValues(row) {
@@ -177,7 +197,7 @@ async function complete(req, res, next) {
 module.exports = {
   getAll,
   getById,
-  create: baseController.create,
+  create,
   update: baseController.update,
   delete: baseController.delete,
   getByDateRange,

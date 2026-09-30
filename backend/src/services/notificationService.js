@@ -51,6 +51,16 @@ const alertStream = require('./alertStream');
 const MANAGER_ROLES = ['centerhead', 'admin'];
 
 /**
+ * Who is told when the schedule changes — see `notifyScheduleAudience`.
+ *
+ * The Psychological Staff is on it because it runs the assessments and the
+ * psychosocial activities; the Center Head and the Social Worker because the
+ * schedule is part of the case plan. Deliberately not the Nurse or the Educator:
+ * they read a resident's record, but neither runs the schedule.
+ */
+const SCHEDULE_AUDIENCE_ROLES = ['centerhead', 'socialworker', 'psychologist'];
+
+/**
  * The columns a client needs, with read state resolved for one user.
  *
  * `isRead`/`readBy`/`readAt` are computed, never read off `alerts` — that is
@@ -329,9 +339,43 @@ async function notifyResidentEvent(event, { subModule = null } = {}) {
   return notifyUsers([...recipients], event);
 }
 
+/**
+ * The audience for something the schedule produces — an assessment, an activity,
+ * or an assessment raised by a verified violation.
+ *
+ * The Center Head, the Social Worker and the Psychological Staff **by role**, and
+ * the Houseparents of the residents involved **by id**.
+ *
+ * Written out rather than derived from the Child Records matrix, because these
+ * are not Child Records tabs and the people who need to know are a different set:
+ * the Nurse and the Educator read a resident's record but do not run the
+ * schedule, and a Houseparent holds neither module yet is the one who walks the
+ * resident to the session.
+ *
+ * `houseparent` as a role means every Houseparent in the facility, which is why
+ * they go through `houseparentsOf` — the same reason `notifyResidentEvent` does.
+ * A record naming several residents (an activity with participants) addresses
+ * every one of their Houseparents, but sends a **single** row to the role
+ * audience: one event happened, and three copies of it would be noise.
+ *
+ * @param {object} event notification payload
+ * @param {string[]} residentIds the residents the record names, if any
+ */
+async function notifyScheduleAudience(event, residentIds = []) {
+  const recipients = new Set();
+  for (const account of await usersWithAnyRole(SCHEDULE_AUDIENCE_ROLES)) {
+    recipients.add(account.id);
+  }
+  for (const residentId of residentIds) {
+    for (const houseparent of await houseparentsOf(residentId)) {
+      recipients.add(houseparent.id);
+    }
+  }
+  return notifyUsers([...recipients], event);
+}
+
 /** A resident's display name, for message text. */
-async function residentName(residentId, executor = pool) {
-  if (!residentId) return null;
+async function residentName(residentId, executor = pool) {  if (!residentId) return null;
   const [rows] = await executor.query('SELECT name FROM children WHERE id = ?', [residentId]);
   return rows[0]?.name || residentId;
 }
@@ -536,6 +580,7 @@ module.exports = {
   houseparentsOf,
   rolesAllowedResidentSubModule,
   notifyResidentEvent,
+  notifyScheduleAudience,
   residentName,
   residentExists,
   visibilityClause,
