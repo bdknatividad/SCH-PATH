@@ -347,10 +347,22 @@ export async function buildProgressReportPdf(
     });
 
     y = ruleY - 13;
-    page.drawText(options.name, { x: REPORT_MARGIN, y, size: LABEL_FONT_SIZE, font, color: BODY_INK });
+    /**
+     * The printed name is centred on the rule, because the signature above it is.
+     *
+     * `drawSignatureImageOnPage` scales the drawn signature to fit the box and
+     * centres it, so on a 190 pt rule the ink sits in the middle. The name was
+     * left-aligned at the margin, which put its centre about 30 pt to the left of
+     * the signature's — the reviewer's signature read as drifting off the name it
+     * belongs to. Both are centred on the same rule now, so they line up.
+     */
+    const centred = (value: string) =>
+      REPORT_MARGIN + Math.max(0, (SIGNATURE_RULE_WIDTH - font.widthOfTextAtSize(value, LABEL_FONT_SIZE)) / 2);
+
+    page.drawText(options.name, { x: centred(options.name), y, size: LABEL_FONT_SIZE, font, color: BODY_INK });
     if (options.title) {
       y -= 13;
-      page.drawText(options.title, { x: REPORT_MARGIN, y, size: LABEL_FONT_SIZE, font, color: BODY_INK });
+      page.drawText(options.title, { x: centred(options.title), y, size: LABEL_FONT_SIZE, font, color: BODY_INK });
     }
   };
 
