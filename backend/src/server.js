@@ -2811,6 +2811,70 @@ async function runMigrations() {
   await ensureColumn('phaseProgress', 'admissionId', 'VARCHAR(40) NULL', 'residentId');
   await ensureIndex('phaseProgress', 'idx_phaseProgress_admission', 'admissionId');
   await backfillPhaseProgressAdmissions();
+  await repairWorkflowDocuments();
+}
+
+/**
+ * Two documents whose real state is decided elsewhere, repaired at boot.
+ *
+ * Both are the same shape of defect: a document was left in the review queue (or
+ * missing from it) because the write that should have moved it never landed. Both
+ * statements match only rows in the broken state, so a second boot changes
+ * nothing.
+ *
+ *  1. **An Admission Slip is final on creation.** The system generates it from the
+ *     admission record itself, so a reviewer has nothing to check that the
+ *     admission does not already state. `create` approves one on upload when it
+ *     arrives already submitted, but slips filed before that rule existed are
+ *     still sitting at 'Submitted' in the Documents module's Pending Review queue,
+ *     waiting on a decision nobody needs to make. Four were live on 2026-09-30
+ *     (DOC002/003/007/010), all filed by the Center Head.
+ *
+ *  2. **A Form 08 whose report was corrected and resubmitted kept a returned
+ *     document.** `resubmit` moves the report and its document together; a
+ *     surplus bind parameter in an earlier version meant the document write bound
+ *     its `WHERE id = ?` to the actor and matched no row (the note in
+ *     `incidentReportController.resubmit` has the detail). The report then read
+ *     'Submitted' while the document still read 'Reassessment' — so the Center
+ *     Head had nothing in Pending Review and the tracker had no way forward.
+ *     Live on CH001 (INC001 / DOC005) on 2026-09-30.
+ *
+ * The approval trail is recorded against the uploader, which is what `create`
+ * does for a self-approved document.
+ */
+async function repairWorkflowDocuments() {
+  try {
+    const [slips] = await pool.query(
+      `UPDATE documents
+          SET status = 'Approved',
+              approvedBy = COALESCE(approvedBy, uploadedBy, submittedBy, createdBy),
+              approvedAt = COALESCE(approvedAt, NOW())
+        WHERE title = 'Admission Slip'
+          AND status IN ('Submitted', 'Under Review')`
+    );
+    if (slips.affectedRows) {
+      console.log(`Migration: ${slips.affectedRows} Admission Slip(s) approved — a slip is final on creation.`);
+    }
+  } catch (err) {
+    console.warn('Migration warning (Admission Slip approval backfill):', err.message);
+  }
+
+  try {
+    const [reports] = await pool.query(
+      `UPDATE documents d
+         JOIN incidentReports ir ON ir.pdfDocumentId = d.id
+          SET d.status = 'Submitted',
+              d.reviewedBy = NULL, d.reviewedAt = NULL,
+              d.submittedAt = COALESCE(d.submittedAt, NOW())
+        WHERE ir.status = 'Submitted'
+          AND d.status IN ('Reassessment', 'Rejected', 'Failed')`
+    );
+    if (reports.affectedRows) {
+      console.log(`Migration: ${reports.affectedRows} resubmitted Form 08 document(s) returned to Pending Review.`);
+    }
+  } catch (err) {
+    console.warn('Migration warning (Form 08 document backfill):', err.message);
+  }
 }
 
 /**

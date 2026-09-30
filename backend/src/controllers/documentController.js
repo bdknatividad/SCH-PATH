@@ -1043,7 +1043,19 @@ async function submit(req, res, next) {
      * Scoped to those two roles: a Social Worker's or an Educator's submission
      * still goes to the review queue.
      */
-    const selfApproving = isSystemWide(req.user);
+    /*
+     * A system-wide uploader's own paperwork has nobody above it to review, and
+     * an Admission Slip is final whoever filed it — the system generates it from
+     * the admission record itself, so a reviewer has nothing to check that the
+     * admission does not already state.
+     *
+     * Both rules belong here as well as in `create`. A slip that arrives already
+     * submitted is approved on upload, but one saved as a Draft and submitted
+     * afterwards reached this function instead and landed in Pending Review —
+     * which is how four of them were left waiting on a decision nobody needed to
+     * make (see `repairWorkflowDocuments` in server.js).
+     */
+    const selfApproving = isSystemWide(req.user) || String(existing.title || '').trim() === 'Admission Slip';
     const nextStatus = selfApproving ? 'Approved' : 'Under Review';
 
     await pool.query(
