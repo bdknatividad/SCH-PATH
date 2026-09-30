@@ -32,7 +32,7 @@ interface Assessment {
 export function AssessmentDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { assessments, isLoading, violations } = useData(); 
+  const { assessments, isLoading, violations, children } = useData(); 
 
   useEffect(() => {
     if (!isLoading && assessments) {
@@ -100,10 +100,23 @@ export function AssessmentDetail() {
     : (assessment.assessor || '—');
 
   const residents = Array.isArray(assessment.forResidents) ? assessment.forResidents : [];
-  // Handle both string[] and {id, name}[] formats
-  const residentNames = residents.map((r: string | ResidentRef) => 
-    typeof r === 'string' ? r : (r?.name || r?.id || 'Unknown')
-  );
+  /**
+   * A participant is shown by name, never by case number.
+   *
+   * `forResidents` holds either `{ id, name }` pairs or bare ids, and a record
+   * saved by the schedule dialog carries bare ids — so the resident list is what
+   * supplies the name, and the id is only the last resort, for someone no longer
+   * in the caseload. Falling back to the id is what printed "CH001" on the
+   * Participants card here, while the list view in `Assessments.tsx` had already
+   * been resolving the same field to a name.
+   */
+  const residentName = (ref: string | ResidentRef): string => {
+    if (ref && typeof ref === 'object' && ref.name) return ref.name;
+    const refId = typeof ref === 'string' ? ref : ref?.id;
+    if (!refId) return 'Unknown';
+    return children.find((child) => String(child.id) === String(refId))?.name || refId;
+  };
+  const residentNames = residents.map(residentName);
   const filteredParticipants = residentNames.filter(
     (name: string) => !String(assessorList).toLowerCase().includes(name.toLowerCase())
   );
