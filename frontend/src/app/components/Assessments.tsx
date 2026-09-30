@@ -89,7 +89,10 @@ export function Assessments() {
   const canOpenResidentProfile = canOpenModule('Child Records');
 
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeTab, setActiveTab] = useState('all');
+  // The module opens on the work that is still owed, not on the whole history:
+  // "Scheduled" is what a reviewer came here to look at. The other tabs are one
+  // click away and their counts are on the triggers.
+  const [activeTab, setActiveTab] = useState('scheduled');
   const [showForms, setShowForms] = useState(false);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
