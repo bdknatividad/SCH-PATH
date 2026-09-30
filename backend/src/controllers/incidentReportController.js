@@ -478,13 +478,23 @@ async function resubmit(req, res, next) {
       // recent review outcome, the Documents folder view shows the rejected-by
       // and rejection date, and the audit trail holds every rejection. Only the
       // decision fields for the *current* cycle are cleared.
+      //
+      // **Eight placeholders, eight values — the `id` last.** There was a ninth
+      // (`actor` repeated) here, and `pool.query` does not reject a surplus
+      // parameter: it binds the values to the placeholders in order and ignores
+      // what is left over, so the `WHERE id = ?` took the *actor* and the
+      // statement matched no row. The resubmit therefore returned 200 with the
+      // report back on 'Submitted' while its document kept the 'Reassessment'
+      // the Center Head had given it — and the document is what the Intervention
+      // Tracker's Form 08 row reads, so "Fill Out Again & Resubmit" looked like
+      // it did nothing at all.
       await pool.query(
         `UPDATE documents SET title = 'Incident Report', status = 'Submitted',
          reviewedBy = NULL, reviewedAt = NULL, approvedBy = NULL, approvedAt = NULL,
          fileName = ?, fileSize = ?, fileData = ?, fileType = 'application/pdf', modifiedBy = ?,
          documentCategory = ?, submittedBy = ?, submittedAt = NOW(), uploadedBy = ?, uploadedAt = NOW()
          WHERE id = ?`,
-        [pdfFileName, pdfBuffer.length, pdfBuffer.toString('base64'), actor, VIOLATION_FOLDER, actor, actor, actor, existing.pdfDocumentId]
+        [pdfFileName, pdfBuffer.length, pdfBuffer.toString('base64'), actor, VIOLATION_FOLDER, actor, actor, existing.pdfDocumentId]
       );
     }
 
