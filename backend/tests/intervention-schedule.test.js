@@ -110,27 +110,47 @@ test.beforeEach(() => {
   };
 });
 
+/**
+ * A schedule that is always in the future.
+ *
+ * These cases used the literal `2026-09-30T14:32`. That was in the future when
+ * they were written and stopped being so at 14:32 on 2026-09-30 — after which the
+ * guard below correctly refused every one of them as "must be in the future" and
+ * the file went red for a reason that had nothing to do with the code it pins.
+ * A date in a test that asserts "this is the future" has to be relative to now,
+ * or the test has an expiry date of its own.
+ *
+ * `datetime-local` carries no zone, and `new Date('YYYY-MM-DDTHH:MM')` reads it
+ * as local — which is what the guard does — so tomorrow at the same wall-clock is
+ * unambiguously ahead of `Date.now()` in any timezone.
+ */
+const FUTURE_SCHEDULE = (() => {
+  const pad = (n) => String(n).padStart(2, '0');
+  const d = new Date(Date.now() + 24 * 60 * 60 * 1000);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T14:32`;
+})();
+
 // ── the behaviour ──────────────────────────────────────────────────────────
 
 test('a schedule is saved and the stored row comes back', async () => {
-  const result = await call({ scheduledAt: '2026-09-30T14:32' });
+  const result = await call({ scheduledAt: FUTURE_SCHEDULE });
 
   assert.equal(result.status, 200, JSON.stringify(result.error?.message || result.payload));
   const update = queries.find((q) => /UPDATE intervention_tracker SET/i.test(q.sql));
   assert.ok(update, 'no UPDATE was issued');
   assert.match(update.sql, /scheduledAt = \?/);
-  assert.equal(update.params[0], '2026-09-30T14:32');
+  assert.equal(update.params[0], FUTURE_SCHEDULE);
 });
 
 test('the scheduling guard does not throw for a manager', async () => {
   // The regression itself: this resolved as a 500 with
   // "normalizeRole is not defined" rather than reaching the database.
-  const result = await call({ scheduledAt: '2026-09-30T14:32' });
+  const result = await call({ scheduledAt: FUTURE_SCHEDULE });
   assert.notEqual(result.status, 500, 'the schedule path still 500s');
 });
 
 test('a Houseparent cannot schedule, and is refused as a client error', async () => {
-  const result = await call({ scheduledAt: '2026-09-30T14:32' }, { id: 'U2', role: 'houseparent' });
+  const result = await call({ scheduledAt: FUTURE_SCHEDULE }, { id: 'U2', role: 'houseparent' });
   assert.equal(result.status, 403);
   assert.match(result.error.message, /cannot schedule/i);
 });
@@ -140,14 +160,14 @@ test('a role alias is normalised before the guard reads it', async () => {
   // the same branch as `houseparent`. Reading the raw role would let an alias
   // through the guard.
   for (const alias of ['House Parent', 'house_parent', 'HOUSEPARENT']) {
-    const result = await call({ scheduledAt: '2026-09-30T14:32' }, { id: 'U3', role: alias });
+    const result = await call({ scheduledAt: FUTURE_SCHEDULE }, { id: 'U3', role: alias });
     assert.equal(result.status, 403, `${alias} was not treated as a Houseparent`);
   }
 });
 
 test('a type that is not schedulable is a 400, not a 500', async () => {
   trackerRow.interventionType = 'Individual Counseling';
-  const result = await call({ scheduledAt: '2026-09-30T14:32' });
+  const result = await call({ scheduledAt: FUTURE_SCHEDULE });
   assert.equal(result.status, 400);
   assert.match(result.error.message, /does not require scheduling/i);
 });
