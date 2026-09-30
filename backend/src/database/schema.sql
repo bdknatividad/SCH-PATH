@@ -343,6 +343,17 @@ CREATE TABLE violations (
   psychVerification LONGTEXT NULL,
   swVerifiedBy VARCHAR(100) NULL,
   swVerifiedAt DATETIME NULL,
+
+  -- The notes each side typed in the review dialog, kept apart.
+  --
+  -- They used to share `actionTaken` below, which the log form also writes
+  -- "Immediate action taken" into and the Intervention Tracker prints as
+  -- "Action Taken". Two things went wrong with that: the second reviewer's
+  -- notes overwrote the first's, so only one side's text survived, and a review
+  -- note showed up on the tracker as an action taken.
+  psychReviewNotes TEXT NULL,
+  swReviewNotes TEXT NULL,
+
   actionTaken TEXT NULL,
   status ENUM('Pending Review', 'Under Investigation', 'Reviewed', 'Resolved', 'Escalated', 'Rejected') NOT NULL DEFAULT 'Pending Review',
   requiresAssessment BOOLEAN NOT NULL DEFAULT TRUE,

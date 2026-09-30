@@ -1601,25 +1601,51 @@ export function Violations() {
                   )}
                 </div>
 
-                {/* Review Notes captured during Psychological Staff verification. Shown
-                    here so the notes remain readable after the dialog closes and
-                    the page is reloaded — they are persisted on the violation
-                    itself (actionTaken / reviewedBy). */}
-                {(selectedViolation.actionTaken || selectedViolation.reviewedBy) && (
-                  <div className="border border-gray-200 rounded-xl overflow-hidden">
-                    <div className="bg-[#2F3E46] px-4 py-2.5">
-                      <p className="text-xs font-bold text-white uppercase tracking-wide">Review Notes</p>
+                {/* Review notes, one block per side.
+                    Each reviewer's own text is kept in its own column, so both
+                    survive. They used to share `actionTaken`, and since the two
+                    verifications are separate requests the second one replaced
+                    the first — which is why only the Psychological Staff's notes
+                    were ever readable. Rows written before the split keep their
+                    notes in `actionTaken`, so that is still shown when neither
+                    side has a note of its own. */}
+                {(() => {
+                  const psychNotes = (selectedViolation as any).psychReviewNotes as string | null | undefined;
+                  const swNotes = (selectedViolation as any).swReviewNotes as string | null | undefined;
+                  const psychBy = (selectedViolation as any).psychVerifiedBy as string | null | undefined;
+                  const swBy = (selectedViolation as any).swVerifiedBy as string | null | undefined;
+                  const legacyNotes = !psychNotes && !swNotes ? selectedViolation.actionTaken : null;
+                  if (!psychBy && !swBy && !legacyNotes && !selectedViolation.reviewedBy) return null;
+                  return (
+                    <div className="border border-gray-200 rounded-xl overflow-hidden">
+                      <div className="bg-[#2F3E46] px-4 py-2.5">
+                        <p className="text-xs font-bold text-white uppercase tracking-wide">Review Notes</p>
+                      </div>
+                      <div className="p-3 space-y-3">
+                        {psychBy && (
+                          <div>
+                            <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Psychological Support Staff · {psychBy}</p>
+                            <p className="text-sm text-gray-700 whitespace-pre-wrap">{psychNotes || 'No notes recorded.'}</p>
+                          </div>
+                        )}
+                        {swBy && (
+                          <div>
+                            <p className="text-[11px] font-bold text-gray-500 uppercase tracking-wide">Social Worker · {swBy}</p>
+                            <p className="text-sm text-gray-700 whitespace-pre-wrap">{swNotes || 'No notes recorded.'}</p>
+                          </div>
+                        )}
+                        {!psychBy && !swBy && (
+                          legacyNotes
+                            ? <div>
+                                <p className="text-sm text-gray-700 whitespace-pre-wrap">{legacyNotes}</p>
+                                {selectedViolation.reviewedBy && <p className="text-xs text-gray-500 mt-1">Reviewed by {selectedViolation.reviewedBy}</p>}
+                              </div>
+                            : <p className="text-sm text-gray-500">No review notes were recorded.</p>
+                        )}
+                      </div>
                     </div>
-                    <div className="p-3 space-y-2">
-                      {selectedViolation.actionTaken
-                        ? <p className="text-sm text-gray-700 whitespace-pre-wrap">{selectedViolation.actionTaken}</p>
-                        : <p className="text-sm text-gray-500">No review notes were recorded.</p>}
-                      {selectedViolation.reviewedBy && (
-                        <p className="text-xs text-gray-500">Reviewed by {selectedViolation.reviewedBy}</p>
-                      )}
-                    </div>
-                  </div>
-                )}
+                  );
+                })()}
               </div>
             );
           })()}
@@ -1876,7 +1902,10 @@ export function Violations() {
               {needsSchedule && <div className="space-y-2 rounded-lg border p-4"><Label>Schedule Date and Time</Label><Input type="datetime-local" min={getCurrentPHDateTime()} value={reviewForm.scheduleDateTime} onChange={(e) => setReviewForm(p => ({ ...p, scheduleDateTime: e.target.value }))} /><p className="text-xs text-gray-500">The configured intervention type is Psychosocial Activity or Dialogue/Counseling, which has to be scheduled before this violation can be verified.</p></div>}
               {isPsychosocial && <div className="space-y-2 rounded-lg border p-4"><Label>Psychosocial Activity (select all that apply)</Label><div className="grid grid-cols-1 sm:grid-cols-2 gap-2">{PSYCHOSOCIAL_OPTIONS.map(option => <label key={option} className="flex items-center gap-2 text-sm"><Checkbox checked={reviewForm.psychosocialActivities.includes(option)} onCheckedChange={() => togglePsychosocialActivity(option)} />{option}</label>)}</div></div>}
               <div className="space-y-2 rounded-lg border p-4">
-                <Label htmlFor="review-notes">Review Notes</Label>
+                <Label htmlFor="review-notes">
+                  Review Notes
+                  {verificationSide === 'psych' ? ' — Psychological Support Staff' : verificationSide === 'sw' ? ' — Social Worker' : ''}
+                </Label>
                 <Textarea
                   id="review-notes"
                   rows={4}
@@ -1885,7 +1914,10 @@ export function Violations() {
                   placeholder="Record your findings, the reason for rejection, or any instruction for the assigned intervention…"
                   disabled={isReviewSubmitting}
                 />
-                <p className="text-xs text-gray-500">Saved with this violation and shown on its View details. Required when rejecting.</p>
+                <p className="text-xs text-gray-500">
+                  Kept with your own verification, so both sides&rsquo; notes stay readable on View details.
+                  Required when rejecting.
+                </p>
               </div>
               {reviewError && (
                 <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">

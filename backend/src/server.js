@@ -799,6 +799,12 @@ async function runMigrations() {
   await ensureColumn('violations', 'psychVerification', 'LONGTEXT NULL', 'psychVerifiedAt');
   await ensureColumn('violations', 'swVerifiedBy', 'VARCHAR(100) NULL', 'psychVerification');
   await ensureColumn('violations', 'swVerifiedAt', 'DATETIME NULL', 'swVerifiedBy');
+  // Each side's own review notes. They used to share `actionTaken`, which the
+  // log form also writes "Immediate action taken" into and the Intervention
+  // Tracker prints under that heading — so the second reviewer's notes replaced
+  // the first's and a review note read as an action taken.
+  await ensureColumn('violations', 'psychReviewNotes', 'TEXT NULL', 'swVerifiedAt');
+  await ensureColumn('violations', 'swReviewNotes', 'TEXT NULL', 'psychReviewNotes');
 
   // `type` holds `guide.name`, so it has to be as wide as the guide name it
   // copies: violationController.create() writes `type: guide.name` straight

@@ -4381,6 +4381,20 @@
     "extra": ""
    },
    {
+    "name": "psychReviewNotes",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "swReviewNotes",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
     "name": "swVerifiedBy",
     "type": "varchar(100)",
     "nullable": true,

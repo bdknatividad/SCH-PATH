@@ -919,8 +919,10 @@ function ensureViolationVerificationColumns() {
         ['psychVerifiedBy', 'VARCHAR(100) NULL'],
         ['psychVerifiedAt', 'DATETIME NULL'],
         ['psychVerification', 'LONGTEXT NULL'],
+        ['psychReviewNotes', 'TEXT NULL'],
         ['swVerifiedBy', 'VARCHAR(100) NULL'],
         ['swVerifiedAt', 'DATETIME NULL'],
+        ['swReviewNotes', 'TEXT NULL'],
       ]) {
         if (!existing.has(column.toLowerCase())) {
           await pool.query(`ALTER TABLE violations ADD COLUMN \`${column}\` ${definition}`);
@@ -951,6 +953,18 @@ async function review(req, res, next) {
     if (!rows.length) throw new ApiError(404, 'Violation not found');
     const violation = rows[0];
     if (violation.status !== 'Pending Review') throw new ApiError(400, 'This violation has already been reviewed.');
+
+    /**
+     * What this reviewer typed in the dialog's Review Notes field.
+     *
+     * Captured here, before anything reassigns `actionTaken`, because the two
+     * are not the same fact and used to share one column. `actionTaken` is the
+     * log form's "Immediate action taken" and the Intervention Tracker prints it
+     * under that heading — so a review note landed on the tracker as an action
+     * taken, and whichever reviewer wrote second overwrote the first's notes.
+     * Each side now keeps its own, in `psychReviewNotes` / `swReviewNotes`.
+     */
+    const typedReviewNotes = String(actionTaken || '').trim() || null;
 
     // ── Dual verification ────────────────────────────────────────────────
     // A logged incident is verified by BOTH the Psychological Support Staff and
@@ -1034,17 +1048,17 @@ async function review(req, res, next) {
     if (status === 'Reviewed') {
       if (verificationSide === 'psych') {
         await connection.query(
-          'UPDATE violations SET psychVerifiedBy = ?, psychVerifiedAt = NOW(), psychVerification = ? WHERE id = ?',
+          'UPDATE violations SET psychVerifiedBy = ?, psychVerifiedAt = NOW(), psychVerification = ?, psychReviewNotes = ? WHERE id = ?',
           [req.user?.username || reviewer, JSON.stringify({
             actionTaken: actionTaken || null,
             scheduleDateTime: scheduleDateTime || null,
             psychosocialActivities: Array.isArray(psychosocialActivities) ? psychosocialActivities : [],
-          }), id]
+          }), typedReviewNotes, id]
         );
       } else {
         await connection.query(
-          'UPDATE violations SET swVerifiedBy = ?, swVerifiedAt = NOW() WHERE id = ?',
-          [req.user?.username || reviewer, id]
+          'UPDATE violations SET swVerifiedBy = ?, swVerifiedAt = NOW(), swReviewNotes = ? WHERE id = ?',
+          [req.user?.username || reviewer, typedReviewNotes, id]
         );
       }
       if (!completesDualVerification) {
@@ -1081,7 +1095,22 @@ async function review(req, res, next) {
         });
       }
     }
-    await connection.query('UPDATE violations SET status = ?, actionTaken = ?, reviewedBy = ?, severity = ?, points = ?, guideId = ? WHERE id = ?', [status, actionTaken || null, reviewer, guide.category, pointsForSeverity(guide.category), guide.id, id]);
+    // `actionTaken` is written only on a rejection, where the typed note *is*
+    // the reason and the Violation List reads it back as one. On a verification
+    // the notes go to the reviewer's own column above and `actionTaken` is left
+    // alone, so the tracker's "Action Taken" keeps meaning what the log form put
+    // there rather than repeating a reviewer's note.
+    if (status === 'Rejected') {
+      await connection.query(
+        'UPDATE violations SET status = ?, actionTaken = ?, reviewedBy = ?, severity = ?, points = ?, guideId = ? WHERE id = ?',
+        [status, typedReviewNotes, reviewer, guide.category, pointsForSeverity(guide.category), guide.id, id]
+      );
+    } else {
+      await connection.query(
+        'UPDATE violations SET status = ?, reviewedBy = ?, severity = ?, points = ?, guideId = ? WHERE id = ?',
+        [status, reviewer, guide.category, pointsForSeverity(guide.category), guide.id, id]
+      );
+    }
     if (status === 'Reviewed') {
       const residentName = await getResidentName(violation.residentId);
       const [existing] = await connection.query('SELECT id FROM intervention_tracker WHERE violationId = ?', [id]);
