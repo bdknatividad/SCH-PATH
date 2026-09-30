@@ -359,15 +359,20 @@ test('the Social Worker reaches the verify route and the Houseparent does not', 
   assert.doesNotMatch(route, /houseparent/, 'a Houseparent was authorized on the verify route');
 });
 
-test('the verification surface is gated on the same capability as the route', () => {
-  assert.match(
-    MODAL_SRC,
-    /const canVerifyIncidentReport = can\('Violations', 'verify'\)/,
-    'the modal does not read the capability the route checks',
-  );
-  assert.match(MODAL_SRC, /if \(!canVerify\) return null;/, 'the panel renders for a role without the capability');
-  // The two slots have to be the two sides, keyed to the columns the API writes.
+test('the incident report asks for no in-modal verification', () => {
+  // The two signatures belong to a newly logged *incident* — the violation —
+  // which is where they still are. Asking for them again on the report meant
+  // three separate approvals for one incident, and the second signature was the
+  // step nobody could complete, so the report sat unapproved with no way
+  // forward. The Center Head's decision on the report's own document, the same
+  // Approve / Return it already gives through the Documents module, is now the
+  // only approval and is what the Intervention Tracker reads.
+  assert.doesNotMatch(MODAL_SRC, /VerificationPanel/, 'the modal still renders a verification surface');
+  assert.doesNotMatch(MODAL_SRC, /canVerifyIncidentReport/, 'the modal still reads the verify capability');
   for (const column of ['psychVerifiedBy', 'psychVerifiedAt', 'swVerifiedBy', 'swVerifiedAt']) {
-    assert.ok(MODAL_SRC.includes(column), `the panel does not read ${column}`);
+    assert.ok(
+      !MODAL_SRC.includes(column),
+      `the modal still reads ${column} — the Form 08 carries no signatures of its own`,
+    );
   }
 });

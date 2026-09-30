@@ -807,7 +807,13 @@ export function InterventionTracker({ embedded = false }: { embedded?: boolean }
                                     </div>
                                     {incidentReportsByViolation[track.violation.id] ? (() => {
                                       const report = incidentReportsByViolation[track.violation.id];
-                                      const approved = report.documentStatus === 'Approved' || (!report.pdfDocumentId && report.status === 'Verified');
+                                      // The Center Head's decision on the report's own document is
+                                      // the approval. A Form 08 used to also need two in-modal
+                                      // signatures (psych + social worker) and counted as approved
+                                      // only once both were present — those belong to the logged
+                                      // incident, not to the report, and the second signature was
+                                      // the step nobody could complete.
+                                      const approved = report.documentStatus === 'Approved';
                                       const failed = report.status === 'Failed' || report.status === 'Rejected' || (report.documentStatus === 'Rejected' && report.status !== 'Verified');
                                       const reassessment = report.status === 'Reassessment' || report.status === 'For Reassessment' || report.documentStatus === 'Reassessment';
                                       if (approved) return <span className="text-[10px] font-bold text-green-700">✓ Approved</span>;
