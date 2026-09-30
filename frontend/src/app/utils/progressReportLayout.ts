@@ -101,6 +101,33 @@ export const RESIDENT_NAME_MASK = { x: 136, y: 600.5, width: 170, height: 17.5 }
 export const PROGRAM_LINE_RULE_WIDTH = 225.02;
 export const RESIDENT_NAME_RULE_WIDTH = 153.27;
 
+/**
+ * The type sizes the form is set in, in points.
+ *
+ * Shared so the on-screen preview is the same document as the one that gets
+ * filed. The preview's cells and narrative were left at the browser's default
+ * (~14–16 px against a 9 pt cell), so a cell that looked comfortable on screen
+ * wrapped to more lines in the PDF, and the preview's rows were visibly taller
+ * than the printed ones.
+ */
+export const HEADING_FONT_SIZE = 7.5;
+export const BODY_FONT_SIZE = 9;
+export const BODY_LEADING = 11.5;
+export const NARRATIVE_FONT_SIZE = 10;
+export const NARRATIVE_LEADING = 13;
+export const LABEL_FONT_SIZE = 11;
+
+/**
+ * The rule each sign-off block is signed on, and the height reserved above it.
+ *
+ * Shared by the PDF renderer and the on-screen preview so the pad the author
+ * signs on is the same width as the printed rule. The preview drew a wider
+ * column, which made the preview a slightly different form from the one that gets
+ * filed.
+ */
+export const SIGNATURE_RULE_WIDTH = 190;
+export const SIGNATURE_HEIGHT = 28;
+
 /** The names the official form prints, which the app redraws below the table. */
 export const REPORT_CHECKED_BY_NAME = 'Francis Patricio, RSW';
 export const REPORT_NOTED_BY_NAME = 'Maricor C. Navarro, RSW, MSSW';

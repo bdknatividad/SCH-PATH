@@ -25,6 +25,13 @@ import {
   TABLE_HEADINGS,
   PROGRAM_LINE,
   RESIDENT_NAME,
+  SIGNATURE_RULE_WIDTH,
+  HEADING_FONT_SIZE,
+  BODY_FONT_SIZE,
+  BODY_LEADING,
+  NARRATIVE_FONT_SIZE,
+  NARRATIVE_LEADING,
+  LABEL_FONT_SIZE,
   REPORT_CHECKED_BY_NAME,
   REPORT_NOTED_BY_NAME,
   REPORT_NOTED_BY_TITLE,
@@ -87,12 +94,22 @@ function AutoTextarea({
   placeholder,
   minHeight,
   className,
+  fontSize,
+  lineHeight,
 }: {
   value: string;
   onChange: (next: string) => void;
   placeholder?: string;
   minHeight: number;
   className?: string;
+  /**
+   * The printed size for this field, in pixels, and its leading. Left out, the
+   * textarea inherits the browser default — which made the preview's text much
+   * larger than the 9 pt it prints at, so the same words took more lines on
+   * screen than on the page.
+   */
+  fontSize?: number;
+  lineHeight?: number;
 }) {
   const ref = useRef<HTMLTextAreaElement | null>(null);
   const resize = useCallback(() => {
@@ -111,7 +128,7 @@ function AutoTextarea({
       onChange={(event) => { onChange(event.target.value); resize(); }}
       placeholder={placeholder}
       rows={1}
-      style={{ minHeight }}
+      style={{ minHeight, fontSize, lineHeight: lineHeight ? `${lineHeight}px` : undefined }}
       className={`w-full resize-none overflow-hidden bg-transparent outline-none focus:bg-yellow-50/60 ${className || ''}`}
     />
   );
@@ -369,7 +386,7 @@ export function ProgressReportDialog({
                   aria-label="Program"
                   value={program}
                   readOnly
-                  className="pdf-overlay-cell absolute bg-white/70 font-bold outline-none"
+                  className="pdf-overlay-cell absolute bg-white/70 text-center font-bold outline-none"
                   style={{
                     left: px(PROGRAM_LINE.x), top: topPx(PROGRAM_LINE.y) - px(13),
                     width: px(PROGRAM_LINE.width), height: px(16), fontSize: fieldFont,
@@ -398,7 +415,7 @@ export function ProgressReportDialog({
                     <div
                       key={heading}
                       className="flex items-center border-r border-gray-400 px-1 font-bold uppercase last:border-r-0"
-                      style={{ width: px(COLUMN_WIDTHS[index]), fontSize: Math.max(5, 7.5 * scale) }}
+                      style={{ width: px(COLUMN_WIDTHS[index]), fontSize: Math.max(5, px(HEADING_FONT_SIZE)) }}
                     >
                       {heading}
                     </div>
@@ -419,6 +436,8 @@ export function ProgressReportDialog({
                           onChange={(next) => setRow(index, key, next)}
                           placeholder={placeholder}
                           minHeight={px(26)}
+                          fontSize={px(BODY_FONT_SIZE)}
+                          lineHeight={px(BODY_LEADING)}
                           className="text-gray-900 placeholder:text-gray-300"
                         />
                       </div>
@@ -449,22 +468,29 @@ export function ProgressReportDialog({
 
                 {/* Narrative */}
                 <div style={{ marginTop: px(24) }}>
-                  <p className="font-bold" style={{ fontSize: px(11) }}>Narrative conclusion:</p>
+                  <p className="font-bold" style={{ fontSize: px(LABEL_FONT_SIZE) }}>Narrative conclusion:</p>
                   <div style={{ marginTop: px(4) }}>
                     <AutoTextarea
                       value={narrative}
                       onChange={setNarrative}
                       placeholder="Summarise the quarter."
                       minHeight={px(72)}
+                      fontSize={px(NARRATIVE_FONT_SIZE)}
+                      lineHeight={px(NARRATIVE_LEADING)}
                       className="border-b border-gray-300 text-gray-900 placeholder:text-gray-300"
                     />
                   </div>
                 </div>
 
-                {/* Signatures */}
-                <div style={{ marginTop: px(28), fontSize: px(11) }}>
+                {/* Signatures.
+                    Each block is as wide as the printed rule it is signed on, and
+                    the name and designation are centred under it — the signature
+                    itself is centred on the rule by the PDF renderer, so a
+                    left-aligned name under a centred signature is the mismatch
+                    this preview used to show. */}
+                <div style={{ marginTop: px(28), fontSize: px(LABEL_FONT_SIZE) }}>
                   <div className="flex flex-wrap items-start gap-6">
-                    <div style={{ minWidth: px(230) }}>
+                    <div className="text-center" style={{ width: px(SIGNATURE_RULE_WIDTH) }}>
                       <p className="font-bold">Prepared by:</p>
                       <div style={{ marginTop: px(6) }}>
                         <SignaturePadModal
@@ -479,11 +505,11 @@ export function ProgressReportDialog({
                       </p>
                       <p>Program in-charge</p>
                     </div>
-                    <div style={{ minWidth: px(230) }}>
+                    <div className="text-center" style={{ width: px(SIGNATURE_RULE_WIDTH) }}>
                       <p className="font-bold">Checked by:</p>
                       <p style={{ marginTop: px(6) }}>{REPORT_CHECKED_BY_NAME}</p>
                     </div>
-                    <div style={{ minWidth: px(230) }}>
+                    <div className="text-center" style={{ width: px(SIGNATURE_RULE_WIDTH) }}>
                       <p className="font-bold">Noted by:</p>
                       <p style={{ marginTop: px(6) }}>{REPORT_NOTED_BY_NAME}</p>
                       <p>{REPORT_NOTED_BY_TITLE}</p>

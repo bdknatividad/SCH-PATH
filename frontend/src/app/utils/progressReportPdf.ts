@@ -33,6 +33,14 @@ import {
   RESIDENT_NAME_MASK,
   PROGRAM_LINE_RULE_WIDTH,
   RESIDENT_NAME_RULE_WIDTH,
+  SIGNATURE_RULE_WIDTH,
+  SIGNATURE_HEIGHT,
+  HEADING_FONT_SIZE,
+  BODY_FONT_SIZE,
+  BODY_LEADING,
+  NARRATIVE_FONT_SIZE,
+  NARRATIVE_LEADING,
+  LABEL_FONT_SIZE,
 } from '@/app/utils/progressReportLayout';
 
 export interface ProgressReportRow {
@@ -68,16 +76,8 @@ export interface ProgressReportFields {
 export const PROGRESS_REPORT_TEMPLATE_URL = '/forms/progress-report.pdf';
 
 // ── The app-drawn body ──────────────────────────────────────────────────────
-const BODY_FONT_SIZE = 9;
-const BODY_LEADING = 11.5;
-const HEADING_FONT_SIZE = 7.5;
-const LABEL_FONT_SIZE = 11;
-const NARRATIVE_FONT_SIZE = 10;
-const NARRATIVE_LEADING = 13;
 const CELL_PADDING = 4;
 const MIN_ROW_HEIGHT = 30;
-const SIGNATURE_RULE_WIDTH = 190;
-const SIGNATURE_HEIGHT = 28;
 
 const INK = rgb(0.05, 0.05, 0.05);
 const BODY_INK = rgb(0.12, 0.12, 0.12);
@@ -173,6 +173,7 @@ export async function buildProgressReportPdf(
     line: { x: number; y: number },
     mask: { x: number; y: number; width: number; height: number },
     ruleWidth: number,
+    align: 'left' | 'center' = 'left',
   ) => {
     page.drawRectangle({ x: mask.x, y: mask.y, width: mask.width, height: mask.height, color: COVER });
     page.drawLine({
@@ -181,10 +182,22 @@ export async function buildProgressReportPdf(
       thickness: 0.75,
       color: RULE,
     });
-    page.drawText(value, { x: line.x + 2, y: line.y + 4, size: 11, font: bold, color: INK });
+    /**
+     * The program name is centred on its rule; the resident's name is not.
+     *
+     * The form prints the underscore run for the program with a centred
+     * "(PROGRAM)" label under it, so a name written from the rule's left edge sat
+     * well left of the line it belongs to — the preview showed the same thing,
+     * because both wrote from the same x. The resident's name follows the printed
+     * `RESIDENT:` label, so it stays against it.
+     */
+    const textX = align === 'center'
+      ? line.x + Math.max(0, (ruleWidth - bold.widthOfTextAtSize(value, 11)) / 2)
+      : line.x + 2;
+    page.drawText(value, { x: textX, y: line.y + 4, size: 11, font: bold, color: INK });
   };
 
-  writeOnLine(String(fields.program || ''), PROGRAM_LINE, PROGRAM_LINE_MASK, PROGRAM_LINE_RULE_WIDTH);
+  writeOnLine(String(fields.program || ''), PROGRAM_LINE, PROGRAM_LINE_MASK, PROGRAM_LINE_RULE_WIDTH, 'center');
   writeOnLine(String(fields.residentName || ''), RESIDENT_NAME, RESIDENT_NAME_MASK, RESIDENT_NAME_RULE_WIDTH);
 
   // ── Cover everything from the table down ─────────────────────────────────
