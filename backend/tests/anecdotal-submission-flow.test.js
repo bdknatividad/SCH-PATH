@@ -171,14 +171,39 @@ test('approving publishes the PDF and rejecting removes it', () => {
 
 // ── Role boundaries ─────────────────────────────────────────────────────────
 
-test('only a Houseparent is offered the Submit button', () => {
+test('any report author is offered the Submit button, on the TRI form\'s rule', () => {
   const source = read(EDITOR);
-  // Submission is a Houseparent action. A Social Worker looking at the same
-  // report gets Approve/Reject instead.
-  assert.match(source, /\{isHouseparent && isEditable && \(/,
-    'the Submit button must be gated on the Houseparent role');
-  assert.ok(!/isReportAuthor && isEditable && <Button onClick=\{requestSubmit\}/.test(source),
-    'Submit must not be offered to every report author');
+  // Submission is the author's action, not the Houseparent's. The controller's
+  // `AUTHOR_ROLES` has accepted every author role for as long as it has existed
+  // (`isAuthor(req)` is the only check in `submit`), and the TRI form gates its
+  // own Save & Submit on the record's status alone — so gating this on
+  // `isHouseparent` gave a Center Head an enabled Submit on TRI and nothing
+  // here, and their report sat in Draft with no way to move it.
+  assert.ok(
+    !/\{isHouseparent && isEditable && \(/.test(source),
+    'the Submit button must not be gated on the Houseparent role',
+  );
+  assert.match(
+    source,
+    /const canSubmit = !selectedRecord \|\| \['Draft', 'Returned'\]\.includes\(selectedRecord\.status\)/,
+    'Submit must be offered on the two statuses the API accepts, and on an unsaved report',
+  );
+  assert.match(
+    source,
+    /\{isReportAuthor && canSubmit && \(/,
+    'Submit must be offered to any report author whose report is still theirs to send',
+  );
+  assert.match(
+    source,
+    /function requestSubmit\(\) \{\s*\n\s*if \(!isReportAuthor\) return;/,
+    'requestSubmit() must admit every author role',
+  );
+  // The reviewer's own controls are untouched: a reviewer who did not write the
+  // report still gets Approve/Reject and no Submit.
+  assert.match(source, /<CheckCircle2 className="h-4 w-4" \/> Approve/,
+    'the reviewer must still be offered Approve');
+  assert.match(source, /<RotateCcw className="h-4 w-4" \/> Reject/,
+    'the reviewer must still be offered Reject');
 });
 
 test('the Houseparent resident picker is limited to the assigned caseload', () => {
