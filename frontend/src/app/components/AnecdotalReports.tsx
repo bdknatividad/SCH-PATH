@@ -354,7 +354,21 @@ export function AnecdotalReports({
     return missing;
   }, [content, reportDate]);
   const isComplete = missingSections.length === 0;
-  const canSubmit = isHouseparent && isComplete && !saving;
+  /**
+   * Whether this report is still the author's to send.
+   *
+   * `Draft` and `Returned` are the only two statuses the API accepts
+   * (`anecdotalReportController.submit`), so the button is offered on exactly
+   * those, plus on a report that has not been saved yet.
+   *
+   * Deliberately **not** gated on the role. The API has allowed every author
+   * role to submit since `AUTHOR_ROLES` was widened, and the TRI form gates its
+   * own Save & Submit on the record's status alone — so a Center Head or Social
+   * Worker who filled this form in saw an enabled Submit on TRI and nothing
+   * here, leaving their report stuck in Draft with no way to move it. The
+   * Houseparent is not the only role that writes one.
+   */
+  const canSubmit = !selectedRecord || ['Draft', 'Returned'].includes(selectedRecord.status);
   // Mirrors the backend's editability rule in anecdotalReportController.update():
   // reviewers may edit anything not yet finalized; any author role may edit a
   // Draft or a report returned to them. The previous version granted Draft access
@@ -476,12 +490,15 @@ export function AnecdotalReports({
   }
 
   /**
-   * Submission is a Houseparent action — a reviewer approves or rejects, they do
-   * not submit. Everything is validated before the confirmation is shown, so the
-   * dialog is never the thing that discovers a blank section.
+   * Submission is the author's action — a reviewer approves or rejects, they do
+   * not submit. Any author role may take it: the API accepts every one of them
+   * (`AUTHOR_ROLES`), so gating this on the Houseparent alone is what stranded a
+   * Center Head's report in Draft. Everything is validated before the
+   * confirmation is shown, so the dialog is never the thing that discovers a
+   * blank section.
    */
   function requestSubmit() {
-    if (!isHouseparent) return;
+    if (!isReportAuthor) return;
     if (!(selectedRecord?.residentId || newResidentId)) { setError('Select a resident before submitting the report.'); return; }
     if (!isComplete) {
       setError(`Complete every section before submitting. Still blank: ${missingSections.join(', ')}.`);
@@ -501,7 +518,7 @@ export function AnecdotalReports({
    */
   async function confirmSubmit() {
     setShowSubmitConfirm(false);
-    if (!isHouseparent) return;
+    if (!isReportAuthor) return;
     const childId = selectedRecord?.residentId || newResidentId;
     if (!childId) { setError('Select a resident before submitting the report.'); return; }
     setSaving(true); setError(null);
@@ -708,16 +725,20 @@ export function AnecdotalReports({
               </Button>
             )}
             {isReportAuthor && isEditable && <Button variant="outline" onClick={saveDraft} disabled={saving || !(selectedRecord?.residentId || newResidentId)} className="gap-2"><Save className="h-4 w-4" /> Save Draft</Button>}
-            {/* Submission belongs to the Houseparent. A Social Worker reviewing
-                the same report approves or rejects it instead. */}
-            {isHouseparent && isEditable && (
+            {/* Submission belongs to whoever wrote the report. A reviewer who
+                did not write it approves or rejects it instead — and a reviewer
+                who *did* write it keeps both sets of controls, which is what
+                TRI already does. The button is left enabled while the form is
+                incomplete, so pressing it names what is still blank instead of
+                presenting a dead button with the reason hidden in a tooltip. */}
+            {isReportAuthor && canSubmit && (
               <Button
                 onClick={requestSubmit}
-                disabled={!canSubmit}
+                disabled={saving || !(selectedRecord?.residentId || newResidentId)}
                 className="gap-2 bg-[#2F3E46] text-white"
-                title={isComplete ? undefined : `Still blank: ${missingSections.join(', ')}`}
+                title={isComplete ? 'Submit the report for review' : `Submitting now will list what is still blank (${missingSections.length} left)`}
               >
-                <Send className="h-4 w-4" /> Submit to Social Worker
+                <Send className="h-4 w-4" /> {selectedRecord?.status === 'Returned' ? 'Resubmit for Review' : 'Submit to Social Worker'}
               </Button>
             )}
           </div>
