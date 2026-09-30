@@ -18,6 +18,7 @@ import { Pill, Check, Loader2, RotateCcw } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/app/components/ui/card';
 import { Button } from '@/app/components/ui/button';
 import { Badge } from '@/app/components/ui/badge';
+import { formatShortDate } from '@/utils/dateFormatter';
 import { request } from '@/services/api';
 
 /** The record type a prescription is stored as. */
@@ -28,12 +29,17 @@ export function isPrescription(record: any): boolean {
   return String(record?.recordType || '') === PRESCRIPTION_RECORD_TYPE;
 }
 
-/** `2026-09-26` → `Sep 26, 2026`, without dragging in a formatter. */
+/**
+ * `2026-09-26` → `09/26/2026`.
+ *
+ * The system's one display format. This used to render `Sep 26, 2026` — an
+ * abbreviation that appears nowhere else in the app, so a prescription date and
+ * the date beside it on the same card disagreed.
+ */
 function shortDate(value?: string | null): string {
   const iso = String(value || '').slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return '—';
-  const [year, month, day] = iso.split('-').map(Number);
-  return new Date(year, month - 1, day).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' });
+  return formatShortDate(iso);
 }
 
 /** The prescription's own line: `500mg · Once daily · 2 weeks`. */

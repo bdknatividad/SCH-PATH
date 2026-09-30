@@ -121,10 +121,13 @@ test('the flat list also names the approver', () => {
     /Approved by<\/strong> \{doc\.approvedBy\}/,
     'the flat list no longer prints who approved a document'
   );
+  // The date goes through the shared `formatShortDate`, so every date in the app
+  // reads MM/DD/YYYY. It used to be a bare `toLocaleDateString()`, which renders
+  // in whatever locale the browser happens to be set to.
   assert.match(
     source,
-    /doc\.approvedAt \? ` on \$\{new Date\(doc\.approvedAt\)/,
-    'the flat list no longer prints the approval date'
+    /doc\.approvedAt \? ` on \$\{formatShortDate\(doc\.approvedAt\)\}`/,
+    'the flat list no longer prints the approval date in the system format'
   );
 });
 

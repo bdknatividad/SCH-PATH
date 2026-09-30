@@ -14,6 +14,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/app/components/ui/ta
 import { Label } from '@/app/components/ui/label';
 import { Textarea } from '@/app/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/app/components/ui/select';
+import { formatShortDate } from '@/utils/dateFormatter';
 import { ProgressReportDialog, EDUCATION_PROGRESS_PROGRAM } from './ProgressReportDialog';
 import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
@@ -1745,7 +1746,7 @@ export function Education() {
                               participation: '',
                               strengths: '',
                               areasForImprovement: '',
-                              overallDevelopment: `Marked ${result === 'Passed' ? 'Pass' : 'Fail'} by Educator on ${new Date().toLocaleDateString()}`,
+                              overallDevelopment: `Marked ${result === 'Passed' ? 'Pass' : 'Fail'} by Educator on ${formatShortDate(new Date())}`,
                               schoolVisits: 0,
                               createdAt: new Date().toISOString(),
                             };

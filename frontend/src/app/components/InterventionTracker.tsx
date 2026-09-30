@@ -5,7 +5,7 @@ import { usePermissions } from '@/app/hooks/usePermissions';
 import { useNavigate } from 'react-router-dom';
 import { describeError, request } from '@/services/api';
 import { systemDialog } from '@/app/components/SystemDialog';
-import { getCurrentPHDateTime } from '@/utils/dateFormatter';
+import { formatShortDate, getCurrentPHDateTime } from '@/utils/dateFormatter';
 import IncidentReportModal from './IncidentReportModal';
 import { Card, CardContent, CardHeader, CardTitle } from '@/app/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/app/components/ui/dialog';
@@ -70,7 +70,10 @@ const isSchedulingIntervention = (step: any) => {
 const formatDateValue = (value: any) => {
   if (!value) return '';
   const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toLocaleDateString();
+  // `formatShortDate`, not `toLocaleDateString()`: the bare call renders in
+  // whatever locale the browser is set to, so the same date read `9/30/2026`
+  // on one machine and `30/09/2026` on another. The system format is MM/DD/YYYY.
+  return Number.isNaN(parsed.getTime()) ? String(value) : formatShortDate(parsed);
 };
 
 export function InterventionTracker({ embedded = false }: { embedded?: boolean } = {}) {
@@ -705,7 +708,7 @@ export function InterventionTracker({ embedded = false }: { embedded?: boolean }
 
                                         {isCompleted && (
                                           <p className="text-[10px] text-green-700 mt-1 font-semibold">
-                                            ✓ Completed{step.completionDate ? ` on ${new Date(step.completionDate).toLocaleDateString()}` : ''}
+                                            ✓ Completed{step.completionDate ? ` on ${formatShortDate(step.completionDate)}` : ''}
                                           </p>
                                         )}
 
@@ -854,8 +857,8 @@ export function InterventionTracker({ embedded = false }: { embedded?: boolean }
               This intervention has not reached its configured duration yet.
             </div>
             <div className="text-sm space-y-1">
-              <p><span className="font-semibold">Expected duration end:</span> {earlyEndTarget?.expectedEnd.toLocaleDateString() || '—'}</p>
-              <p><span className="font-semibold">End today:</span> {earlyEndTarget ? new Date(`${earlyEndTarget.endDate}T00:00:00`).toLocaleDateString() : '—'}</p>
+              <p><span className="font-semibold">Expected duration end:</span> {earlyEndTarget?.expectedEnd ? formatShortDate(earlyEndTarget.expectedEnd) : '—'}</p>
+              <p><span className="font-semibold">End today:</span> {earlyEndTarget ? formatShortDate(earlyEndTarget.endDate) : '—'}</p>
             </div>
             <p className="text-xs text-gray-500">The intervention will be marked complete using the date you choose now. Any remaining configured duration will not be completed automatically.</p>
           </div>

@@ -7,6 +7,7 @@ import { useData, Alert } from '../state/DataContext';
 import { useAuth } from '../state/AuthContext';
 import { MODULE_TREE, canOpenModule } from '../config/moduleAccess';
 import { streamAlerts } from '@/services/api';
+import { formatShortDate } from '@/utils/dateFormatter';
 
 /**
  * Which module a route belongs to, derived from the RBAC hierarchy.
@@ -449,7 +450,7 @@ export function Notifications() {
                             <p className="text-xs text-blue-600 mb-2">Action: {alert.actionRequired}</p>
                           )}
                           <div className="flex items-center gap-2 text-xs text-gray-400">
-                            <span>{alert.createdAt ? new Date(alert.createdAt).toLocaleDateString() : ''}</span>
+                            <span>{alert.createdAt ? formatShortDate(alert.createdAt) : ''}</span>
                           </div>
                         </div>
                       </div>

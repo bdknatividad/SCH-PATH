@@ -403,7 +403,7 @@ function DocumentList({ docs, children, canApprove, canDelete, onApprove, onReje
                           line is only rendered when there is actually a file —
                           otherwise it printed "undefined (0 Bytes)". */}
                       {doc.fileName && <span><strong>File:</strong> {doc.fileName} ({formatFileSize(doc.fileSize || 0)})</span>}
-                      {(doc.submittedAt || doc.uploadedAt) && <span><strong>Submitted:</strong> {new Date(doc.submittedAt || doc.uploadedAt || '').toLocaleDateString('en-PH', { timeZone: 'Asia/Manila' })}</span>}
+                      {(doc.submittedAt || doc.uploadedAt) && <span><strong>Submitted:</strong> {formatShortDate(doc.submittedAt || doc.uploadedAt)}</span>}
                       {(doc.submittedBy || doc.uploadedBy) && (
                         <span><strong>Submitted by:</strong> {doc.submittedBy || doc.uploadedBy}{doc.uploaderRole ? ` (${ROLE_LABEL_FALLBACK[doc.uploaderRole] || doc.uploaderRole})` : ''}</span>
                       )}
@@ -412,12 +412,12 @@ function DocumentList({ docs, children, canApprove, canDelete, onApprove, onReje
                         document always shows both "who sent it" and "who acted on it". */}
                     {doc.status === 'Approved' && doc.approvedBy && (
                       <p className="text-xs text-green-600 mt-1">
-                        ✓ <strong>Approved by</strong> {doc.approvedBy}{doc.approvedAt ? ` on ${new Date(doc.approvedAt).toLocaleDateString('en-PH', { timeZone: 'Asia/Manila' })}` : ''}
+                        ✓ <strong>Approved by</strong> {doc.approvedBy}{doc.approvedAt ? ` on ${formatShortDate(doc.approvedAt)}` : ''}
                       </p>
                     )}
                     {doc.status === 'Rejected' && (
                       <p className={`text-xs mt-1 ${doc.title === 'Incident Report' ? 'text-yellow-700' : 'text-red-600'}`}>
-                        ✗ <strong>{doc.title === 'Incident Report' ? 'Failed' : 'Rejected'} by</strong> {doc.reviewedBy || 'Reviewer'}{doc.reviewedAt ? ` on ${new Date(doc.reviewedAt).toLocaleDateString('en-PH', { timeZone: 'Asia/Manila' })}` : ''}{doc.rejectionReason ? `: ${doc.rejectionReason}` : ''}
+                        ✗ <strong>{doc.title === 'Incident Report' ? 'Failed' : 'Rejected'} by</strong> {doc.reviewedBy || 'Reviewer'}{doc.reviewedAt ? ` on ${formatShortDate(doc.reviewedAt)}` : ''}{doc.rejectionReason ? `: ${doc.rejectionReason}` : ''}
                       </p>
                     )}
                     {doc.canView === false && doc.accessRequestStatus === 'Rejected' && (
@@ -2400,7 +2400,7 @@ export function DocumentUpload() {
                                 <strong>{row.requesterUsername}</strong>
                                 {row.requesterRole ? ` (${ROLE_LABEL_FALLBACK[row.requesterRole] || row.requesterRole})` : ''}
                                 {' requested access'}
-                                {row.createdAt ? ` on ${new Date(row.createdAt).toLocaleDateString()}` : ''}
+                                {row.createdAt ? ` on ${formatShortDate(row.createdAt)}` : ''}
                               </p>
                               <p className="text-sm text-gray-700 mt-2 whitespace-pre-line border-l-2 border-amber-200 pl-3">
                                 {row.reason}
@@ -2447,9 +2447,9 @@ export function DocumentUpload() {
                         </div>
                         <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
                           <span><strong>Resident:</strong> {row.residentName || 'Unknown'}</span>
-                          {row.createdAt && <span><strong>Requested:</strong> {new Date(row.createdAt).toLocaleDateString()}</span>}
+                          {row.createdAt && <span><strong>Requested:</strong> {formatShortDate(row.createdAt)}</span>}
                           {row.reviewedBy && <span><strong>Reviewed by:</strong> {row.reviewedBy}</span>}
-                          {row.reviewedAt && <span><strong>Decided:</strong> {new Date(row.reviewedAt).toLocaleDateString()}</span>}
+                          {row.reviewedAt && <span><strong>Decided:</strong> {formatShortDate(row.reviewedAt)}</span>}
                         </div>
                         <p className="text-xs text-gray-600 whitespace-pre-line"><strong>Your reason:</strong> {row.reason}</p>
                         {row.status === 'Rejected' && (
