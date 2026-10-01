@@ -1,7 +1,7 @@
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { useData, BehavioralLog, Child } from '../state/DataContext';
-import { describeError, request } from '@/services/api';
+import { describeError, fetchBinary, request } from '@/services/api';
 import { systemDialog } from '@/app/components/SystemDialog';
 import { useAuth } from '../state/AuthContext';
 import { useSubModuleTabs } from '@/app/hooks/useSubModuleTabs';
@@ -26,6 +26,7 @@ import { Input } from '@/app/components/ui/input';
 import { Label } from '@/app/components/ui/label';
 import { formatShortDate, formatShortDateTime } from '@/utils/dateFormatter';
 import { triTrend } from '@/utils/triRating';
+import { folderForDocument } from '@/utils/documentCategory';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 import {
   ADMISSION_HOUSEPARENT_SIGNATURE_BOX,
@@ -45,6 +46,18 @@ import 'react-pdf/dist/Page/TextLayer.css';
 
 // `?v=` is a cache key, not a fetch hint — see the note in QuarterlyProgressReport.tsx.
 pdfjs.GlobalWorkerOptions.workerSrc = `/pdf.worker.mjs?v=${pdfjs.version}`;
+
+/** Whether a document can be drawn in the viewer, and how. */
+function isPdfDocument(doc: { fileType?: string | null; fileName?: string | null } | null): boolean {
+  if (!doc) return false;
+  return /pdf/i.test(String(doc.fileType || '')) || /\.pdf$/i.test(String(doc.fileName || ''));
+}
+
+function isImageDocument(doc: { fileType?: string | null; fileName?: string | null } | null): boolean {
+  if (!doc) return false;
+  return /^image\//i.test(String(doc.fileType || ''))
+    || /\.(png|jpe?g|gif|webp|bmp)$/i.test(String(doc.fileName || ''));
+}
 import { PhaseProgress } from './PhaseProgress';
 import { PrescriptionList } from './PrescriptionList';
 import IncidentReportModal from './IncidentReportModal';
@@ -385,6 +398,82 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
   const [remoteChild, setRemoteChild] = useState<any | null>(null);
   const [admissionPdfTitle, setAdmissionPdfTitle] = useState('Admission Slip');
   const [isAdmissionPdfOpen, setIsAdmissionPdfOpen] = useState(false);
+
+  /**
+   * The Education document being read on the Education tab.
+   *
+   * The file is fetched as binary rather than read out of the store: the store's
+   * `documents` rows carry `fileData` as a base64 string, and holding one of
+   * those open would put the whole file in the payload for a page that is not
+   * showing it. `/documents/:id/file` is the same route the Documents module's
+   * own viewer uses.
+   */
+  const [educationDoc, setEducationDoc] = useState<any | null>(null);
+  const [educationDocUrl, setEducationDocUrl] = useState<string | null>(null);
+  const [educationDocError, setEducationDocError] = useState<string | null>(null);
+  const [educationDocLoading, setEducationDocLoading] = useState(false);
+
+  /** Blob URLs are ours to release; the base64 fallback is not. */
+  const closeEducationDoc = () => {
+    if (educationDocUrl && educationDocUrl.startsWith('blob:')) URL.revokeObjectURL(educationDocUrl);
+    setEducationDoc(null);
+    setEducationDocUrl(null);
+    setEducationDocError(null);
+  };
+
+  const openEducationDoc = async (doc: any) => {
+    setEducationDoc(doc);
+    setEducationDocUrl(null);
+    setEducationDocError(null);
+    setEducationDocLoading(true);
+    try {
+      const { blob } = await fetchBinary(`/documents/${doc.id}/file`);
+      setEducationDocUrl(URL.createObjectURL(blob));
+    } catch {
+      // A row filed before the binary route existed only carries the base64 the
+      // uploader sent, and `GET /documents/:id` is what returns that.
+      try {
+        const res = await request<any>(`/documents/${doc.id}`);
+        const fileData = res?.data?.fileData || res?.fileData || null;
+        if (!fileData) throw new Error('No file stored for this document.');
+        setEducationDocUrl(fileData);
+      } catch (error) {
+        setEducationDocError(
+          error instanceof Error ? error.message : 'This file could not be opened.',
+        );
+      }
+    } finally {
+      setEducationDocLoading(false);
+    }
+  };
+
+  /**
+   * Save a copy of an education document to the device.
+   *
+   * The binary route first, so the file that lands is the one stored rather than
+   * whatever the store happens to be carrying; the store's data URL is the
+   * fallback for a row filed before that route existed.
+   */
+  const downloadEducationDoc = async (doc: any) => {
+    const fileName = doc.fileName || doc.title || 'document';
+    const save = (href: string) => {
+      const link = document.createElement('a');
+      link.href = href;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    };
+    try {
+      const { blob } = await fetchBinary(`/documents/${doc.id}/file`);
+      const url = URL.createObjectURL(blob);
+      save(url);
+      URL.revokeObjectURL(url);
+    } catch {
+      if (doc.fileData) save(doc.fileData);
+      else setEducationDocError('This file could not be downloaded.');
+    }
+  };
 
   useEffect(() => {
     const fetchRequirements = async () => {
@@ -1251,6 +1340,25 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
             const visitDocs = documents.filter(d => d.residentId === child.id && d.title === 'School Visit Report');
             const quarterlyDocs = documents.filter(d => d.residentId === child.id && d.title === 'Quarterly Education Report');
 
+            /*
+              Everything else the Education module filed for this learner — the
+              files uploaded through the module's own Upload dialog, which have
+              always been copied into Documents but were never shown back here.
+
+              The folder is resolved from the document's own fields with the
+              shared resolver rather than matched on a title, so a file filed by
+              hand in the Documents module under the child's Educational Records
+              folder appears here too. The two titles the sections below already
+              render are excluded: listing them twice is the same duplication the
+              Medical tab had to undo for the Health module's published copies.
+            */
+            const educationDocs = documents.filter(d =>
+              d.residentId === child.id
+              && folderForDocument(d as any) === 'Educational Records'
+              && d.title !== 'School Visit Report'
+              && d.title !== 'Quarterly Education Report',
+            );
+
             // Passed / Failed count the Educator's own evaluations, which is
             // exactly what the Progress Reports list below renders. They used to
             // count quarterly reports the Center Head had *approved*, so a learner
@@ -1328,6 +1436,56 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
 
                 {quarterlyDocs.length > 0 && <Card className="border-none shadow-sm"><CardContent className="p-4"><h4 className="font-bold text-[#2F3E46] text-sm mb-3">Quarterly Reports</h4><div className="space-y-2">{quarterlyDocs.map((d) => { const firstLines = (d.description || '').split('\n').slice(0, 2).join(' '); const badge = d.status === 'Approved' ? { label: 'Pass', cls: 'bg-green-100 text-green-700' } : d.status === 'Rejected' ? { label: 'Fail', cls: 'bg-red-100 text-red-700' } : (d.status as string) === 'Reassessment' ? { label: 'Reassessment', cls: 'bg-yellow-100 text-yellow-700' } : { label: 'Pending Review', cls: 'bg-gray-100 text-gray-600' }; return (<div key={d.id} className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl"><div className="flex-1 min-w-0"><div className="flex items-center gap-2 flex-wrap"><p className="text-xs font-bold text-[#2F3E46] truncate">{firstLines}</p><span className={`px-2 py-0.5 rounded-full font-bold text-[10px] shrink-0 ${badge.cls}`}>{badge.label}</span></div><p className="text-[10px] text-gray-400 mt-0.5">Submitted {d.submittedAt ? formatShortDate(d.submittedAt) : '—'} by {d.uploadedBy || 'Educator'}</p></div></div>); })}</div></CardContent></Card>}
                 {visitDocs.length > 0 && <Card className="border-none shadow-sm"><CardContent className="p-4"><h4 className="font-bold text-[#2F3E46] text-sm mb-3">School Visit Reports</h4><div className="space-y-2">{visitDocs.map((d) => (<div key={d.id} className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl"><div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center shrink-0"><span className="text-sm">🏫</span></div><div className="flex-1 min-w-0"><p className="text-xs text-gray-600">{d.description}</p><p className="text-[10px] text-gray-400 mt-0.5">{d.uploadedAt ? formatShortDate(d.uploadedAt) : ''}</p></div></div>))}</div></CardContent></Card>}
+                {/* The files the Education module filed for this learner, read
+                    back out of the child's own folder in Documents. Every
+                    education upload has always been copied there; this is what
+                    makes it visible — and readable — from the resident's own
+                    record, without opening the Documents module. */}
+                {educationDocs.length > 0 && (
+                  <Card className="border-none shadow-sm">
+                    <CardContent className="p-4">
+                      <h4 className="font-bold text-[#2F3E46] text-sm mb-3">Education Documents</h4>
+                      <div className="space-y-2">
+                        {educationDocs.map((d) => (
+                          <div key={d.id} className="flex items-center justify-between gap-3 p-3 bg-gray-50 rounded-xl">
+                            <div className="min-w-0 flex items-center gap-2">
+                              <FileText className="w-4 h-4 text-[#2F3E46] shrink-0" />
+                              <div className="min-w-0">
+                                <p className="text-xs font-semibold text-[#2F3E46] truncate" title={d.title || d.fileName || ''}>
+                                  {d.title || d.fileName || 'Document'}
+                                </p>
+                                <p className="text-[10px] text-gray-400 truncate">
+                                  {d.fileName || 'File'}
+                                  {d.uploadedAt ? ` · ${formatShortDate(String(d.uploadedAt).slice(0, 10))}` : ''}
+                                  {d.uploadedBy ? ` · ${d.uploadedBy}` : ''}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex shrink-0 items-center gap-2">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-7 px-2 text-xs"
+                                onClick={() => void openEducationDoc(d)}
+                              >
+                                <Eye className="w-3.5 h-3.5 mr-1" /> View
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-7 px-2 text-xs"
+                                onClick={() => void downloadEducationDoc(d)}
+                              >
+                                <FileText className="w-3.5 h-3.5 mr-1" /> Download
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
                 {!learner && <Card className="border-none shadow-sm"><CardContent className="p-8 text-center"><span className="text-4xl">📚</span><p className="text-gray-400 mt-2 text-sm">No education records found for this resident.</p>{/*
                   Only point at the Education module for someone who can open it.
                   The line used to be unconditional, so a Nurse, a Psychologist or
@@ -1671,6 +1829,67 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
               </div>
             ) : (
               <div className="h-full flex items-center justify-center text-sm text-gray-400">Loading Admission Slip...</div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/*
+        Reading an education document without leaving the resident's record.
+        A PDF is drawn page by page with the viewer this page already loads for
+        the Admission Slip; an image is shown as-is; anything else says so and
+        offers the download, rather than pretending to render a .docx.
+      */}
+      <Dialog open={educationDoc !== null} onOpenChange={(open) => { if (!open) closeEducationDoc(); }}>
+        <DialogContent className="h-[90vh] w-[min(1000px,calc(100vw-2rem))] !max-w-none p-0 overflow-hidden">
+          <DialogHeader className="px-4 py-3 border-b bg-white">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <DialogTitle className="text-sm font-semibold truncate pr-8">
+                {educationDoc?.title || educationDoc?.fileName || 'Document'}
+              </DialogTitle>
+              {educationDoc && (
+                <Button type="button" variant="outline" size="sm" onClick={() => void downloadEducationDoc(educationDoc)}>
+                  <FileText className="w-4 h-4 mr-2" /> Download
+                </Button>
+              )}
+            </div>
+          </DialogHeader>
+          <div className="flex-1 min-h-0 overflow-auto bg-gray-100 p-4">
+            {educationDocLoading ? (
+              <div className="flex h-full items-center justify-center text-sm text-gray-400">Opening the file…</div>
+            ) : educationDocError ? (
+              <div className="flex h-full items-center justify-center px-6 text-center text-sm text-red-600">{educationDocError}</div>
+            ) : !educationDocUrl ? null : isPdfDocument(educationDoc) ? (
+              <div className="flex justify-center items-start min-w-max">
+                <PdfDocument
+                  file={educationDocUrl}
+                  loading={<div className="py-10 text-sm text-gray-400">Loading the document…</div>}
+                  error={<div className="py-10 text-sm text-red-500">Unable to display this PDF. Download it instead.</div>}
+                >
+                  <PdfPage
+                    pageNumber={1}
+                    width={880}
+                    renderAnnotationLayer={false}
+                    renderTextLayer={false}
+                  />
+                </PdfDocument>
+              </div>
+            ) : isImageDocument(educationDoc) ? (
+              <div className="flex justify-center">
+                <img
+                  src={educationDocUrl}
+                  alt={educationDoc?.title || educationDoc?.fileName || 'Document'}
+                  className="max-h-full max-w-full rounded-lg shadow-sm"
+                />
+              </div>
+            ) : (
+              <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-sm text-gray-500">
+                <FileText className="h-8 w-8 text-gray-300" />
+                <p>This file type cannot be shown here.</p>
+                <Button variant="outline" size="sm" onClick={() => void downloadEducationDoc(educationDoc)}>
+                  Download it instead
+                </Button>
+              </div>
             )}
           </div>
         </DialogContent>
