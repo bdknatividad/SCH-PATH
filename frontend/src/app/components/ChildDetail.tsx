@@ -1297,8 +1297,19 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
                       <div className="mt-4 grid grid-cols-1 gap-3 text-xs sm:grid-cols-2">
                         <p><span className="font-medium text-gray-500">School:</span> {learner.school || '—'}</p>
                         <p><span className="font-medium text-gray-500">Enrolment date:</span> {learner.enrollmentDate ? formatShortDate(String(learner.enrollmentDate).slice(0, 10)) : '—'}</p>
-                        <p><span className="font-medium text-gray-500">LRN:</span> {learner.lrn || '—'}</p>
-                        <p><span className="font-medium text-gray-500">Trainee number:</span> {learner.traineeNumber || '—'}</p>
+                        {/* LRN and the trainee number are one slot on two kinds
+                            of enrolment, not two fields. The Education module
+                            asks for a Trainee Number only when the level is
+                            CMDC and shows the LRN otherwise (`Education.tsx`).
+                            Printing both put a permanent "—" beside every
+                            school enrolment, which reads as a value someone
+                            forgot to fill in rather than a field that does not
+                            apply to that enrolment. */}
+                        {learner.educationLevel === 'Calamba Manpower Development Center (CMDC)' ? (
+                          <p><span className="font-medium text-gray-500">Trainee number:</span> {learner.traineeNumber || '—'}</p>
+                        ) : (
+                          <p><span className="font-medium text-gray-500">LRN:</span> {learner.lrn || '—'}</p>
+                        )}
                         <p><span className="font-medium text-gray-500">Grade / section:</span> {learner.gradeSection || '—'}</p>
                         <p><span className="font-medium text-gray-500">Status:</span> {learner.status || '—'}</p>
                       </div>
