@@ -20,9 +20,13 @@
  *    loading failure. Every list on every dashboard passes one.
  */
 
-import type { ComponentType, ReactNode } from 'react';
+import { useState, type ComponentType, type ReactNode } from 'react';
+import { Users, ChevronRight } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/app/components/ui/card';
 import { Badge } from '@/app/components/ui/badge';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+} from '@/app/components/ui/dialog';
 import { cn } from '@/app/components/ui/utils';
 
 /** The SCH-PATH header band: dark slate, yellow underline. */
@@ -258,3 +262,172 @@ export function ListRow({
     </Wrapper>
   );
 }
+
+/** A resident as a distribution's breakdown names them. */
+export interface ResidentRef {
+  id: string;
+  name: string;
+}
+
+/** One bar of a distribution: what it says, how many it is, and who it is made of. */
+export interface DistributionRow {
+  /** Stable identity for the row. */
+  key: string;
+  /** The short label printed beside the bar. */
+  label: string;
+  /** The full label, shown as a tooltip where the short one is truncated. */
+  fullLabel?: string;
+  count: number;
+  /** The bar's colour class. */
+  barClass: string;
+  /** The residents the bar is made of — the list its click opens. */
+  residents: ResidentRef[];
+  /** Heading for the breakdown dialog. */
+  dialogTitle: string;
+  /** The sentence above the breakdown, saying what the group is. */
+  dialogNote: string;
+}
+
+/**
+ * A distribution card — the shape "Residents by Rehabilitation Phase" and
+ * "Behavioral Status" both draw.
+ *
+ * The bars are buttons, not decoration: clicking one opens the residents it is
+ * made of, and clicking a resident opens their profile. Hover alone would leave
+ * the list unreachable on every phone and tablet, and the whole row is a far
+ * larger tap target than the bar itself. A band holding nobody stays a plain
+ * div — there is nothing behind it, and a control that opens an empty list is
+ * worse than one that does not respond.
+ *
+ * `total` is passed rather than summed here, so the caller states which
+ * population the percentages are of. A page that scopes its own rows cannot
+ * then silently get the wrong denominator.
+ */
+export function DistributionCard({
+  title,
+  icon,
+  caption,
+  rows,
+  total,
+  loading = false,
+  empty,
+  onOpenResident,
+}: {
+  title: string;
+  icon?: ReactNode;
+  caption: ReactNode;
+  rows: DistributionRow[];
+  total: number;
+  loading?: boolean;
+  empty: ReactNode;
+  onOpenResident: (residentId: string) => void;
+}) {
+  const [breakdown, setBreakdown] = useState<DistributionRow | null>(null);
+
+  const share = (count: number) =>
+    total > 0 ? `${Math.round((count / total) * 100)}%` : '0%';
+
+  return (
+    <Card className="border-none shadow-sm">
+      <CardHeader className="border-b border-gray-100 pb-3">
+        <CardTitle className="flex items-center gap-2 text-sm font-bold text-[#2F3E46]">
+          {icon}
+          {title}
+        </CardTitle>
+        <p className="mt-1 text-[11px] text-gray-500">{caption}</p>
+      </CardHeader>
+      <CardContent className="pt-4">
+        {loading ? (
+          <p className="py-4 text-center text-xs text-gray-400">Loading…</p>
+        ) : rows.length === 0 ? (
+          <EmptyState>{empty}</EmptyState>
+        ) : (
+          <div className="space-y-2">
+            {rows.map((row) => (
+              <BarRow
+                key={row.key}
+                label={row.label}
+                fullLabel={row.fullLabel}
+                count={row.count}
+                percent={share(row.count)}
+                barClass={row.barClass}
+                onOpen={() => setBreakdown(row)}
+              />
+            ))}
+          </div>
+        )}
+      </CardContent>
+
+      <Dialog open={breakdown !== null} onOpenChange={(next) => { if (!next) setBreakdown(null); }}>
+        <DialogContent className="max-h-[80vh] max-w-md overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-[#2F3E46]">
+              <Users className="h-4 w-4 text-[#FFD100]" />
+              {breakdown?.dialogTitle}
+              {breakdown && (
+                <Badge className="bg-[#FFD100] text-[#2F3E46] px-1.5 py-0 text-[10px]">
+                  {breakdown.residents.length}
+                </Badge>
+              )}
+            </DialogTitle>
+          </DialogHeader>
+
+          {breakdown && (
+            <>
+              <p className="text-[11px] text-gray-500">{breakdown.dialogNote}</p>
+              {breakdown.residents.length === 0 ? (
+                <p className="py-4 text-center text-xs italic text-gray-400">
+                  No residents in this group.
+                </p>
+              ) : (
+                <div className="space-y-1.5">
+                  {breakdown.residents.map((resident) => (
+                    <button
+                      key={resident.id}
+                      type="button"
+                      onClick={() => {
+                        setBreakdown(null);
+                        onOpenResident(resident.id);
+                      }}
+                      className="flex w-full items-center justify-between gap-3 rounded-lg border border-gray-100 p-2.5 text-left transition-colors hover:border-[#FFD100] hover:bg-[#FFD100]/10"
+                    >
+                      <span className="truncate text-xs font-semibold text-[#2F3E46]">{resident.name}</span>
+                      <ChevronRight className="h-4 w-4 shrink-0 text-gray-300" />
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+    </Card>
+  );
+}
+
+/** The colour each behavioural band carries on every screen that draws it. */
+export const BEHAVIORAL_BAR: Record<string, string> = {
+  'Needs Improvement': 'bg-red-500',
+  Fair: 'bg-orange-400',
+  Good: 'bg-blue-500',
+  'Very Good': 'bg-green-500',
+  Unscored: 'bg-gray-300',
+};
+
+/**
+ * The behavioural bands, in the order the approved template lists them —
+ * weakest first, with the residents who have no finalised TRI last. Shared so
+ * the command centre and the Social Worker's page cannot print a different
+ * order, and so a band added to one appears on the other.
+ *
+ * `Unscored` is the TRI module's own word for a resident with no finalised TRI,
+ * and it is also where a finalised TRI with a blank rating lands: both mean "no
+ * score", and giving them two rows would split one population across two bars.
+ */
+export const BEHAVIORAL_BANDS = [
+  'Needs Improvement',
+  'Fair',
+  'Good',
+  'Very Good',
+  'Unscored',
+] as const;

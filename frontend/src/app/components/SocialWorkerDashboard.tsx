@@ -15,7 +15,7 @@
  * ## Every figure is derived once, by the page
  *
  * Nothing here recounts a collection. `activeCount`, `pendingApprovals`,
- * `missingDocuments`, `upcomingHearings`, `urgency` and `phases` are computed in
+ * `missingDocuments`, `upcomingHearings` and `phases` are computed in
  * `Dashboard.tsx` from the same predicates the rest of the application already
  * uses, and passed in. That is deliberate: "Docs Pending" on this page and the
  * Documents module's badge are the same queue, and the two came apart once
@@ -23,21 +23,22 @@
  * second copy of a rule is how a tile starts disagreeing with the screen it
  * opens.
  *
- * The two distributions follow that rule too: each band arrives with the
- * residents it is made of, so a bar opens the very list its count was taken
- * from rather than a second guess at who is in the group.
+ * ## The two distributions are the command centre's, drawn once
  *
- * TRI Statistics is the one exception, and deliberately so: it is the existing
- * shared card, which loads `/tri/monitor` itself and is already used by the TRI
- * module and the command centre. Reusing it is what keeps this page and those
- * two reading the same rating.
+ * "Residents by Rehabilitation Phase" and "Behavioral Status" are the two cards
+ * the Center Head's page carries, and both pages render the same
+ * `DistributionCard` — one component, so the two cannot drift into
+ * different-looking charts of the same thing. Each bar opens the residents it is
+ * made of; each resident opens their profile.
  *
- * ## Everything on the page goes somewhere
+ * The two pages source them differently, and that difference is real:
  *
- * The tiles, every list row, both distribution bars, the pending-assessment
- * cards and the day's schedule all open the record or module they describe —
- * the same rule the command centre follows. A bar opens the residents behind
- * it; a resident opens their profile.
+ *  - The command centre reads both from `GET /dashboard/center-head`, scoped to
+ *    the month its period selector names — a **finalized TRI for that month**.
+ *  - This page has no period selector, so Behavioral Status reads
+ *    `GET /tri/monitor`, the rating of each resident's **most recent** finalized
+ *    TRI. That is the same reading as the TRI Statistics card below it, which is
+ *    the point: the two cannot disagree.
  *
  * ## Links
  *
@@ -47,20 +48,16 @@
  * type-checks, and the click is silently refused by the route guard.
  */
 
-import { useState } from 'react';
 import {
   Briefcase, FolderOpen, ShieldAlert, Gavel, ClipboardCheck, Calendar, ArrowRight,
-  BarChart3, TrendingUp, Users, ChevronRight,
+  TrendingUp,
 } from 'lucide-react';
 import type { Child, CourtRecord, Violation } from '../state/DataContext';
 import { formatShortDate } from '@/utils/dateFormatter';
-import { Badge } from '@/app/components/ui/badge';
+import { TriStatistics, useTriMonitor } from './TriStatistics';
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle,
-} from '@/app/components/ui/dialog';
-import { TriStatistics } from './TriStatistics';
-import {
-  DashboardHeader, StatTile, StatTileRow, SectionCard, EmptyState, ListRow, BarRow,
+  DashboardHeader, StatTile, StatTileRow, SectionCard, EmptyState, ListRow,
+  DistributionCard, BEHAVIORAL_BAR, BEHAVIORAL_BANDS, type DistributionRow, type ResidentRef,
 } from './DashboardKit';
 
 interface MissingDocumentsEntry {
@@ -68,19 +65,6 @@ interface MissingDocumentsEntry {
   phase: string;
   missing: string[];
   pending: string[];
-}
-
-/** A resident as the breakdown lists name them. */
-interface ResidentRef {
-  id: string;
-  name: string;
-}
-
-/** One urgency band: the count, and the residents it is made of. */
-interface UrgencyBand {
-  label: string;
-  count: number;
-  residents: ResidentRef[];
 }
 
 interface SocialWorkerDashboardProps {
@@ -96,10 +80,8 @@ interface SocialWorkerDashboardProps {
   violations: Violation[];
   /** Scheduled hearings dated today or later. */
   upcomingHearings: CourtRecord[];
-  /** Active residents per intervention phase, with the residents behind each. */
+  /** Active residents per rehabilitation phase, with the residents behind each. */
   phases: Array<{ short: string; count: number; residents: ResidentRef[] }>;
-  /** Unresolved violations by urgency band, with the residents behind each. */
-  urgency: UrgencyBand[];
   /** Assessments still on the Scheduled status. */
   pendingAssessments: Array<{ id: string; title?: string; type?: string; date?: string; time?: string }>;
   todayActivities: any[];
@@ -107,13 +89,8 @@ interface SocialWorkerDashboardProps {
   onOpen: (path: string) => void;
 }
 
-/** The colour each urgency band carries on every screen that draws it. */
-const URGENCY_BAR: Record<string, string> = {
-  'Need Improvement': 'bg-red-500',
-  Fair: 'bg-orange-500',
-  Good: 'bg-yellow-400',
-  'Very Good': 'bg-green-500',
-};
+/** The four ratings a finalized TRI can carry. Anything else is `Unscored`. */
+const SCORED_BANDS = ['Very Good', 'Good', 'Fair', 'Needs Improvement'];
 
 export function SocialWorkerDashboard({
   displayRole,
@@ -124,22 +101,18 @@ export function SocialWorkerDashboard({
   violations,
   upcomingHearings,
   phases,
-  urgency,
   pendingAssessments,
   todayActivities,
   todayAssessments,
   onOpen,
 }: SocialWorkerDashboardProps) {
   /**
-   * The residents behind one bar.
-   *
-   * Held as the residents the page handed over with that band, not recomputed
-   * here: the bar's count and this list come from the same pass, so they cannot
-   * disagree.
+   * The TRI rows behind Behavioral Status, loaded here rather than inside the
+   * TRI Statistics card so the page makes one request and both cards read the
+   * same rows.
    */
-  const [breakdown, setBreakdown] = useState<
-    { title: string; note: string; residents: ResidentRef[] } | null
-  >(null);
+  const triMonitor = useTriMonitor();
+  const triRows = triMonitor.rows || [];
 
   const nameOf = (residentId?: string | null) =>
     residents.find((resident) => String(resident.id) === String(residentId))?.name ||
@@ -155,8 +128,47 @@ export function SocialWorkerDashboard({
 
   const scheduleCount = todayActivities.length + todayAssessments.length;
 
-  const share = (count: number) =>
-    activeCount ? `${Math.round((count / activeCount) * 100)}%` : '0%';
+  /** The phase bars, in the shape the shared card draws. */
+  const phaseRows: DistributionRow[] = phases.map((phase) => ({
+    key: phase.short,
+    label: phase.short,
+    fullLabel: phase.short,
+    count: phase.count,
+    barClass: 'bg-[#2F3E46]',
+    residents: phase.residents,
+    dialogTitle: phase.short,
+    dialogNote: phase.short === 'Unassigned'
+      ? 'Active residents with no rehabilitation phase set.'
+      : `Active residents in the ${phase.short} phase.`,
+  }));
+
+  /**
+   * The behavioural bars: one per band, in the order every screen draws them,
+   * built from the same rows the TRI Statistics card shows. A resident is in a
+   * band when their latest finalized TRI carries that rating, and `Unscored`
+   * when it carries none — the TRI module's own reading, not a second rule.
+   */
+  const behavioralRows: DistributionRow[] = BEHAVIORAL_BANDS.map((label) => {
+    const bandResidents = triRows
+      .filter((row) => (
+        label === 'Unscored'
+          ? !row.rating || !SCORED_BANDS.includes(String(row.rating))
+          : row.rating === label
+      ))
+      .map((row) => ({ id: String(row.residentId), name: row.name }));
+
+    return {
+      key: label,
+      label,
+      count: bandResidents.length,
+      barClass: BEHAVIORAL_BAR[label],
+      residents: bandResidents,
+      dialogTitle: label,
+      dialogNote: label === 'Unscored'
+        ? 'Active residents with no finalized TRI yet.'
+        : `Active residents whose most recent finalized TRI rates ${label}.`,
+    };
+  });
 
   return (
     <div className="space-y-6">
@@ -197,59 +209,29 @@ export function SocialWorkerDashboard({
         />
       </StatTileRow>
 
-      {/* The two distributions the role read on the shared dashboard. Both are
-          about the whole active population, which is what a case-carrying role
-          works across. Each bar opens the residents behind it, exactly as the
-          command centre's bars do. */}
+      {/* The command centre's two distributions. Same card, same behaviour —
+          each bar opens the residents behind it. */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <SectionCard
-          title="Urgency — Unresolved Violations"
-          icon={<ShieldAlert className="w-4 h-4 text-[#FFD100]" />}
-          isEmpty={activeCount === 0}
-          empty="No active residents."
-        >
-          <div className="space-y-2">
-            {urgency.map((band) => (
-              <BarRow
-                key={band.label}
-                label={band.label}
-                count={band.count}
-                percent={share(band.count)}
-                barClass={URGENCY_BAR[band.label] || 'bg-gray-400'}
-                onOpen={() => setBreakdown({
-                  title: band.label,
-                  note: `Unresolved violations rated ${band.label}, counted from live violation records.`,
-                  residents: band.residents,
-                })}
-              />
-            ))}
-          </div>
-        </SectionCard>
+        <DistributionCard
+          title="Residents by Rehabilitation Phase"
+          icon={<Calendar className="w-4 h-4 text-[#FFD100]" />}
+          caption={activeCount ? 'Residents in the facility now.' : 'Nothing to report yet.'}
+          rows={phaseRows}
+          total={activeCount}
+          empty="No residents are on the Active filter."
+          onOpenResident={(id) => onOpen(`/children/${id}`)}
+        />
 
-        <SectionCard
-          title="Residents per Intervention Phase"
-          icon={<BarChart3 className="w-4 h-4 text-[#FFD100]" />}
-          isEmpty={phases.length === 0}
-          empty="No active residents."
-        >
-          <div className="space-y-2">
-            {phases.map((phase) => (
-              <BarRow
-                key={phase.short}
-                label={phase.short}
-                fullLabel={phase.short}
-                count={phase.count}
-                percent={share(phase.count)}
-                barClass="bg-[#2F3E46]"
-                onOpen={() => setBreakdown({
-                  title: phase.short,
-                  note: `Active residents in the ${phase.short} phase.`,
-                  residents: phase.residents,
-                })}
-              />
-            ))}
-          </div>
-        </SectionCard>
+        <DistributionCard
+          title="Behavioral Status"
+          icon={<ClipboardCheck className="w-4 h-4 text-[#FFD100]" />}
+          caption="Based on each resident's most recent finalized TRI."
+          rows={behavioralRows}
+          total={triRows.length}
+          loading={triMonitor.rows === null}
+          empty="No residents are on the Active filter."
+          onOpenResident={(id) => onOpen(`/children/${id}`)}
+        />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -373,10 +355,11 @@ export function SocialWorkerDashboard({
         </SectionCard>
       </div>
 
-      {/* TRI Statistics — the shared card, reused rather than re-drawn. It reads
-          `/tri/monitor`, which this role is entitled to (the endpoint is gated
-          to the reviewer roles and the Social Worker is one of them). */}
-      <TriStatistics />
+      {/* TRI Statistics — the shared card, reused rather than re-drawn, and fed
+          the rows Behavioral Status already loaded so the page asks once. It
+          reads `/tri/monitor`, which this role is entitled to (the endpoint is
+          gated to the reviewer roles and the Social Worker is one of them). */}
+      <TriStatistics rows={triMonitor.rows} />
 
       {/* Pending assessments. Each card opens the assessment it names. */}
       <SectionCard
@@ -413,7 +396,7 @@ export function SocialWorkerDashboard({
                 <p className="font-bold text-xs text-[#2F3E46] truncate">{assessment.title}</p>
                 <p className="text-[10px] text-gray-400 italic truncate">{assessment.type}</p>
               </div>
-              <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-gray-300" />
+              <ArrowRight className="mt-0.5 h-4 w-4 shrink-0 text-gray-300" />
             </button>
           ))}
         </div>
@@ -473,51 +456,6 @@ export function SocialWorkerDashboard({
           No residents are on the Active filter, so there is nothing to queue here yet.
         </EmptyState>
       )}
-
-      {/* ── The residents behind a bar ── */}
-      <Dialog open={breakdown !== null} onOpenChange={(next) => { if (!next) setBreakdown(null); }}>
-        <DialogContent className="max-h-[80vh] max-w-md overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-[#2F3E46]">
-              <Users className="h-4 w-4 text-[#FFD100]" />
-              {breakdown?.title}
-              {breakdown && (
-                <Badge className="bg-[#FFD100] text-[#2F3E46] px-1.5 py-0 text-[10px]">
-                  {breakdown.residents.length}
-                </Badge>
-              )}
-            </DialogTitle>
-          </DialogHeader>
-
-          {breakdown && (
-            <>
-              <p className="text-[11px] text-gray-500">{breakdown.note}</p>
-              {breakdown.residents.length === 0 ? (
-                <p className="py-4 text-center text-xs italic text-gray-400">
-                  No residents in this group.
-                </p>
-              ) : (
-                <div className="space-y-1.5">
-                  {breakdown.residents.map((resident) => (
-                    <button
-                      key={resident.id}
-                      type="button"
-                      onClick={() => {
-                        setBreakdown(null);
-                        onOpen(`/children/${resident.id}`);
-                      }}
-                      className="flex w-full items-center justify-between gap-3 rounded-lg border border-gray-100 p-2.5 text-left transition-colors hover:border-[#FFD100] hover:bg-[#FFD100]/10"
-                    >
-                      <span className="truncate text-xs font-semibold text-[#2F3E46]">{resident.name}</span>
-                      <ChevronRight className="h-4 w-4 shrink-0 text-gray-300" />
-                    </button>
-                  ))}
-                </div>
-              )}
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

@@ -1766,55 +1766,59 @@ export function Dashboard() {
   const activeCount    = activeChildren.length;
   const closedCount    = children.filter(c => isClosedResident(c.status)).length;
 
-  // Each urgency band keeps the residents it is made of, so a bar on the Social
-  // Worker's page can open the very list the count was taken from. One pass
-  // builds both, so the bar and its dialog cannot disagree; the four counts are
-  // then read off the groups rather than re-filtering the caseload.
-  const urgencyGroups: Record<string, { id: string; name: string }[]> = {
-    'Need Improvement': [], Fair: [], Good: [], 'Very Good': [],
+  // One pass over the caseload builds the four urgency bands and their counts
+  // together, so a bar and its number cannot disagree. The counts are read off
+  // the groups rather than re-filtering — the same predicate, evaluated once.
+  const urgencyGroups: Record<string, number> = {
+    'Need Improvement': 0, Fair: 0, Good: 0, 'Very Good': 0,
   };
   activeChildren.forEach(c => {
-    urgencyGroups[getRealTimeUrgency(c.id).label].push({ id: String(c.id), name: c.name });
+    urgencyGroups[getRealTimeUrgency(c.id).label] += 1;
   });
 
-  const needImprovementCount = urgencyGroups['Need Improvement'].length;
-  const fairCount = urgencyGroups.Fair.length;
-  const goodCount = urgencyGroups.Good.length;
-  const veryGoodCount = urgencyGroups['Very Good'].length;
-
-  /** The four bands, each with its residents — what the Social Worker's bars open. */
-  const urgencyBands = [
-    { label: 'Need Improvement', count: needImprovementCount, residents: urgencyGroups['Need Improvement'] },
-    { label: 'Fair', count: fairCount, residents: urgencyGroups.Fair },
-    { label: 'Good', count: goodCount, residents: urgencyGroups.Good },
-    { label: 'Very Good', count: veryGoodCount, residents: urgencyGroups['Very Good'] },
-  ];
+  const needImprovementCount = urgencyGroups['Need Improvement'];
+  const fairCount = urgencyGroups.Fair;
+  const goodCount = urgencyGroups.Good;
+  const veryGoodCount = urgencyGroups['Very Good'];
 
   // Urgency is computed from real-time unresolved violations, not the
   // previous month's materialized ratings. The period label is therefore
   // "Real-time" rather than a fixed month.
   const urgencyPeriod = 'Real-time';
 
-  // Phase counts
+  // Phase counts, grouped the way the command centre groups them: by the
+  // resident's stored `casePhase`, with a blank one landing in "Unassigned"
+  // rather than being dropped. Iterating the label map instead would silently
+  // lose a resident whose phase is blank or spelled differently, and the two
+  // dashboards would then disagree about the same population.
+  //
+  // The short names match `PHASE_SHORT` in the backend's dashboardController, so
+  // "Rehabilitation" is the same word on the command centre and on the Social
+  // Worker's page.
   const PHASE_LABELS: Record<string,string> = {
     'Admission Phase':                          'Admission',
     'Orientation Phase':                         'Orientation',
     'Enculturation/Observation Phase':           'Observation',
-    'Caring & Rehabilitation Phase / DP or IPP Implementation': 'Rehab',
+    'Caring & Rehabilitation Phase / DP or IPP Implementation': 'Rehabilitation',
     'Pre-integration Phase':                     'Pre-integration',
     'Reintegration/Aftercare Program':           'Reintegration',
   };
-  const phaseCounts = Object.keys(PHASE_LABELS).map(phase => {
-    const inPhase = activeChildren.filter(c => c.casePhase === phase);
-    return {
+  const phaseGroups = new Map<string, Child[]>();
+  activeChildren.forEach(child => {
+    const phase = String(child.casePhase || '').trim();
+    const group = phaseGroups.get(phase);
+    if (group) group.push(child); else phaseGroups.set(phase, [child]);
+  });
+  const phaseCounts = [...phaseGroups.entries()]
+    .map(([phase, group]) => ({
       phase,
-      short: PHASE_LABELS[phase],
-      count: inPhase.length,
+      short: PHASE_LABELS[phase] || phase || 'Unassigned',
+      count: group.length,
       // The residents behind the bar, so clicking it opens the same list the
       // count was taken from rather than a guess at who is in the phase.
-      residents: inPhase.map(c => ({ id: String(c.id), name: c.name })),
-    };
-  }).filter(p => p.count > 0);
+      residents: group.map(c => ({ id: String(c.id), name: c.name })),
+    }))
+    .sort((a, b) => b.count - a.count);
 
   // Offense tracking per child (based on violation category counts)
   const getOffenseLevel = (residentId: string) => {
@@ -1990,7 +1994,6 @@ export function Dashboard() {
           violations={violations}
           upcomingHearings={scheduledHearings}
           phases={phaseCounts}
-          urgency={urgencyBands}
           pendingAssessments={scheduledAssessments}
           todayActivities={todayActivities}
           todayAssessments={todayAssessments}

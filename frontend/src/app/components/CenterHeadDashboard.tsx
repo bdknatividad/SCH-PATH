@@ -35,13 +35,14 @@
  *   Behavioural status       the Finalized TRI for that month, by rating band
  *   Documents / Reports      the live review queues, counted once, server-side
  *
- * ## What is deliberately not clickable
+ * ## The bars open the residents behind them
  *
- * The phase and behavioural bars are display-only. Child Records has filters for
- * status only — Active / Discharged / Absconded — and there is no resident list
- * filtered by phase or by rating anywhere in the system. Pointing those bars at
- * `/children` would land the reader on an unrelated screen, which is worse than
- * a bar that does not pretend to be a link.
+ * Both distributions are drawn by `DistributionCard` (`DashboardKit`), which is
+ * also what the Social Worker's page uses, so the two pages cannot drift into
+ * two different-looking charts of the same thing. Clicking a bar opens the
+ * residents it is made of; clicking a resident opens their profile. Pointing a
+ * bar at `/children` would land the reader on an unrelated screen, which is why
+ * the bar carries the list itself rather than a link.
  *
  * ## Why there is no charting library here
  *
@@ -58,15 +59,14 @@ import {
   RefreshCw, Loader2, ChevronLeft, ChevronRight,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/app/components/ui/card';
-import { Badge } from '@/app/components/ui/badge';
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle,
-} from '@/app/components/ui/dialog';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/app/components/ui/select';
 import { request } from '@/services/api';
 import { formatShortDate } from '@/utils/dateFormatter';
+import {
+  DistributionCard, BEHAVIORAL_BAR, type DistributionRow,
+} from './DashboardKit';
 
 // ── PAYLOAD ─────────────────────────────────────────────────────────────────
 
@@ -170,14 +170,6 @@ function shiftPeriod(period: string, months: number): string {
   return `${nextYear}-${String(nextMonth).padStart(2, '0')}`;
 }
 
-/** The rating bands, and the colour each one carries everywhere in the app. */
-const BEHAVIORAL_STYLE: Record<string, string> = {
-  'Needs Improvement': 'bg-red-500',
-  Fair: 'bg-orange-400',
-  Good: 'bg-blue-500',
-  'Very Good': 'bg-green-500',
-  Unscored: 'bg-gray-300',
-};
 
 // ── COMPONENT ───────────────────────────────────────────────────────────────
 
@@ -188,17 +180,6 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  /**
-   * The resident breakdown behind one bar.
-   *
-   * Held as the residents the server returned with that bar, not recomputed
-   * here: the bar's count and this list come from the same query, so they cannot
-   * disagree — which is the whole reason the server sends the names rather than
-   * the client matching a phase against the store it happens to hold.
-   */
-  const [breakdown, setBreakdown] = useState<
-    { title: string; note: string; residents: ResidentRef[] } | null
-  >(null);
   const requestId = useRef(0);
 
   const load = useCallback(async () => {
@@ -279,11 +260,43 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
   const behavioralTotal = (data?.residents?.behavioral || []).reduce((sum, row) => sum + row.count, 0);
   const phaseTotal = (data?.residents?.byPhase || []).reduce((sum, row) => sum + row.count, 0);
 
+  /**
+   * The two distributions, in the shape the shared card draws.
+   *
+   * Built from the rows the server returned — including the residents behind
+   * each bar — so a bar's count and the list its click opens come from the same
+   * query and cannot drift apart.
+   *
+   * The behavioural bands are dropped entirely when nobody is in them: the
+   * server always sends all five so the bars keep their places month to month,
+   * but five zero bars with nothing behind them would read as a broken page
+   * rather than an empty month.
+   */
+  const phaseRows: DistributionRow[] = (data?.residents.byPhase || []).map((row) => ({
+    key: row.phase || row.short,
+    label: row.short,
+    fullLabel: row.phase,
+    count: row.count,
+    barClass: 'bg-[#2F3E46]',
+    residents: row.residents,
+    dialogTitle: row.short,
+    dialogNote: `In ${row.phase || 'no phase'} during ${periodLabel(period)}`,
+  }));
+
+  const behavioralRows: DistributionRow[] = behavioralTotal === 0
+    ? []
+    : (data?.residents.behavioral || []).map((row) => ({
+        key: row.label,
+        label: row.label,
+        count: row.count,
+        barClass: BEHAVIORAL_BAR[row.label] || 'bg-gray-400',
+        residents: row.residents,
+        dialogTitle: row.label,
+        dialogNote: `Behavioural status for ${periodLabel(period)}, from finalized TRI results`,
+      }));
+
   /** `'…'` while a period is in flight, so no stale figure is ever on screen. */
   const figure = (value: number | undefined) => (loading ? '…' : String(value ?? 0));
-
-  const share = (count: number, total: number) =>
-    total > 0 ? `${Math.round((count / total) * 100)}%` : '0%';
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -433,86 +446,37 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
 
       {/* ── Two distributions ── */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Card className="border-none shadow-sm">
-          <CardHeader className="border-b border-gray-100 pb-3">
-            <CardTitle className="flex items-center gap-2 text-sm font-bold text-[#2F3E46]">
-              <Calendar className="h-4 w-4 text-[#FFD100]" /> Residents by Rehabilitation Phase
-            </CardTitle>
-            <p className="mt-1 text-[11px] text-gray-500">
-              {periodIsFuture
-                ? 'Nothing to report yet.'
-                : isCurrent
-                  ? 'Residents in the facility now.'
-                  : `Residents still in the facility at the end of ${periodLabel(period)}.`}
-            </p>
-          </CardHeader>
-          <CardContent className="pt-4">
-            {loading ? (
-              <p className="py-4 text-center text-xs text-gray-400">Loading…</p>
-            ) : (data?.residents.byPhase || []).length === 0 ? (
-              <p className="py-4 text-center text-xs italic text-gray-400">
-                {periodIsFuture ? futureNote : 'No residents were present in this period.'}
-              </p>
-            ) : (
-              <div className="space-y-2">
-                {data!.residents.byPhase.map((row) => (
-                  <BarRow
-                    key={row.phase || row.short}
-                    label={row.short}
-                    fullLabel={row.phase}
-                    count={row.count}
-                    percent={share(row.count, phaseTotal)}
-                    barClass="bg-[#2F3E46]"
-                    onOpen={() => setBreakdown({
-                      title: row.short,
-                      note: `In ${row.phase || 'no phase'} during ${periodLabel(period)}`,
-                      residents: row.residents,
-                    })}
-                  />
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        <DistributionCard
+          title="Residents by Rehabilitation Phase"
+          icon={<Calendar className="h-4 w-4 text-[#FFD100]" />}
+          caption={
+            periodIsFuture
+              ? 'Nothing to report yet.'
+              : isCurrent
+                ? 'Residents in the facility now.'
+                : `Residents still in the facility at the end of ${periodLabel(period)}.`
+          }
+          rows={phaseRows}
+          total={phaseTotal}
+          loading={loading}
+          empty={periodIsFuture ? futureNote : 'No residents were present in this period.'}
+          onOpenResident={(id) => open(`/children/${id}`)}
+        />
 
-        <Card className="border-none shadow-sm">
-          <CardHeader className="border-b border-gray-100 pb-3">
-            <CardTitle className="flex items-center gap-2 text-sm font-bold text-[#2F3E46]">
-              <ClipboardCheck className="h-4 w-4 text-[#FFD100]" /> Behavioral Status
-            </CardTitle>
-            <p className="mt-1 text-[11px] text-gray-500">
-              {periodIsFuture
-                ? 'Nothing to report yet.'
-                : `Based on finalized TRI results for ${periodLabel(period)}.`}
-            </p>
-          </CardHeader>
-          <CardContent className="pt-4">
-            {loading ? (
-              <p className="py-4 text-center text-xs text-gray-400">Loading…</p>
-            ) : behavioralTotal === 0 ? (
-              <p className="py-4 text-center text-xs italic text-gray-400">
-                {periodIsFuture ? futureNote : 'No residents were present in this period.'}
-              </p>
-            ) : (
-              <div className="space-y-2">
-                {(data?.residents.behavioral || []).map((row) => (
-                  <BarRow
-                    key={row.label}
-                    label={row.label}
-                    count={row.count}
-                    percent={share(row.count, behavioralTotal)}
-                    barClass={BEHAVIORAL_STYLE[row.label] || 'bg-gray-400'}
-                    onOpen={() => setBreakdown({
-                      title: row.label,
-                      note: `Behavioural status for ${periodLabel(period)}, from finalized TRI results`,
-                      residents: row.residents,
-                    })}
-                  />
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        <DistributionCard
+          title="Behavioral Status"
+          icon={<ClipboardCheck className="h-4 w-4 text-[#FFD100]" />}
+          caption={
+            periodIsFuture
+              ? 'Nothing to report yet.'
+              : `Based on finalized TRI results for ${periodLabel(period)}.`
+          }
+          rows={behavioralRows}
+          total={behavioralTotal}
+          loading={loading}
+          empty={periodIsFuture ? futureNote : 'No residents were present in this period.'}
+          onOpenResident={(id) => open(`/children/${id}`)}
+        />
       </div>
 
       {/* ── Upcoming schedules ── */}
@@ -586,51 +550,6 @@ export function CenterHeadDashboard({ displayRole }: { displayRole?: string }) {
         The two review queues are counted as they stand now — they are what the Pending Review and Needs
         Review screens will show you. Click any bar to see the residents behind it.
       </p>
-
-      {/* ── The residents behind a bar ── */}
-      <Dialog open={breakdown !== null} onOpenChange={(next) => { if (!next) setBreakdown(null); }}>
-        <DialogContent className="max-h-[80vh] max-w-md overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-[#2F3E46]">
-              <Users className="h-4 w-4 text-[#FFD100]" />
-              {breakdown?.title}
-              {breakdown && (
-                <Badge className="bg-[#FFD100] text-[#2F3E46] px-1.5 py-0 text-[10px]">
-                  {breakdown.residents.length}
-                </Badge>
-              )}
-            </DialogTitle>
-          </DialogHeader>
-
-          {breakdown && (
-            <>
-              <p className="text-[11px] text-gray-500">{breakdown.note}</p>
-              {breakdown.residents.length === 0 ? (
-                <p className="py-4 text-center text-xs italic text-gray-400">
-                  No residents in this group for the selected period.
-                </p>
-              ) : (
-                <div className="space-y-1.5">
-                  {breakdown.residents.map((resident) => (
-                    <button
-                      key={resident.id}
-                      type="button"
-                      onClick={() => {
-                        setBreakdown(null);
-                        open(`/children/${resident.id}`);
-                      }}
-                      className="flex w-full items-center justify-between gap-3 rounded-lg border border-gray-100 p-2.5 text-left transition-colors hover:border-[#FFD100] hover:bg-[#FFD100]/10"
-                    >
-                      <span className="truncate text-xs font-semibold text-[#2F3E46]">{resident.name}</span>
-                      <ChevronRight className="h-4 w-4 shrink-0 text-gray-300" />
-                    </button>
-                  ))}
-                </div>
-              )}
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
@@ -671,51 +590,6 @@ function StatCard({
         </div>
       </CardContent>
     </Card>
-  );
-}
-
-/**
- * One bar in a distribution.
- *
- * A **button** rather than a div whenever there is a breakdown to show, because
- * hover alone would leave the residents unreachable on every phone and tablet —
- * and the row is a far larger tap target than the bar itself. An empty band stays
- * a plain div: there is nothing behind it, and a control that opens an empty
- * dialog is worse than one that does not respond.
- */
-function BarRow({
-  label, fullLabel, count, percent, barClass, onOpen,
-}: {
-  label: string;
-  fullLabel?: string;
-  count: number;
-  percent: string;
-  barClass: string;
-  onOpen: () => void;
-}) {
-  const interactive = count > 0;
-  const Wrapper = interactive ? 'button' : 'div';
-
-  return (
-    <Wrapper
-      type={interactive ? 'button' : undefined}
-      onClick={interactive ? onOpen : undefined}
-      aria-label={interactive ? `${label}: ${count} residents. Show the list.` : undefined}
-      className={`flex w-full items-center gap-3 rounded-lg px-1.5 py-1 text-left ${
-        interactive ? 'transition-colors hover:bg-[#FFD100]/15' : ''
-      }`}
-    >
-      <span
-        className={`w-28 shrink-0 truncate text-xs sm:w-32 ${interactive ? 'font-medium text-[#2F3E46]' : 'text-gray-600'}`}
-        title={fullLabel || label}
-      >
-        {label}
-      </span>
-      <div className="h-5 flex-1 overflow-hidden rounded-full bg-gray-100">
-        <div className={`h-full rounded-full transition-all ${barClass}`} style={{ width: percent }} />
-      </div>
-      <span className="w-8 text-right text-xs font-bold text-[#2F3E46]">{count}</span>
-    </Wrapper>
   );
 }
 
