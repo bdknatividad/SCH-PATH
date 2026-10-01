@@ -16,6 +16,16 @@ build/
 .verify-build*/
 dist-verify*/
 
+# Build snapshots taken under a throwaway name while checking a UI change
+# (`dist-h`, `dist-r2`, `dist-shots`, …). Rebuilt on demand and never
+# committed — `dist/` above is the one Vercel actually produces.
+frontend/dist-*/
+
+# A manual archive of the tree and a zero-byte file a stray shell redirect
+# left behind. Neither is source; both were sitting untracked in the root.
+sch-path.zip
+=
+
 # ── Environment ───────────────────────────────────────────────────────────
 # Only the *example* templates are committed; real values are set in the
 # Vercel / Render dashboards and never enter the repository.
@@ -35,10 +45,13 @@ backend/data/store.json
 .smoke-serve.cjs
 *.local-analyze.*
 
-# Recon / audit probes: Playwright sweeps, RBAC snapshots, DB integrity
-# scripts and the static server they drive. Throwaway by design — they carry
-# hardcoded seeded credentials and the Railway host, so they must not ship.
-.workbuddy-ai/recon/
+# ── Agent working data ────────────────────────────────────────────────────
+# The WorkBuddy agent's own folder: memory notes, plans, prompts and scratch
+# files, plus the recon/audit probes (Playwright sweeps, RBAC snapshots, DB
+# integrity scripts) that carry hardcoded seeded credentials and the Railway
+# host. None of it is application source — a clone does not need it and some of
+# it must not ship. Left on disk; only untracked.
+.workbuddy-ai/
 
 # ── Editor / OS noise ─────────────────────────────────────────────────────
 .vscode/*
