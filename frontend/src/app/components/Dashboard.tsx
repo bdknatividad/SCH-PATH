@@ -587,19 +587,34 @@ function PsychologistDashboard({
                     up. On a phone each card would get roughly a third of ~360px,
                     which is narrower than the words in the labels above the
                     numbers, so they stack instead. */}
+                {/* Each figure opens the Assessments module it was counted from.
+                    Buttons rather than divs for the same reason the tiles are:
+                    the number invites a click, so it has to answer one. */}
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                  <div className="p-3 rounded-xl bg-blue-50 border border-blue-100">
+                  <button
+                    type="button"
+                    onClick={() => onOpen('/assessments')}
+                    className="p-3 rounded-xl bg-blue-50 border border-blue-100 text-left transition-all hover:ring-2 hover:ring-[#FFD100] active:scale-95"
+                  >
                     <p className="text-[10px] font-semibold uppercase tracking-wide text-blue-600">Scheduled</p>
                     <p className="text-2xl font-bold text-blue-700">{summary.scheduled}</p>
-                  </div>
-                  <div className="p-3 rounded-xl bg-green-50 border border-green-100">
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onOpen('/assessments')}
+                    className="p-3 rounded-xl bg-green-50 border border-green-100 text-left transition-all hover:ring-2 hover:ring-[#FFD100] active:scale-95"
+                  >
                     <p className="text-[10px] font-semibold uppercase tracking-wide text-green-600">Completed</p>
                     <p className="text-2xl font-bold text-green-700">{summary.completed}</p>
-                  </div>
-                  <div className="p-3 rounded-xl bg-gray-50 border border-gray-200">
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onOpen('/assessments')}
+                    className="p-3 rounded-xl bg-gray-50 border border-gray-200 text-left transition-all hover:ring-2 hover:ring-[#FFD100] active:scale-95"
+                  >
                     <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-600">Total</p>
                     <p className="text-2xl font-bold text-[#2F3E46]">{summary.total}</p>
-                  </div>
+                  </button>
                 </div>
                 <div>
                   <p className="text-[10px] font-bold uppercase tracking-wide text-gray-500 mb-2">By instrument</p>
@@ -607,13 +622,19 @@ function PsychologistDashboard({
                     {summary.types.slice(0, 5).map(([type, count]) => {
                       const share = Math.round((count / summary.total) * 100);
                       return (
-                        <div key={type} className="flex items-center gap-2">
+                        <button
+                          key={type}
+                          type="button"
+                          onClick={() => onOpen('/assessments')}
+                          title={`${type}: ${count}. Open the Assessments module.`}
+                          className="flex w-full items-center gap-2 rounded px-1 py-0.5 text-left transition-colors hover:bg-[#FFD100]/15"
+                        >
                           <span className="text-xs text-gray-600 w-40 truncate" title={type}>{type}</span>
                           <div className="flex-1 h-2 rounded-full bg-gray-100 overflow-hidden">
                             <div className="h-full rounded-full bg-[#2F3E46]" style={{ width: `${share}%` }} />
                           </div>
                           <span className="text-xs font-semibold text-[#2F3E46] w-8 text-right">{count}</span>
-                        </div>
+                        </button>
                       );
                     })}
                   </div>
@@ -968,13 +989,22 @@ function NurseDashboard({
               <p className="text-sm text-gray-400 italic text-center py-4">No medical documents filed.</p>
             ) : (
               <>
-                {/* Three columns, not five: this card is half-width now. */}
+                {/* Three columns, not five: this card is half-width now.
+                    Each bucket opens the Documents module's flat list, which is
+                    where a status can actually be read off — the folder tree is
+                    filed by resident, not by status. */}
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                   {documentStatus.filter((row) => row.count > 0).map((row) => (
-                    <div key={row.status} className="p-3 rounded-xl bg-gray-50 border border-gray-200">
+                    <button
+                      key={row.status}
+                      type="button"
+                      onClick={() => onOpen('/documents?tab=all')}
+                      title={`${row.count} ${row.status}. Open All Documents.`}
+                      className="p-3 rounded-xl bg-gray-50 border border-gray-200 text-left transition-all hover:ring-2 hover:ring-[#FFD100] active:scale-95"
+                    >
                       <p className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">{row.status}</p>
                       <p className="text-2xl font-bold text-[#2F3E46]">{row.count}</p>
-                    </div>
+                    </button>
                   ))}
                 </div>
                 <div className="mt-4 space-y-2">
@@ -1024,6 +1054,12 @@ function NurseDashboard({
 // Every link on this page stays inside the Education module. That matters:
 // Violations, Health, Activities, Reports and Court Records are all withheld, so
 // a control pointing at any of them would be a dead link.
+//
+// The three list cards are clickable — every row is a button. Education has no
+// per-record route and no sub-module tabs (see `rbac.definition.json`), so a row
+// lands on `/education`, the module the record lives in, rather than on the
+// record itself. That is the deepest destination the role's access allows; a
+// link to `/education/:id` would be a route the app does not define.
 
 interface EducatorStudent {
   id: string;
@@ -1241,12 +1277,21 @@ function EducatorDashboard({ displayRole, onOpen }: EducatorDashboardProps) {
               : (
                 <ul className="divide-y divide-gray-100">
                   {updates.map((entry) => (
-                    <li key={entry.id} className="py-2 flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-xs font-medium text-[#2F3E46]">{entry.label}</p>
-                        <p className="text-[11px] text-gray-500 truncate">{entry.detail}</p>
-                      </div>
-                      <span className="text-[10px] text-gray-400 shrink-0">{formatShortDate(entry.when)}</span>
+                    <li key={entry.id}>
+                      <button
+                        type="button"
+                        onClick={() => onOpen('/education')}
+                        className="w-full py-2 flex items-start justify-between gap-3 text-left transition-colors hover:bg-gray-50"
+                      >
+                        <div className="min-w-0">
+                          <p className="text-xs font-medium text-[#2F3E46]">{entry.label}</p>
+                          <p className="text-[11px] text-gray-500 truncate">{entry.detail}</p>
+                        </div>
+                        <span className="flex shrink-0 items-center gap-1.5">
+                          <span className="text-[10px] text-gray-400">{formatShortDate(entry.when)}</span>
+                          <ArrowRight className="w-3.5 h-3.5 text-gray-300" />
+                        </span>
+                      </button>
                     </li>
                   ))}
                 </ul>
@@ -1263,18 +1308,27 @@ function EducatorDashboard({ displayRole, onOpen }: EducatorDashboardProps) {
               : (
                 <ul className="divide-y divide-gray-100">
                   {upcomingVisits.slice(0, 6).map((visit) => (
-                    <li key={visit.id} className="py-2 flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-xs font-medium text-[#2F3E46]">
-                          {students.find((s) => String(s.id) === linkedRecordId(visit))?.name || 'School visit'}
-                        </p>
-                        <p className="text-[11px] text-gray-500 truncate">
-                          {visit.school || 'School not recorded'}{visit.purpose ? ` — ${visit.purpose}` : ''}
-                        </p>
-                      </div>
-                      <span className="text-[10px] text-gray-400 shrink-0">
-                        {formatShortDate(String(visit.visitDate || '').slice(0, 10))}
-                      </span>
+                    <li key={visit.id}>
+                      <button
+                        type="button"
+                        onClick={() => onOpen('/education')}
+                        className="w-full py-2 flex items-start justify-between gap-3 text-left transition-colors hover:bg-gray-50"
+                      >
+                        <div className="min-w-0">
+                          <p className="text-xs font-medium text-[#2F3E46]">
+                            {students.find((s) => String(s.id) === linkedRecordId(visit))?.name || 'School visit'}
+                          </p>
+                          <p className="text-[11px] text-gray-500 truncate">
+                            {visit.school || 'School not recorded'}{visit.purpose ? ` — ${visit.purpose}` : ''}
+                          </p>
+                        </div>
+                        <span className="flex shrink-0 items-center gap-1.5">
+                          <span className="text-[10px] text-gray-400">
+                            {formatShortDate(String(visit.visitDate || '').slice(0, 10))}
+                          </span>
+                          <ArrowRight className="w-3.5 h-3.5 text-gray-300" />
+                        </span>
+                      </button>
                     </li>
                   ))}
                 </ul>
@@ -1291,18 +1345,27 @@ function EducatorDashboard({ displayRole, onOpen }: EducatorDashboardProps) {
               : (
                 <ul className="divide-y divide-gray-100">
                   {outstandingReports.slice(0, 6).map(({ student, lastReport }) => (
-                    <li key={student.id} className="py-2 flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <p className="text-xs font-medium text-[#2F3E46]">
-                          Monthly progress report — {student.name || student.id}
-                        </p>
-                        <p className="text-[11px] text-gray-500">
-                          {lastReport ? `Last filed ${monthLabel(lastReport)}` : 'No report on file yet'}
-                        </p>
-                      </div>
-                      <Badge className="bg-orange-100 text-orange-700 text-[10px] px-1.5 py-0 shrink-0">
-                        {monthLabel(currentMonth)}
-                      </Badge>
+                    <li key={student.id}>
+                      <button
+                        type="button"
+                        onClick={() => onOpen('/education')}
+                        className="w-full py-2 flex items-start justify-between gap-3 text-left transition-colors hover:bg-gray-50"
+                      >
+                        <div className="min-w-0">
+                          <p className="text-xs font-medium text-[#2F3E46]">
+                            Monthly progress report — {student.name || student.id}
+                          </p>
+                          <p className="text-[11px] text-gray-500">
+                            {lastReport ? `Last filed ${monthLabel(lastReport)}` : 'No report on file yet'}
+                          </p>
+                        </div>
+                        <span className="flex shrink-0 items-center gap-1.5">
+                          <Badge className="bg-orange-100 text-orange-700 text-[10px] px-1.5 py-0">
+                            {monthLabel(currentMonth)}
+                          </Badge>
+                          <ArrowRight className="w-3.5 h-3.5 text-gray-300" />
+                        </span>
+                      </button>
                     </li>
                   ))}
                   {outstandingReports.length > 6 && (
