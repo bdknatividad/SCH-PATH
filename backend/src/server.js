@@ -2825,6 +2825,108 @@ async function runMigrations() {
   await backfillPhaseProgressAdmissions();
   await repairWorkflowDocuments();
   await grantChildRecordsToHouseparents();
+  await backfillEducationDocuments();
+}
+
+/**
+ * Files the education uploads that were made before the create gate allowed
+ * them into Documents.
+ *
+ * The Education module's Upload button has always copied what it saved into the
+ * child's **Educational Records** folder, but `POST /documents` answered 403 to
+ * the Educator: the role holds `Education: create` and only `Documents: view`,
+ * and the gate asked for `Documents: create`. The screen caught the refusal,
+ * kept the file in the education record and said so in a line that is easy to
+ * miss — so the upload looked like it had worked and the file was nowhere in the
+ * resident's record. Three files were live in that state on 2026-10-02, all
+ * uploaded the day before: two for CH004 and one for CH002.
+ *
+ * The gate is fixed in `documentRoutes.requireDocumentCreate`; this places what
+ * was uploaded before it was, so nobody has to upload their files a second time.
+ *
+ * Idempotent: a file is skipped when a document already carries its resident,
+ * its title and its file name — which is also what keeps a later re-upload from
+ * producing a duplicate of a row this repair created.
+ *
+ * `admissionId` is left NULL and filled by `backfillDocumentAdmissions()`, which
+ * already knows how to place a document under the admission that was open when
+ * it was written; this calls it again at the end rather than repeating the rule.
+ */
+async function backfillEducationDocuments() {
+  try {
+    const [records] = await pool.query(
+      'SELECT id, residentId, name, createdBy, modifiedBy, files FROM education_records WHERE files IS NOT NULL'
+    );
+    if (!records.length) return;
+
+    const { insertWithGeneratedId } = require('./utils/helpers');
+    const { RESOURCES } = require('./utils/constants');
+    const prefix = RESOURCES?.documents?.prefix || 'DOC';
+    const { categoryForDocument } = require('./utils/documentCategory');
+
+    let filed = 0;
+
+    for (const record of records) {
+      let files = record.files;
+      if (typeof files === 'string') {
+        try { files = JSON.parse(files); } catch { continue; }
+      }
+      if (!Array.isArray(files) || !files.length) continue;
+
+      const residentId = record.residentId;
+      if (!residentId) continue;
+
+      const [existing] = await pool.query(
+        'SELECT title, fileName FROM documents WHERE residentId = ?',
+        [residentId],
+      );
+      const alreadyFiled = new Set(existing.map((row) => `${row.title}|${row.fileName}`));
+
+      for (const file of files) {
+        if (!file || !file.dataUrl) continue;
+
+        const label = file.otherLabel || file.category || 'File';
+        const title = `Education — ${label}`;
+        if (alreadyFiled.has(`${title}|${file.name}`)) continue;
+
+        const description = `${label} uploaded via Education Module for ${record.name || residentId}.`;
+        const uploadedAt = file.uploadDate ? new Date(file.uploadDate) : new Date();
+        const documentFolder = categoryForDocument({ title, category: 'Education', fileName: file.name });
+        // The education record's own author is the closest thing to the uploader
+        // this file has: it was written by the educator who uploaded it. The
+        // role is safe to state — only an Educator writes an education record.
+        const actor = record.modifiedBy || record.createdBy || 'Educator';
+
+        await insertWithGeneratedId(pool, {
+          table: 'documents',
+          prefix,
+          insert: (id) => pool.query(
+            `INSERT INTO documents
+               (id, residentId, residentName, title, category, documentCategory, description,
+                fileName, fileType, fileSize, fileData, uploaderRole, uploadedBy, uploadedAt,
+                status, submittedBy, submittedAt, createdBy, modifiedBy)
+             VALUES (?, ?, ?, ?, 'Education', ?, ?, ?, ?, ?, ?, 'educator', ?, ?,
+                     'Submitted', ?, ?, ?, ?)`,
+            [
+              id, residentId, record.name || null, title, documentFolder, description,
+              file.name || null, file.type || null, file.size || null, file.dataUrl,
+              actor, uploadedAt, actor, uploadedAt, actor, actor,
+            ],
+          ),
+        });
+
+        alreadyFiled.add(`${title}|${file.name}`);
+        filed += 1;
+      }
+    }
+
+    if (filed) {
+      console.log(`Migration: ${filed} education file(s) filed into Documents.`);
+      await backfillDocumentAdmissions();
+    }
+  } catch (err) {
+    console.warn('Migration warning (education documents backfill):', err.message);
+  }
 }
 
 /**

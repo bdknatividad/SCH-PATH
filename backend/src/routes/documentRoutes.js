@@ -12,6 +12,10 @@ const { authorize, authorizeNonHouseparent } = require('../middleware/auth');
 const { requirePermission, requireSubModule, snapshotFor } = require('../middleware/rbac');
 const { hasModuleAccess, hasPermission } = require('../config/rbac');
 const { pool } = require('../config/database');
+const { categoryForDocument } = require('../utils/documentCategory');
+
+/** The folder the Education module's own uploads are filed into. */
+const EDUCATION_FOLDER = 'Educational Records';
 
 /**
  * The module each generated quarterly Progress Report is filed from.
@@ -47,13 +51,34 @@ const PROGRESS_REPORT_PROGRAM_BY_TYPE = {
  * back to it, so nothing that used to work stops working.
  */
 function requireDocumentCreate(req, res, next) {
-  const program = PROGRESS_REPORT_PROGRAM_BY_TYPE[String(req.body?.type || '').trim()];
-  if (program) {
-    const snapshot = snapshotFor(req);
-    if (hasModuleAccess(snapshot, program) && hasPermission(snapshot, program, 'create')) {
-      return next();
-    }
-  }
+  const body = req.body || {};
+  const snapshot = snapshotFor(req);
+  const holds = (moduleName) =>
+    hasModuleAccess(snapshot, moduleName) && hasPermission(snapshot, moduleName, 'create');
+
+  const program = PROGRESS_REPORT_PROGRAM_BY_TYPE[String(body.type || '').trim()];
+  if (program && holds(program)) return next();
+
+  /*
+   * The Education module's own Upload button, which files whatever the educator
+   * chose straight into the child's **Educational Records** folder.
+   *
+   * Exactly the same asymmetry as the quarterly report above, and it produced a
+   * worse failure: the Educator holds `Education: create` but only
+   * `Documents: view`, so the copy into Documents answered 403. The upload
+   * screen caught that, kept the file in the Education record, and said so in a
+   * line most people never read — so the file appeared to save and then was
+   * simply absent from the resident's record, which is how "I uploaded it but
+   * it isn't in the child's documents" presents.
+   *
+   * Keyed on the folder the document is about to be filed into rather than on a
+   * title, so it covers every education upload without the caller having to
+   * name one — and it cannot be used to file anything outside Education,
+   * because a document that derives anywhere else still goes through
+   * `Documents: create`.
+   */
+  if (categoryForDocument(body) === EDUCATION_FOLDER && holds('Education')) return next();
+
   return requirePermission('Documents', 'create')(req, res, next);
 }
 
