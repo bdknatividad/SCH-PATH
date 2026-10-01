@@ -166,6 +166,60 @@ export function EmptyState({ children }: { children?: ReactNode }) {
 }
 
 /**
+ * One bar in a distribution.
+ *
+ * A **button** whenever there is something behind it, because hover alone would
+ * leave the residents unreachable on every phone and tablet — and the whole row
+ * is a far larger tap target than the bar itself. An empty band stays a plain
+ * `div`: there is nothing to show, and a control that opens an empty list is
+ * worse than one that does not respond.
+ */
+export function BarRow({
+  label,
+  fullLabel,
+  count,
+  percent,
+  barClass,
+  onOpen,
+}: {
+  label: string;
+  fullLabel?: string;
+  count: number;
+  percent: string;
+  barClass: string;
+  onOpen: () => void;
+}) {
+  const interactive = count > 0;
+  const Wrapper = interactive ? 'button' : 'div';
+
+  return (
+    <Wrapper
+      type={interactive ? 'button' : undefined}
+      onClick={interactive ? onOpen : undefined}
+      aria-label={interactive ? `${label}: ${count}. Show the list.` : undefined}
+      className={cn(
+        'flex w-full items-center gap-3 rounded-lg px-1.5 py-1 text-left',
+        interactive && 'hover:bg-[#FFD100]/15 transition-colors',
+      )}
+    >
+      <span
+        className={cn(
+          'w-28 shrink-0 truncate text-xs sm:w-32',
+          interactive ? 'font-medium text-[#2F3E46]' : 'text-gray-600',
+        )}
+        title={fullLabel || label}
+      >
+        {label}
+      </span>
+      <div className="h-4 flex-1 overflow-hidden rounded-full bg-gray-100 sm:h-5">
+        <div className={cn('h-full rounded-full transition-all', barClass)} style={{ width: percent }} />
+      </div>
+      <span className="w-8 shrink-0 text-right text-xs font-bold text-[#2F3E46]">{count}</span>
+    </Wrapper>
+  );
+}
+
+/**
  * A row inside a `SectionCard` list.
  *
  * `to` is a path the caller has already established the role may open — this

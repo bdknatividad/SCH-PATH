@@ -1703,10 +1703,29 @@ export function Dashboard() {
   const activeCount    = activeChildren.length;
   const closedCount    = children.filter(c => isClosedResident(c.status)).length;
 
-  const needImprovementCount = activeChildren.filter(c => getRealTimeUrgency(c.id).label === 'Need Improvement').length;
-  const fairCount = activeChildren.filter(c => getRealTimeUrgency(c.id).label === 'Fair').length;
-  const goodCount = activeChildren.filter(c => getRealTimeUrgency(c.id).label === 'Good').length;
-  const veryGoodCount = activeChildren.filter(c => getRealTimeUrgency(c.id).label === 'Very Good').length;
+  // Each urgency band keeps the residents it is made of, so a bar on the Social
+  // Worker's page can open the very list the count was taken from. One pass
+  // builds both, so the bar and its dialog cannot disagree; the four counts are
+  // then read off the groups rather than re-filtering the caseload.
+  const urgencyGroups: Record<string, { id: string; name: string }[]> = {
+    'Need Improvement': [], Fair: [], Good: [], 'Very Good': [],
+  };
+  activeChildren.forEach(c => {
+    urgencyGroups[getRealTimeUrgency(c.id).label].push({ id: String(c.id), name: c.name });
+  });
+
+  const needImprovementCount = urgencyGroups['Need Improvement'].length;
+  const fairCount = urgencyGroups.Fair.length;
+  const goodCount = urgencyGroups.Good.length;
+  const veryGoodCount = urgencyGroups['Very Good'].length;
+
+  /** The four bands, each with its residents — what the Social Worker's bars open. */
+  const urgencyBands = [
+    { label: 'Need Improvement', count: needImprovementCount, residents: urgencyGroups['Need Improvement'] },
+    { label: 'Fair', count: fairCount, residents: urgencyGroups.Fair },
+    { label: 'Good', count: goodCount, residents: urgencyGroups.Good },
+    { label: 'Very Good', count: veryGoodCount, residents: urgencyGroups['Very Good'] },
+  ];
 
   // Urgency is computed from real-time unresolved violations, not the
   // previous month's materialized ratings. The period label is therefore
@@ -1722,11 +1741,17 @@ export function Dashboard() {
     'Pre-integration Phase':                     'Pre-integration',
     'Reintegration/Aftercare Program':           'Reintegration',
   };
-  const phaseCounts = Object.keys(PHASE_LABELS).map(phase => ({
-    phase,
-    short: PHASE_LABELS[phase],
-    count: activeChildren.filter(c => c.casePhase === phase).length,
-  })).filter(p => p.count > 0);
+  const phaseCounts = Object.keys(PHASE_LABELS).map(phase => {
+    const inPhase = activeChildren.filter(c => c.casePhase === phase);
+    return {
+      phase,
+      short: PHASE_LABELS[phase],
+      count: inPhase.length,
+      // The residents behind the bar, so clicking it opens the same list the
+      // count was taken from rather than a guess at who is in the phase.
+      residents: inPhase.map(c => ({ id: String(c.id), name: c.name })),
+    };
+  }).filter(p => p.count > 0);
 
   // Offense tracking per child (based on violation category counts)
   const getOffenseLevel = (residentId: string) => {
@@ -1902,12 +1927,7 @@ export function Dashboard() {
           violations={violations}
           upcomingHearings={scheduledHearings}
           phases={phaseCounts}
-          urgency={{
-            needImprovement: needImprovementCount,
-            fair: fairCount,
-            good: goodCount,
-            veryGood: veryGoodCount,
-          }}
+          urgency={urgencyBands}
           pendingAssessments={scheduledAssessments}
           todayActivities={todayActivities}
           todayAssessments={todayAssessments}
