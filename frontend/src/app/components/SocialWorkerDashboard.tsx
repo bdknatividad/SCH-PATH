@@ -36,9 +36,9 @@
  *  - The command centre reads both from `GET /dashboard/center-head`, scoped to
  *    the month its period selector names — a **finalized TRI for that month**.
  *  - This page has no period selector, so Behavioral Status reads
- *    `GET /tri/monitor`, the rating of each resident's **most recent** finalized
- *    TRI. That is the same reading as the TRI Statistics card below it, which is
- *    the point: the two cannot disagree.
+ *    `GET /tri/monitor` — the rating of each resident's **most recent** finalized
+ *    TRI. That is the reading the TRI module itself ranks residents by, so this
+ *    card and the TRI screen cannot disagree.
  *
  * ## Links
  *
@@ -54,7 +54,7 @@ import {
 } from 'lucide-react';
 import type { Child, CourtRecord, Violation } from '../state/DataContext';
 import { formatShortDate } from '@/utils/dateFormatter';
-import { TriStatistics, useTriMonitor } from './TriStatistics';
+import { useTriMonitor } from './TriStatistics';
 import {
   DashboardHeader, StatTile, StatTileRow, SectionCard, EmptyState, ListRow,
   DistributionCard, BEHAVIORAL_BAR, BEHAVIORAL_BANDS, type DistributionRow, type ResidentRef,
@@ -107,9 +107,10 @@ export function SocialWorkerDashboard({
   onOpen,
 }: SocialWorkerDashboardProps) {
   /**
-   * The TRI rows behind Behavioral Status, loaded here rather than inside the
-   * TRI Statistics card so the page makes one request and both cards read the
-   * same rows.
+   * The TRI rows behind Behavioral Status. `/tri/monitor` returns one row per
+   * active resident — the rating of their most recent finalized TRI — which is
+   * both the count and the names, so the bar and the list it opens come from one
+   * answer.
    */
   const triMonitor = useTriMonitor();
   const triRows = triMonitor.rows || [];
@@ -355,12 +356,6 @@ export function SocialWorkerDashboard({
         </SectionCard>
       </div>
 
-      {/* TRI Statistics — the shared card, reused rather than re-drawn, and fed
-          the rows Behavioral Status already loaded so the page asks once. It
-          reads `/tri/monitor`, which this role is entitled to (the endpoint is
-          gated to the reviewer roles and the Social Worker is one of them). */}
-      <TriStatistics rows={triMonitor.rows} />
-
       {/* Pending assessments. Each card opens the assessment it names. */}
       <SectionCard
         title="Pending Assessments"
@@ -447,8 +442,9 @@ export function SocialWorkerDashboard({
       <p className="text-[10px] text-gray-400">
         Counts follow the module each card opens: Active Cases is the Child Records Active
         filter, Docs Pending is the Documents module&rsquo;s For Review queue, For Verification
-        is the Violations module&rsquo;s verification queue, and TRI Statistics is the TRI
-        module&rsquo;s own card. Click any bar to see the residents behind it.
+        is the Violations module&rsquo;s verification queue, and Behavioral Status is the rating
+        of each resident&rsquo;s most recent finalized TRI. Click any bar to see the residents
+        behind it.
       </p>
 
       {activeCount === 0 && (

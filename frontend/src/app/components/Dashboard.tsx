@@ -1766,20 +1766,10 @@ export function Dashboard() {
   const activeCount    = activeChildren.length;
   const closedCount    = children.filter(c => isClosedResident(c.status)).length;
 
-  // One pass over the caseload builds the four urgency bands and their counts
-  // together, so a bar and its number cannot disagree. The counts are read off
-  // the groups rather than re-filtering — the same predicate, evaluated once.
-  const urgencyGroups: Record<string, number> = {
-    'Need Improvement': 0, Fair: 0, Good: 0, 'Very Good': 0,
-  };
-  activeChildren.forEach(c => {
-    urgencyGroups[getRealTimeUrgency(c.id).label] += 1;
-  });
-
-  const needImprovementCount = urgencyGroups['Need Improvement'];
-  const fairCount = urgencyGroups.Fair;
-  const goodCount = urgencyGroups.Good;
-  const veryGoodCount = urgencyGroups['Very Good'];
+  const needImprovementCount = activeChildren.filter(c => getRealTimeUrgency(c.id).label === 'Need Improvement').length;
+  const fairCount = activeChildren.filter(c => getRealTimeUrgency(c.id).label === 'Fair').length;
+  const goodCount = activeChildren.filter(c => getRealTimeUrgency(c.id).label === 'Good').length;
+  const veryGoodCount = activeChildren.filter(c => getRealTimeUrgency(c.id).label === 'Very Good').length;
 
   // Urgency is computed from real-time unresolved violations, not the
   // previous month's materialized ratings. The period label is therefore

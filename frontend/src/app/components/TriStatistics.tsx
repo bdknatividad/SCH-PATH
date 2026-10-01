@@ -84,21 +84,9 @@ const TILES: { key: string; label: string; cls: string; hint: string }[] = [
   { key: 'Unscored', label: 'Unscored', cls: 'border-gray-200 bg-gray-50 text-gray-500', hint: 'No finalized TRI yet' },
 ];
 
-/**
- * The TRI Statistics card.
- *
- * `rows` lets a page that has already loaded `/tri/monitor` — the Social
- * Worker's dashboard draws its Behavioral Status card from the same rows — hand
- * them over instead of asking for them a second time. Left out, the card loads
- * its own, which is how every other page uses it.
- */
-export function TriStatistics({ refreshKey, rows: providedRows }: {
-  refreshKey?: unknown;
-  rows?: TriMonitorRow[] | null;
-}) {
-  const ownsRequest = providedRows === undefined;
-  const { rows: loadedRows, error } = useTriMonitor(refreshKey, ownsRequest);
-  const rows = ownsRequest ? loadedRows : providedRows;
+/** The TRI Statistics card. */
+export function TriStatistics({ refreshKey }: { refreshKey?: unknown }) {
+  const { rows, error } = useTriMonitor(refreshKey);
   const counts = useMemo(() => countTriStatistics(rows || []), [rows]);
   const total = rows?.length ?? 0;
 
