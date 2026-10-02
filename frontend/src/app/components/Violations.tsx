@@ -23,6 +23,7 @@ import { systemDialog } from '@/app/components/SystemDialog';
 import ViolationGuide from './ViolationGuide';
 import IncidentReportModal from './IncidentReportModal';
 import { InterventionTracker } from './InterventionTracker';
+import { isActiveResident } from '@/utils/residentStatus';
 
 const SEVERITY_OPTIONS = [
   { value: 'Minor', label: 'Minor' },
@@ -577,7 +578,13 @@ export function Violations() {
   // assigned to them. A Houseparent on duty has to be able to log against
   // whichever resident is in front of them, so the list is now the one every
   // other role already used, and the server no longer refuses the write.
-  const residentChoices: Child[] = children;
+  // Only residents still in care can be given an incident. An absconded resident
+  // was already refused by the API after the fact — the picker offered them
+  // anyway, so the only way to find out was to submit and be rejected. A
+  // discharged or transferred resident was not refused at all: the list was
+  // every child in the store, so an incident could be logged against a case that
+  // had already closed. `isActiveResident` is the one predicate for both.
+  const residentChoices: Child[] = children.filter((child) => isActiveResident(child.status));
   const filteredResidentChoices = residentChoices.filter((child) =>
     child.name.toLowerCase().includes(residentSearch.trim().toLowerCase()) ||
     child.id.toLowerCase().includes(residentSearch.trim().toLowerCase())

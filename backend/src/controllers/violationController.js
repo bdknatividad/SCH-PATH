@@ -18,7 +18,7 @@ const {
   determineOffenseLevel,
 } = require('../utils/violationGuideHelper');
 const notifications = require('../services/notificationService');
-const { assertResidentNotAbsconded } = require('../utils/abscond');
+const { assertResidentActive } = require('../utils/residentStatus');
 const { canAccessResident } = require('./assignmentController');
 const { pointsForSeverity } = require('../utils/violationPoints');
 const { notifyScheduleCreated } = require('../utils/scheduledWork');
@@ -557,7 +557,7 @@ async function create(req, res, next) {
     const residentId = String(req.body?.residentId || '').trim();
     const violationType = String(req.body?.type || '').trim();
     // An absconded resident's record is view-only.
-    await assertResidentNotAbsconded(residentId, 'given a new incident');
+    await assertResidentActive(residentId, 'given a new incident');
 
     if (!residentId) {
       throw new ApiError(400, 'Resident is required.');
@@ -739,7 +739,7 @@ async function resubmit(req, res, next) {
       throw new ApiError(403, 'Only the staff member who reported this incident can correct and resubmit it.');
     }
 
-    await assertResidentNotAbsconded(violation.residentId, 'corrected');
+    await assertResidentActive(violation.residentId, 'corrected');
 
     const violationType = String(req.body?.type || violation.type || '').trim();
     const guide = await getGuideWithInterventionsByName(violationType);
