@@ -410,35 +410,37 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
   const [isAdmissionPdfOpen, setIsAdmissionPdfOpen] = useState(false);
 
   /**
-   * The Education document being read on the Education tab.
+   * The document being read on the resident's own record — from the Education
+   * tab or the Medical tab.
    *
-   * The file is fetched as binary rather than read out of the store: the store's
-   * `documents` rows carry `fileData` as a base64 string, and holding one of
-   * those open would put the whole file in the payload for a page that is not
-   * showing it. `/documents/:id/file` is the same route the Documents module's
-   * own viewer uses.
+   * The file is fetched as binary rather than read out of the store: the store
+   * deliberately drops `documents.fileData` (it is base64 and can be megabytes
+   * per file), so there is nothing to read there. `/documents/:id/file` is the
+   * same route the Documents module's own viewer uses, and it enforces the
+   * document's read rule — a role that may not read the file is refused.
    */
-  const [educationDoc, setEducationDoc] = useState<any | null>(null);
-  const [educationDocUrl, setEducationDocUrl] = useState<string | null>(null);
-  const [educationDocError, setEducationDocError] = useState<string | null>(null);
-  const [educationDocLoading, setEducationDocLoading] = useState(false);
+  const [previewDoc, setPreviewDoc] = useState<any | null>(null);
+  const [previewDocUrl, setPreviewDocUrl] = useState<string | null>(null);
+  const [previewDocError, setPreviewDocError] = useState<string | null>(null);
+  const [previewDocLoading, setPreviewDocLoading] = useState(false);
 
   /** Blob URLs are ours to release; the base64 fallback is not. */
-  const closeEducationDoc = () => {
-    if (educationDocUrl && educationDocUrl.startsWith('blob:')) URL.revokeObjectURL(educationDocUrl);
-    setEducationDoc(null);
-    setEducationDocUrl(null);
-    setEducationDocError(null);
+  const closeDocPreview = () => {
+    if (previewDocUrl && previewDocUrl.startsWith('blob:')) URL.revokeObjectURL(previewDocUrl);
+    setPreviewDoc(null);
+    setPreviewDocUrl(null);
+    setPreviewDocError(null);
   };
 
-  const openEducationDoc = async (doc: any) => {
-    setEducationDoc(doc);
-    setEducationDocUrl(null);
-    setEducationDocError(null);
-    setEducationDocLoading(true);
+  /** Open a document in the reader. Shared by the Education and Medical tabs. */
+  const openDocPreview = async (doc: any) => {
+    setPreviewDoc(doc);
+    setPreviewDocUrl(null);
+    setPreviewDocError(null);
+    setPreviewDocLoading(true);
     try {
       const { blob } = await fetchBinary(`/documents/${doc.id}/file`);
-      setEducationDocUrl(URL.createObjectURL(blob));
+      setPreviewDocUrl(URL.createObjectURL(blob));
     } catch {
       // A row filed before the binary route existed only carries the base64 the
       // uploader sent, and `GET /documents/:id` is what returns that.
@@ -446,25 +448,25 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
         const res = await request<any>(`/documents/${doc.id}`);
         const fileData = res?.data?.fileData || res?.fileData || null;
         if (!fileData) throw new Error('No file stored for this document.');
-        setEducationDocUrl(fileData);
+        setPreviewDocUrl(fileData);
       } catch (error) {
-        setEducationDocError(
+        setPreviewDocError(
           error instanceof Error ? error.message : 'This file could not be opened.',
         );
       }
     } finally {
-      setEducationDocLoading(false);
+      setPreviewDocLoading(false);
     }
   };
 
   /**
-   * Save a copy of an education document to the device.
+   * Save a copy of a document to the device.
    *
    * The binary route first, so the file that lands is the one stored rather than
    * whatever the store happens to be carrying; the store's data URL is the
    * fallback for a row filed before that route existed.
    */
-  const downloadEducationDoc = async (doc: any) => {
+  const downloadDocCopy = async (doc: any) => {
     const fileName = doc.fileName || doc.title || 'document';
     const save = (href: string) => {
       const link = document.createElement('a');
@@ -481,7 +483,7 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
       URL.revokeObjectURL(url);
     } catch {
       if (doc.fileData) save(doc.fileData);
-      else setEducationDocError('This file could not be downloaded.');
+      else setPreviewDocError('This file could not be downloaded.');
     }
   };
 
@@ -1371,7 +1373,7 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
               render are excluded: listing them twice is the same duplication the
               Medical tab had to undo for the Health module's published copies.
             */
-            const educationDocs = documents.filter(d =>
+            const previewDocs = documents.filter(d =>
               d.residentId === child.id
               && folderForDocument(d as any) === 'Educational Records'
               && d.title !== 'School Visit Report'
@@ -1474,12 +1476,12 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
                     education upload has always been copied there; this is what
                     makes it visible — and readable — from the resident's own
                     record, without opening the Documents module. */}
-                {educationDocs.length > 0 && (
+                {previewDocs.length > 0 && (
                   <Card className="border-none shadow-sm">
                     <CardContent className="p-4">
                       <h4 className="font-bold text-[#2F3E46] text-sm mb-3">Education Documents</h4>
                       <div className="space-y-2">
-                        {educationDocs.map((d) => (
+                        {previewDocs.map((d) => (
                           <div key={d.id} className="flex items-center justify-between gap-3 p-3 bg-gray-50 rounded-xl">
                             <div className="min-w-0 flex items-center gap-2">
                               <FileText className="w-4 h-4 text-[#2F3E46] shrink-0" />
@@ -1499,7 +1501,7 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
                                 variant="outline"
                                 size="sm"
                                 className="h-7 px-2 text-xs"
-                                onClick={() => void openEducationDoc(d)}
+                                onClick={() => void openDocPreview(d)}
                               >
                                 <Eye className="w-3.5 h-3.5 mr-1" /> View
                               </Button>
@@ -1507,7 +1509,7 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
                                 variant="outline"
                                 size="sm"
                                 className="h-7 px-2 text-xs"
-                                onClick={() => void downloadEducationDoc(d)}
+                                onClick={() => void downloadDocCopy(d)}
                               >
                                 <FileText className="w-3.5 h-3.5 mr-1" /> Download
                               </Button>
@@ -1584,22 +1586,24 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
             </CardContent>
           </Card>
 
-          {/* Health & Medical History.
-              Two lists, and they are not the same thing:
+          {/* Medical Documents.
+              The files filed for this resident, in the same shape as the
+              Education tab's own document card: one row per file, with View and
+              Download.
 
-                · **Medical Documents** — files filed under category 'Medical' in
-                  the Documents module. Only the ones somebody uploaded by hand:
-                  the Health module publishes a copy of every record into
-                  Documents, and those copies are excluded here because the record
-                  itself is listed below and says more.
-                · **Health Records** — the records the Health module wrote: the
-                  findings, the medications, the treatment. The source of truth.
+              The Download link here used to read `fileData` straight out of the
+              store, which meant it never appeared at all — `/api/store` drops
+              `documents.fileData` deliberately, because it is base64 and can be
+              megabytes per file. Both buttons now go through
+              `/documents/:id/file`, the route the Documents module's own viewer
+              uses, which also enforces the document's read rule.
 
-              They used to overlap almost completely, so a single checkup appeared
-              twice and the section read as duplicated rather than as two views. */}
+              Only files somebody attached by hand are listed here. The Health
+              module publishes a copy of every record into Documents, and those
+              copies are reached from the Health Record they belong to, below. */}
           <Card>
             <CardHeader className="flex flex-row items-center justify-between pb-3">
-              <CardTitle className="text-sm font-bold text-slate-700">Health & Medical History</CardTitle>
+              <CardTitle className="text-sm font-bold text-slate-700">Medical Documents</CardTitle>
               {canEditMedical && (
                 <>
                   <input
@@ -1615,57 +1619,90 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
                 </>
               )}
             </CardHeader>
-            <CardContent className="space-y-5">
-              <div>
-                <p className="mb-2 text-[10px] font-bold uppercase tracking-wide text-gray-400">Medical Documents</p>
-                <div className="rounded-md border border-gray-100 overflow-hidden">
-                  <table className="w-full text-sm text-left">
-                    <thead className="bg-gray-50 border-b text-gray-600">
-                      <tr>
-                        <th className="p-3 font-semibold">Document Name</th>
-                        <th className="p-3 font-semibold">Category</th>
-                        <th className="p-3 font-semibold">Date Uploaded</th>
-                        <th className="p-3 text-right font-semibold">Action</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-50">
-                      {(() => {
-                        /*
-                          Only files that were actually uploaded here.
-                          
-                          The Health module auto-publishes every record into
-                          Documents as a "system-generated copy", and those copies
-                          carry the record's id in `healthRecordId`. Listing every
-                          Medical document therefore showed the same checkup twice:
-                          once as a file, and again as the Health Record below —
-                          which is the fuller entry, because it carries the
-                          findings and the prescription. The copies are excluded,
-                          and what remains is what somebody attached by hand: a
-                          visitor log, a medical certificate.
-                        */
-                        const docModuleMedical = documents
-                          .filter(d => d.residentId === child.id && d.category === 'Medical' && !(d as any).healthRecordId)
-                          .map(d => ({ id: d.id, name: d.title, category: 'Medical', dateUploaded: d.uploadedAt ? d.uploadedAt.split('T')[0] : d.approvedAt?.split('T')[0] || '—', fileName: d.fileName, fileData: d.fileData }));
-                        const legacyRecords = (child.medicalRecords || []).filter(r => !docModuleMedical.some(d => d.name === r.name));
-                        const allRecords = [...docModuleMedical, ...legacyRecords];
-                        if (allRecords.length === 0) return <tr><td colSpan={4} className="p-10 text-center"><div className="flex flex-col items-center gap-2 opacity-30"><Stethoscope className="w-10 h-10" /><p className="text-sm italic">No medical documents filed for this resident.</p></div></td></tr>;
-                        return allRecords.map((rec) => <tr key={rec.id} className="hover:bg-gray-50/50"><td className="p-3 font-medium">{rec.name}</td><td className="p-3 text-gray-500">{rec.category}</td><td className="p-3 text-gray-500">{rec.dateUploaded}</td><td className="p-3 text-right">{rec.fileData && <a href={rec.fileData} download={rec.fileName || rec.name} className="text-xs text-[#2F3E46] underline font-semibold">Download</a>}</td></tr>);
-                      })()}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              <div>
-                <p className="mb-2 text-[10px] font-bold uppercase tracking-wide text-gray-400">Health Records</p>
-                {(() => {
-                  const records = healthRecords.filter(r => String(r.residentId) === String(child.id));
-                  if (records.length === 0) {
-                    return <p className="rounded-md border border-dashed border-gray-200 p-6 text-center text-sm italic text-gray-400">Nothing logged in the Health module for this resident yet.</p>;
-                  }
+            <CardContent>
+              {(() => {
+                const medicalFiles = documents.filter(
+                  d => d.residentId === child.id && d.category === 'Medical' && !(d as any).healthRecordId,
+                );
+                // Rows written before the upload filed a document instead of a
+                // JSON entry. They carry no file, so they are listed without the
+                // two buttons rather than dropped.
+                const legacyRecords = (child.medicalRecords || [])
+                  .filter((r: any) => !medicalFiles.some(d => (d.title || d.fileName) === r.name));
+                if (medicalFiles.length === 0 && legacyRecords.length === 0) {
                   return (
-                    <div className="divide-y divide-gray-100 rounded-md border border-gray-100">
-                      {records.map((r: any) => (
+                    <div className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-gray-200 p-8 opacity-60">
+                      <Stethoscope className="w-9 h-9 text-gray-300" />
+                      <p className="text-sm italic text-gray-400">No medical documents filed for this resident.</p>
+                    </div>
+                  );
+                }
+                return (
+                  <div className="space-y-2">
+                    {medicalFiles.map((d) => (
+                      <div key={d.id} className="flex items-center justify-between gap-3 p-3 bg-gray-50 rounded-xl">
+                        <div className="min-w-0 flex items-center gap-2">
+                          <FileText className="w-4 h-4 text-[#2F3E46] shrink-0" />
+                          <div className="min-w-0">
+                            <p className="text-xs font-semibold text-[#2F3E46] truncate" title={d.title || d.fileName || ''}>
+                              {d.title || d.fileName || 'Document'}
+                            </p>
+                            <p className="text-[10px] text-gray-400 truncate">
+                              {d.fileName || 'File'}
+                              {d.uploadedAt ? ` · ${formatShortDate(String(d.uploadedAt).slice(0, 10))}` : ''}
+                              {d.uploadedBy ? ` · ${d.uploadedBy}` : ''}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <Button variant="outline" size="sm" className="h-7 px-2 text-xs" onClick={() => void openDocPreview(d)}>
+                            <Eye className="w-3.5 h-3.5 mr-1" /> View
+                          </Button>
+                          <Button variant="outline" size="sm" className="h-7 px-2 text-xs" onClick={() => void downloadDocCopy(d)}>
+                            <FileText className="w-3.5 h-3.5 mr-1" /> Download
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                    {legacyRecords.map((r: any) => (
+                      <div key={`legacy-${r.name}`} className="flex items-center justify-between gap-3 p-3 bg-gray-50 rounded-xl opacity-70">
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold text-[#2F3E46] truncate">{r.name}</p>
+                          <p className="text-[10px] text-gray-400">{[r.category, r.dateUploaded].filter(Boolean).join(' · ')}</p>
+                        </div>
+                        <span className="shrink-0 text-[10px] italic text-gray-400">No file attached</span>
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </CardContent>
+          </Card>
+
+          {/* Health Records.
+              The records the Health module wrote — the findings, the medications,
+              the treatment. The source of truth. A record whose copy was
+              published into Documents carries View and Download for that file, so
+              a record is read from the record rather than hunted for in the
+              Documents module. */}
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-bold text-slate-700">Health Records</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {(() => {
+                const records = healthRecords.filter(r => String(r.residentId) === String(child.id));
+                if (records.length === 0) {
+                  return <p className="rounded-md border border-dashed border-gray-200 p-6 text-center text-sm italic text-gray-400">Nothing logged in the Health module for this resident yet.</p>;
+                }
+                return (
+                  <div className="divide-y divide-gray-100 rounded-md border border-gray-100">
+                    {records.map((r: any) => {
+                      // The Health module publishes a copy of every record into
+                      // Documents, keyed back by `healthRecordId`. It is what
+                      // carries the file.
+                      const copy = documents.find((d) => String((d as any).healthRecordId) === String(r.id));
+                      return (
                         <div key={r.id} className="flex items-start justify-between gap-3 p-3">
                           <div className="min-w-0">
                             <p className="text-sm font-medium text-[#2F3E46]">{r.recordType || 'Health Record'}</p>
@@ -1677,13 +1714,25 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
                               <p className="mt-0.5 text-xs text-gray-500">{r.findings || r.procedure_ || r.medicationName}</p>
                             )}
                           </div>
-                          <Badge className="shrink-0 bg-[#2F3E46]/10 text-[#2F3E46]">{r.status || 'Completed'}</Badge>
+                          <div className="flex shrink-0 items-center gap-2">
+                            {copy && (
+                              <>
+                                <Button variant="outline" size="sm" className="h-7 px-2 text-xs" onClick={() => void openDocPreview(copy)}>
+                                  <Eye className="w-3.5 h-3.5 mr-1" /> View
+                                </Button>
+                                <Button variant="outline" size="sm" className="h-7 px-2 text-xs" onClick={() => void downloadDocCopy(copy)}>
+                                  <FileText className="w-3.5 h-3.5 mr-1" /> Download
+                                </Button>
+                              </>
+                            )}
+                            <Badge className="bg-[#2F3E46]/10 text-[#2F3E46]">{r.status || 'Completed'}</Badge>
+                          </div>
                         </div>
-                      ))}
-                    </div>
-                  );
-                })()}
-              </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
             </CardContent>
           </Card>
 
@@ -1870,34 +1919,34 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
       </Dialog>
 
       {/*
-        Reading an education document without leaving the resident's record.
-        A PDF is drawn page by page with the viewer this page already loads for
-        the Admission Slip; an image is shown as-is; anything else says so and
-        offers the download, rather than pretending to render a .docx.
+        Reading a document without leaving the resident's record. A PDF is drawn
+        page by page with the viewer this page already loads for the Admission
+        Slip; an image is shown as-is; anything else says so and offers the
+        download, rather than pretending to render a .docx.
       */}
-      <Dialog open={educationDoc !== null} onOpenChange={(open) => { if (!open) closeEducationDoc(); }}>
+      <Dialog open={previewDoc !== null} onOpenChange={(open) => { if (!open) closeDocPreview(); }}>
         <DialogContent className="h-[90vh] w-[min(1000px,calc(100vw-2rem))] !max-w-none p-0 overflow-hidden">
           <DialogHeader className="px-4 py-3 border-b bg-white">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <DialogTitle className="text-sm font-semibold truncate pr-8">
-                {educationDoc?.title || educationDoc?.fileName || 'Document'}
+                {previewDoc?.title || previewDoc?.fileName || 'Document'}
               </DialogTitle>
-              {educationDoc && (
-                <Button type="button" variant="outline" size="sm" onClick={() => void downloadEducationDoc(educationDoc)}>
+              {previewDoc && (
+                <Button type="button" variant="outline" size="sm" onClick={() => void downloadDocCopy(previewDoc)}>
                   <FileText className="w-4 h-4 mr-2" /> Download
                 </Button>
               )}
             </div>
           </DialogHeader>
           <div className="flex-1 min-h-0 overflow-auto bg-gray-100 p-4">
-            {educationDocLoading ? (
+            {previewDocLoading ? (
               <div className="flex h-full items-center justify-center text-sm text-gray-400">Opening the file…</div>
-            ) : educationDocError ? (
-              <div className="flex h-full items-center justify-center px-6 text-center text-sm text-red-600">{educationDocError}</div>
-            ) : !educationDocUrl ? null : isPdfDocument(educationDoc) ? (
+            ) : previewDocError ? (
+              <div className="flex h-full items-center justify-center px-6 text-center text-sm text-red-600">{previewDocError}</div>
+            ) : !previewDocUrl ? null : isPdfDocument(previewDoc) ? (
               <div className="flex justify-center items-start min-w-max">
                 <PdfDocument
-                  file={educationDocUrl}
+                  file={previewDocUrl}
                   loading={<div className="py-10 text-sm text-gray-400">Loading the document…</div>}
                   error={<div className="py-10 text-sm text-red-500">Unable to display this PDF. Download it instead.</div>}
                 >
@@ -1909,11 +1958,11 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
                   />
                 </PdfDocument>
               </div>
-            ) : isImageDocument(educationDoc) ? (
+            ) : isImageDocument(previewDoc) ? (
               <div className="flex justify-center">
                 <img
-                  src={educationDocUrl}
-                  alt={educationDoc?.title || educationDoc?.fileName || 'Document'}
+                  src={previewDocUrl}
+                  alt={previewDoc?.title || previewDoc?.fileName || 'Document'}
                   className="max-h-full max-w-full rounded-lg shadow-sm"
                 />
               </div>
@@ -1921,7 +1970,7 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
               <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-sm text-gray-500">
                 <FileText className="h-8 w-8 text-gray-300" />
                 <p>This file type cannot be shown here.</p>
-                <Button variant="outline" size="sm" onClick={() => void downloadEducationDoc(educationDoc)}>
+                <Button variant="outline" size="sm" onClick={() => void downloadDocCopy(previewDoc)}>
                   Download it instead
                 </Button>
               </div>
