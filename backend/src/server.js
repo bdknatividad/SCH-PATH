@@ -2182,23 +2182,64 @@ async function runMigrations() {
       const roleDefinition = getRoleDefinition(role);
       if (roleDefinition?.modules?.length) roleModuleDefaults[role] = roleDefinition.modules;
     }
-    // Child-record tabs are not declared in the definition, so they stay
-    // explicit here. They are a UI concern, not part of the module matrix.
-    const roleTabDefaults = {
-      nurse: ['Personal Info', 'Phase Timeline', 'Medical', 'Behavioral'],
-      educator: ['Personal Info', 'Education'],
-      houseparent: ['Personal Info', 'Phase Timeline', 'Education', 'Medical', 'Behavioral'],
-    };
     for (const [role, modules] of Object.entries(roleModuleDefaults)) {
       await pool.query(
         `UPDATE users
          SET accessibleModules = ?, childRecordTabs = ?
          WHERE LOWER(role) = ? AND status = 'Active'
            AND (accessibleModules IS NULL OR JSON_LENGTH(accessibleModules) = 0)`,
-        [JSON.stringify(modules), JSON.stringify(roleTabDefaults[role] || []), role]
+        // The tab list comes from the same canonical source as the module list.
+        // It used to be a third hand-written copy here, and it drifted the same
+        // way the others did: it handed Nurse a Behavioral tab the role matrix
+        // does not grant.
+        [JSON.stringify(modules), JSON.stringify(defaultsForRole(role).childRecordTabs), role]
       );
     }
     console.log('Migration: empty nurse, educator, and houseparent access rows repaired from the role definition.');
+
+    // A stored `childRecordTabs` overrides the role matrix, so a Nurse row
+    // written by the old hand-written default (or granted Behavioral by hand)
+    // keeps the tab even though the matrix withholds it. Strip it from every
+    // Nurse account. Only Nurse: the Educator never held it, and the Houseparent
+    // is granted it, so neither is touched.
+    try {
+      const [nurseRows] = await pool.query(
+        `SELECT id, childRecordTabs, subModules FROM users WHERE LOWER(role) = 'nurse'`
+      );
+      let stripped = 0;
+      for (const row of nurseRows) {
+        const tabs = asStringArray(row.childRecordTabs);
+        const tabsHas = tabs.includes('Behavioral');
+
+        let subModules = null;
+        if (row.subModules && typeof row.subModules === 'object' && !Array.isArray(row.subModules)) {
+          subModules = { ...row.subModules };
+        } else if (typeof row.subModules === 'string' && row.subModules.trim()) {
+          try {
+            const parsed = JSON.parse(row.subModules);
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) subModules = { ...parsed };
+          } catch {
+            subModules = null;
+          }
+        }
+        const subTabs = subModules && Array.isArray(subModules['Child Records']) ? subModules['Child Records'] : null;
+        const subHas = Array.isArray(subTabs) && subTabs.includes('Behavioral');
+
+        if (!tabsHas && !subHas) continue;
+        if (subHas) subModules['Child Records'] = subTabs.filter((tab) => tab !== 'Behavioral');
+        await pool.query('UPDATE users SET childRecordTabs = ?, subModules = ? WHERE id = ?', [
+          JSON.stringify(tabsHas ? tabs.filter((tab) => tab !== 'Behavioral') : tabs),
+          subModules ? JSON.stringify(subModules) : null,
+          row.id,
+        ]);
+        stripped += 1;
+      }
+      if (stripped > 0) {
+        console.log(`Migration: removed the Behavioral tab from ${stripped} nurse account(s).`);
+      }
+    } catch (nurseTabError) {
+      console.warn('Migration warning (nurse Behavioral tab):', nurseTabError.message);
+    }
 
     // Student identification for the Education module — LRN for registered
     // students, Trainee Number for CMDC trainees.

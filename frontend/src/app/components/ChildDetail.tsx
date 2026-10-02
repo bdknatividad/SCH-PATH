@@ -308,6 +308,16 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
       ]
     : rbacChildRecordTabs;
 
+  /**
+   * Whether this role holds the Behavioral tab.
+   *
+   * The header status pill (Behavioral Status / "Still Monitoring") is only a
+   * shortcut into that tab, so it may only be clickable when the tab exists.
+   * Nurse and Educator do not hold it, so their pill is a plain status badge,
+   * not a control — and the tab's own panel is not rendered for them either.
+   */
+  const hasBehavioralTab = childRecordTabs.some((tab) => tab.key === 'behavioral');
+
   const [activeTab, setActiveTab] = useState(() => {
     if (idProp) return initialTab || 'personal';
     const params = new URLSearchParams(location.search);
@@ -1154,9 +1164,18 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
         <Button onClick={handleBack} variant="ghost" className="flex items-center gap-2">
           <ArrowLeft className="w-4 h-4" /> Back
         </Button>
-        <Button onClick={() => setActiveTab('behavioral')} className={`${behaviorSummary.color} text-white px-4 py-1.5 flex gap-2 shadow-sm hover:opacity-90`}>
-          <ShieldAlert className="w-4 h-4" /> {behaviorSummary.status}
-        </Button>
+        {hasBehavioralTab ? (
+          <Button onClick={() => setActiveTab('behavioral')} className={`${behaviorSummary.color} text-white px-4 py-1.5 flex gap-2 shadow-sm hover:opacity-90`}>
+            <ShieldAlert className="w-4 h-4" /> {behaviorSummary.status}
+          </Button>
+        ) : (
+          <div
+            aria-disabled="true"
+            className={`${behaviorSummary.color} inline-flex select-none items-center gap-2 rounded-md px-4 py-1.5 text-sm font-medium text-white shadow-sm`}
+          >
+            <ShieldAlert className="w-4 h-4" /> {behaviorSummary.status}
+          </div>
+        )}
       </div>
 
       <Card className="border-l-4 border-l-[#2F3E46]">
@@ -1685,6 +1704,7 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
           />
         </TabsContent>
 
+        {hasBehavioralTab && (
         <TabsContent value="behavioral" className="mt-4 space-y-4">
           <Card>
             <CardContent className="p-4">
@@ -1726,6 +1746,7 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
           <Card><CardContent className="p-0"><table className="w-full text-sm text-left"><thead className="bg-gray-50 border-b text-gray-600"><tr><th className="p-3">Date</th><th className="p-3">Type</th><th className="p-3">Severity</th><th className="p-3">Status</th></tr></thead><tbody className="divide-y">{(() => { let filtered = childViolations; if (violationFilterValue !== 'all') { if (violationFilterValue === 'Resolved') filtered = childViolations.filter(v => v.status === 'Resolved'); else if (violationFilterValue === 'Unresolved') filtered = childViolations.filter(v => v.status !== 'Resolved'); else filtered = childViolations.filter(v => v.severity === violationFilterValue); } return filtered.length === 0 ? <tr><td colSpan={4} className="p-8 text-center text-gray-400 italic text-sm">{violationFilterValue === 'all' ? 'No violations recorded in system.' : 'No violations match the selected filter.'}</td></tr> : filtered.map((violation) => <tr key={violation.id} className={`hover:bg-gray-50/50 ${violation.status === 'Resolved' ? 'opacity-60' : ''}`}><td className="p-3">{formatShortDate(violation.date)}</td><td className="p-3 font-medium">{violation.type}</td><td className="p-3"><Badge variant="outline" className={violation.severity === 'Major' ? 'border-orange-400 text-orange-600' : 'border-yellow-400 text-yellow-600'}>{violation.severity}</Badge></td><td className="p-3"><Badge className={violation.status === 'Resolved' ? 'bg-green-100 text-green-800' : violation.status === 'Under Investigation' ? 'bg-blue-100 text-blue-800' : violation.status === 'Escalated' ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-800'}>{violation.status}</Badge></td></tr>); })()}</tbody></table></CardContent></Card>
           {(child.behavioralLogs || []).length > 0 && <Card className="opacity-75"><CardHeader className="pb-2"><CardTitle className="text-xs text-gray-500">Legacy Incident Logs (Pre-Migration)</CardTitle></CardHeader><CardContent className="p-0"><table className="w-full text-sm text-left"><tbody className="divide-y">{child.behavioralLogs.map((log) => <tr key={log.id} className="hover:bg-gray-50/50"><td className="p-2 text-xs">{formatShortDate(log.date)}</td><td className="p-2 text-xs">{log.type}</td></tr>)}</tbody></table></CardContent></Card>}
         </TabsContent>
+        )}
       </Tabs>
 
       <Dialog open={showExtensionDialog} onOpenChange={setShowExtensionDialog}>
