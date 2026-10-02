@@ -1144,8 +1144,16 @@ ${admissionHistorySection}
       }
 
       // Re-read the authoritative server state so Documents and Phase Timeline
-      // cannot diverge after an upload.
-      await loadData();
+      // cannot diverge after an upload — quietly.
+      //
+      // The row is already on screen by now: `addDocument` inserts it
+      // optimistically before its request goes out, and rolls it back if the
+      // write fails. What this read adds is the phase-history badges, whose
+      // missing-requirement list the *server* computes. Run without `background`
+      // it raised the page-wide `loading` flag, which replaces the whole timeline
+      // with a spinner — so every upload blanked the tab for a refresh the reader
+      // never asked for, and the row they had just filed disappeared with it.
+      await loadData({ background: true });
       setUploadingDoc(null);
     } catch (error) {
       console.error('Phase document upload failed:', error);
@@ -1207,7 +1215,11 @@ ${admissionHistorySection}
         uploadedAt: new Date().toISOString(),
       });
 
-      await loadData();
+      // Same as the required-document upload above: the row is already in the
+      // list optimistically, so this only refreshes the server-computed history
+      // badges — and it must not raise the page-wide spinner, which blanked the
+      // timeline and hid the document the user had just uploaded.
+      await loadData({ background: true });
       closeDocUpload();
     } catch (error) {
       console.error('Phase document upload failed:', error);
