@@ -134,6 +134,38 @@ function publish({ targetUserId = null, targetRole = null } = {}) {
   return delivered;
 }
 
+/**
+ * Signals every open listener, whatever role it belongs to.
+ *
+ * `publish()` addresses one account or one role, which is right for a
+ * notification: only the addressee's feed changed. A *document* change is a
+ * different shape. The resident's phase checklist, the Documents folder, the
+ * dashboards and the case-load lists all read the same rows, and the people
+ * looking at them are not a role the writer can name — a Center Head files a
+ * required document and the Social Worker, the Nurse and a Houseparent may each
+ * have that resident open.
+ *
+ * Over-delivery is harmless by the same argument the frame body relies on: the
+ * client answers a signal by re-reading through its own scoped endpoint, so the
+ * worst case is a refresh that finds nothing new. Under-delivery is the failure
+ * that matters, because it is a stale screen nobody can see is stale.
+ *
+ * The frame carries an event name so a listener can ignore traffic it does not
+ * care about — the notification bell does not need to re-read its feed because
+ * somebody uploaded a document.
+ *
+ * @param {string} event the SSE event name, e.g. 'documents'
+ * @returns {number} how many listeners were actually written to.
+ */
+function broadcast(event = 'documents') {
+  const payload = `event: ${event}\ndata: {}\n\n`;
+  let delivered = 0;
+  for (const set of [...clientsByUser.values()]) {
+    for (const client of [...set]) { if (writeTo(client, payload)) delivered += 1; }
+  }
+  return delivered;
+}
+
 /** Sends a heartbeat to every listener, dropping the ones that have gone. */
 function heartbeat() {
   for (const set of [...clientsByUser.values()]) {
@@ -175,6 +207,7 @@ module.exports = {
   subscribe,
   unsubscribe,
   publish,
+  broadcast,
   heartbeat,
   stats,
   reset,

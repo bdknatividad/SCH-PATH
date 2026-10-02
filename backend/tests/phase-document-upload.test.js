@@ -214,7 +214,12 @@ test('the upload goes through the existing Child Documents API', () => {
   const body = bodyOf(phaseSource, 'const handleDocUpload', 'const fetchStoredFile');
   assert.match(body, /await addDocument\(/, 'the upload must reuse the existing document API');
   assert.match(body, /residentId,/, 'and be linked to the child');
-  assert.match(body, /await loadData\(\)/, 'and reload so the list cannot diverge');
+  // The re-read is still required — it is what keeps Documents and the phase
+  // list from diverging. It must stay `background`, though: a plain `loadData()`
+  // raises the page-wide spinner, which replaces the timeline and hid the row
+  // the user had just uploaded.
+  assert.match(body, /await loadData\(\{ background: true \}\)/,
+    'and re-read so the list cannot diverge, without blanking the timeline');
 });
 
 test('Houseparents are not offered an upload the server would refuse', () => {

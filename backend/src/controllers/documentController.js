@@ -16,9 +16,33 @@ const { contentDisposition } = require('../utils/contentDisposition');
 const { buildAnecdotalReportDocument, isOfficialAnecdotalPdf } = require('../utils/anecdotalReportPdf');
 const { categoryForDocument, folderForDocument, DOCUMENT_FOLDERS } = require('../utils/documentCategory');
 const notifications = require('../services/notificationService');
+const alertStream = require('../services/alertStream');
 const { activeAdmissionIdFor } = require('../services/admissionLink');
 
 const baseController = createController('documents');
+
+/**
+ * Tell every open client that a document changed, so the resident's lists
+ * re-read instead of waiting for their next poll.
+ *
+ * Best-effort on purpose: the write has already committed, and a push that fails
+ * must not turn a successful upload into an error. Clients answer a signal by
+ * re-reading through their own scoped endpoints, so an over-delivered signal
+ * costs one refresh and can never disclose anything — the contract
+ * `services/alertStream.js` sets out for the notification feed.
+ *
+ * This is what makes a Center Head's upload appear on a Social Worker's screen
+ * within a second. Before it, a required document filed by one person notified
+ * nobody (only a psych assessment and a medical record did), so the other
+ * session had nothing to wake it up short of the 60-second poll.
+ */
+function signalDocumentsChanged() {
+  try {
+    alertStream.broadcast('documents');
+  } catch (error) {
+    console.error('[DocumentController] Document change signal failed (non-fatal):', error.message);
+  }
+}
 
 /**
  * Append a row to the document's audit trail.
@@ -1094,6 +1118,10 @@ async function create(req, res, next) {
       }
     }
 
+    // The document is filed; wake the other sessions now rather than at their
+    // next poll. Signalled after the write and before the response, so a client
+    // that sees the signal can always read the row it refers to.
+    signalDocumentsChanged();
     res.status(201).json({ success: true, data: mapRow('documents', rows[0]) });
   } catch (error) {
     next(error);
@@ -1852,6 +1880,10 @@ async function update(req, res, next) {
       await applyIncidentReportDecision(document, status, String(req.body?.rejectionReason || '').trim(), req.user);
     }
 
+    // Every transition this endpoint performs — approve, reject, reassess,
+    // resubmit — changes a status the phase checklist reads, so the other
+    // sessions are woken here too.
+    signalDocumentsChanged();
     return originalJson(responsePayload);
   } catch (error) {
     next(error);
@@ -1947,6 +1979,11 @@ async function remove(req, res, next) {
     }
 
     await baseController.delete(req, res, next);
+    // Signalled unconditionally. The generic controller reports a failure through
+    // `next()` rather than by throwing, so this cannot tell the two apart — and a
+    // signal for a delete that did not happen costs the clients one refresh that
+    // finds nothing changed. Missing the signal would leave the row on screen.
+    signalDocumentsChanged();
   } catch (error) {
     next(error);
   }

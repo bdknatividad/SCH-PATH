@@ -316,11 +316,14 @@ export const ALERT_STREAM_PATH = '/alerts/stream';
  * expected to re-run its scoped `GET /api/alerts`. The server deliberately does
  * not decide visibility twice; see `backend/src/services/alertStream.js`.
  *
- * @param onSignal called once per frame from the server, including the initial
- *   `ready` frame, so the caller's first refresh happens on connect.
+ * @param onEvent called once per frame from the server, with the frame's event
+ *   name — `ready` on connect, `alerts` when the notification feed changed,
+ *   `documents` when a document was filed, decided or removed. A listener
+ *   ignores the names it does not care about: the bell does not need to re-read
+ *   its feed because somebody uploaded a file.
  * @param signal aborts the subscription; pass the one from the effect's cleanup.
  */
-export async function streamAlerts(onSignal: () => void, signal: AbortSignal): Promise<void> {
+export async function streamAlerts(onEvent: (event: string) => void, signal: AbortSignal): Promise<void> {
   const response = await fetch(apiUrl(ALERT_STREAM_PATH), {
     headers: authHeaders({ Accept: 'text/event-stream' }),
     signal,
@@ -359,7 +362,10 @@ export async function streamAlerts(onSignal: () => void, signal: AbortSignal): P
         const frame = buffer.slice(0, boundary.index);
         buffer = buffer.slice(boundary.index + boundary[0].length);
         // `: keep-alive` comments are not changes.
-        if (/^(?:event|data):/m.test(frame)) onSignal();
+        if (/^(?:event|data):/m.test(frame)) {
+          const named = /^event:\s*(\S+)/m.exec(frame);
+          onEvent(named ? named[1] : 'message');
+        }
         boundary = /\r?\n\r?\n/.exec(buffer);
       }
     }

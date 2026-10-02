@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef, ReactNode } from 'react';
-import { createResource, deleteResource, getStore, updateResource, request } from '@/services/api';
+import { createResource, deleteResource, getStore, streamAlerts, updateResource, request } from '@/services/api';
 import { useAuth } from './AuthContext';
 
 // ponytail: dedupe concurrent mark-as-read calls (per-id) to prevent the
@@ -625,6 +625,60 @@ export function DataProvider({ children: childrenProp }: { children: ReactNode }
   useEffect(() => { persist('violations', violations); }, [violations]);
   useEffect(() => { persist('alerts', alerts); }, [alerts]);
   useEffect(() => { persist('courtRecords', courtRecords); }, [courtRecords]);
+
+  /**
+   * Keep the store current when somebody else changes a document.
+   *
+   * Until this existed, another person's upload became visible only when the
+   * reader regained window focus or the page's own poll came round — the Phase
+   * Timeline waited up to a minute, and only if they came back to the tab. The
+   * server now signals on the same stream the notification bell already uses;
+   * this listens for the `documents` frame and re-reads the store quietly, so
+   * the phase checklist, the Documents folder and every list built from them
+   * agree with the server within about a second.
+   *
+   * Only `documents`. An `alerts` frame means a notification changed, which the
+   * bell already handles on its own, and re-reading the whole store for each one
+   * would multiply `/store` traffic for no gain.
+   *
+   * The read is debounced because one write can arrive as several frames — an
+   * upload also records a revision and an audit row.
+   */
+  useEffect(() => {
+    const controller = new AbortController();
+    let debounce: number | undefined;
+    let retry: number | undefined;
+    let attempt = 0;
+
+    const connect = async () => {
+      try {
+        await streamAlerts((event) => {
+          if (event !== 'documents') return;
+          window.clearTimeout(debounce);
+          debounce = window.setTimeout(() => { void loadStore({ silent: true }); }, 400);
+        }, controller.signal);
+        // A clean end is the server closing the stream, not a failure.
+        attempt = 0;
+      } catch {
+        // Aborted by the cleanup below, or the connection dropped — either way
+        // the retry decision is made after this block.
+      }
+      if (controller.signal.aborted) return;
+      attempt += 1;
+      // The same backoff the notification bell uses. A proxy, a redeploy or a
+      // sleeping laptop must not leave the session deaf for good, and a stream
+      // that genuinely cannot be opened must not be hammered.
+      const delay = Math.min(1000 * 2 ** (attempt - 1), 30000);
+      retry = window.setTimeout(() => { void connect(); }, delay);
+    };
+
+    void connect();
+    return () => {
+      controller.abort();
+      window.clearTimeout(debounce);
+      if (retry) window.clearTimeout(retry);
+    };
+  }, [loadStore]);
 
   /**
    * A temporary, client-only key for an optimistically rendered row.
