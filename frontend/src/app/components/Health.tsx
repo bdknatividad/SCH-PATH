@@ -992,42 +992,15 @@ export function Health() {
       </Tabs>
 
       <Card className="border-none shadow-sm">
-        {/* Stacks on a phone. In a row, the hint text and the title compete for
-            320px and the title loses — "Medical Documents" broke mid-word
-            ("Documen / ts"), which is the same unreadable compression the table
-            fixes removed. Side by side again from `sm` up. */}
-        <CardHeader className="border-b border-gray-100 pb-3 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+        {/* The two upload buttons that used to sit here were disabled whenever
+            the resident filter was "All", so they read as dead controls — and the
+            same two uploads are already offered inside the health record form,
+            which knows which resident and which sheet row it is filing for. */}
+        <CardHeader className="border-b border-gray-100 pb-3">
           <CardTitle className="text-sm font-bold text-[#2F3E46] flex items-center gap-2">
             <FileText className="w-4 h-4 text-[#FFD100] shrink-0" /> Medical Documents
             <Badge className="bg-[#2F3E46]/10 text-[#2F3E46]">{medicalDocuments.length}</Badge>
           </CardTitle>
-          <div className="flex flex-wrap items-center gap-2">
-            {can('Health', 'create') && (
-              <>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 gap-1 px-2 text-xs"
-                  disabled={filterResident === 'all' || uploadingKey !== null}
-                  title={filterResident === 'all' ? 'Choose a resident in the filter first' : undefined}
-                  onClick={() => startUpload('Laboratory Results', filterResident)}
-                >
-                  <Plus className="w-3 h-3" /> Upload Laboratory Results
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-7 gap-1 px-2 text-xs"
-                  disabled={filterResident === 'all' || uploadingKey !== null}
-                  title={filterResident === 'all' ? 'Choose a resident in the filter first' : undefined}
-                  onClick={() => startUpload('Medical Certificate', filterResident)}
-                >
-                  <Plus className="w-3 h-3" /> Upload Medical Certificate
-                </Button>
-              </>
-            )}
-            <p className="text-[11px] text-gray-400">Filed under Documents → Medical Records</p>
-          </div>
         </CardHeader>
         <CardContent>
           {medicalDocuments.length === 0 ? (
