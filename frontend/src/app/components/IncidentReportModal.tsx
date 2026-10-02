@@ -690,9 +690,8 @@ export default function IncidentReportModal({
    * The Social Worker reviews the filed report first, so this is their other
    * outcome: the reason is required, and the return clears every signature and
    * sends the incident back to the Intervention Tracker as "Fill Out Again".
-   * Both decisions reuse the Documents module's tested path — `Reject` (the
-   * document's `Failed`) and `Reassessment` — so the incident, the document and
-   * the filer's notification stay in step.
+   * It reuses the Documents module's tested return path — `Reassessment` — so
+   * the incident, the document and the filer's notification stay in step.
    */
   const canReturn = Boolean(
     mode === 'sign'
@@ -702,7 +701,7 @@ export default function IncidentReportModal({
       && ['Submitted', 'Pending Review'].includes(String(report.status)),
   );
 
-  async function handleReturn(decision: 'Failed' | 'Reassessment') {
+  async function handleReturn() {
     if (!report?.pdfDocumentId) {
       setReturnError('This report has no linked document, so it cannot be returned from here.');
       return;
@@ -715,17 +714,10 @@ export default function IncidentReportModal({
     setReturning(true);
     setReturnError(null);
     try {
-      if (decision === 'Failed') {
-        await request(`/documents/${report.pdfDocumentId}/reject`, {
-          method: 'POST',
-          body: JSON.stringify({ rejectionReason: reason }),
-        });
-      } else {
-        await request(`/documents/${report.pdfDocumentId}`, {
-          method: 'PUT',
-          body: JSON.stringify({ status: 'Reassessment', rejectionReason: reason }),
-        });
-      }
+      await request(`/documents/${report.pdfDocumentId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ status: 'Reassessment', rejectionReason: reason }),
+      });
       setReturnOpen(false);
       setReturnReason('');
       onOpenChange(false);
@@ -841,11 +833,10 @@ export default function IncidentReportModal({
         </DialogFooter>
 
         {/*
-          The return dialog. Two outcomes, both of which clear every signature and
-          hand the report back to the filer: "Reject" (the report is wrong as
-          filed) and "For Reassessment" (it needs another look). The reason is
-          required — it travels to the filer's notification and the tracker row,
-          which is the whole point of returning rather than signing.
+          The return dialog. One outcome: the report goes back to the filer to be
+          corrected, and every signature is cleared. The reason is required — it
+          travels to the filer's notification and the tracker row, which is the
+          whole point of returning rather than signing.
         */}
         <Dialog open={returnOpen} onOpenChange={(next) => { if (!returning) setReturnOpen(next); }}>
           <DialogContent className="max-w-md">
@@ -871,16 +862,8 @@ export default function IncidentReportModal({
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setReturnOpen(false)} disabled={returning}>Cancel</Button>
-              <Button
-                variant="outline"
-                onClick={() => handleReturn('Reassessment')}
-                disabled={returning || !returnReason.trim()}
-                className="border-yellow-300 text-yellow-800 hover:bg-yellow-50"
-              >
-                {returning ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null} For Reassessment
-              </Button>
-              <Button onClick={() => handleReturn('Failed')} disabled={returning || !returnReason.trim()} className="bg-red-600 hover:bg-red-700">
-                {returning ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null} Reject
+              <Button onClick={handleReturn} disabled={returning || !returnReason.trim()} className="bg-[#2F3E46]">
+                {returning ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null} Send back for correction
               </Button>
             </DialogFooter>
           </DialogContent>

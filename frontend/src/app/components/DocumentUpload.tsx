@@ -326,7 +326,6 @@ interface DocListProps {
   children: { id: string; name: string }[];
   canApprove: boolean;
   onApprove: (doc: DocumentWithApproval) => void;
-  onReject: (doc: DocumentWithApproval) => void;
   onReassessment?: (doc: DocumentWithApproval) => void;
   onView: (doc: DocumentWithApproval) => void;
   onPrint?: (doc: DocumentWithApproval) => void;
@@ -350,7 +349,7 @@ interface DocListProps {
   onToggleSelect?: (id: string) => void;
 }
 
-function DocumentList({ docs, children, canApprove, canDelete, onApprove, onReject, onReassessment, onView, onPrint, onRequestAccess, onDelete, getStatusBadge, getFileIcon, formatFileSize, emptyMessage, deriveCategory, bulkMode, selectedIds, onToggleSelect }: DocListProps) {
+function DocumentList({ docs, children, canApprove, canDelete, onApprove, onReassessment, onView, onPrint, onRequestAccess, onDelete, getStatusBadge, getFileIcon, formatFileSize, emptyMessage, deriveCategory, bulkMode, selectedIds, onToggleSelect }: DocListProps) {
   // Declared before the empty-list return below: a hook after a conditional
   // return changes the number of hooks between renders.
   const dialog = useSystemDialog();
@@ -461,9 +460,13 @@ function DocumentList({ docs, children, canApprove, canDelete, onApprove, onReje
                       <Button variant="outline" size="sm" className="text-green-600 border-green-200 hover:bg-green-50" onClick={() => onApprove(doc)}>
                         <CheckCircle className="w-3.5 h-3.5 mr-1" /> Approve
                       </Button>
-                      <Button variant="outline" size="sm" className="text-red-600 border-red-200 hover:bg-red-50" onClick={() => onReject(doc)}>
-                        <X className="w-3.5 h-3.5 mr-1" /> Failed
-                      </Button>
+                      {/* One return action, not two. "Failed" and "Reassessment"
+                          were the same thing — the document goes back to the
+                          submitter to fix and resubmit — and every rule already
+                          treated `Rejected` and `Reassessment` as one list, so
+                          the second button only made the reviewer guess. The
+                          `Rejected` status is still read and rendered for rows
+                          stamped before this change. */}
                       <Button variant="outline" size="sm" className="text-yellow-600 border-yellow-200 hover:bg-yellow-50" onClick={() => onReassessment?.(doc)}>
                         ↺ Reassessment
                       </Button>
@@ -519,7 +522,6 @@ interface FolderDocumentRowProps {
   getStatusBadge: (status: string) => React.ReactNode;
   onView: () => void;
   onApprove: () => void;
-  onFailed: () => void;
   onReassessment: () => void;
   onReplace: () => void;
   onDelete: () => void;
@@ -529,7 +531,7 @@ interface FolderDocumentRowProps {
 
 function FolderDocumentRow({
   doc, canApprove, canDelete, canReplace, getStatusBadge,
-  onView, onApprove, onFailed, onReassessment, onReplace, onDelete, onHistory, onRequestAccess,
+  onView, onApprove, onReassessment, onReplace, onDelete, onHistory, onRequestAccess,
 }: FolderDocumentRowProps) {
   // The most recent review outcome. A rejection is kept on the row even after a
   // resubmission, so `status` decides which of the two the reader is looking at
@@ -638,7 +640,6 @@ function FolderDocumentRow({
           {canApprove && (doc.status === 'Submitted' || doc.status === 'Under Review') && (
             <>
               <Button variant="outline" size="sm" className="h-7 px-2 text-xs text-green-600" onClick={onApprove} title="Approve">✓ Approve</Button>
-              <Button variant="outline" size="sm" className="h-7 px-2 text-xs text-red-500" onClick={onFailed} title="Reject">✕ Reject</Button>
               <Button variant="outline" size="sm" className="h-7 px-2 text-xs text-yellow-600" onClick={onReassessment} title="Reassessment">↺ Reassessment</Button>
             </>
           )}
@@ -822,7 +823,7 @@ export function DocumentUpload() {
   const [rejectTarget, setRejectTarget] = useState<DocumentWithApproval | null>(null);
   const [isReviewDialogOpen, setIsReviewDialogOpen] = useState(false);
   const [reviewTarget, setReviewTarget] = useState<DocumentWithApproval | null>(null);
-  const [reviewDecision, setReviewDecision] = useState<'Passed' | 'Failed' | 'Reassessment'>('Passed');
+  const [reviewDecision, setReviewDecision] = useState<'Passed' | 'Reassessment'>('Passed');
   const [reviewNotes, setReviewNotes] = useState('');
   // The audit trail for one document, loaded on demand. Every transition —
   // upload, submission, resubmission, approval, each rejection with its reason —
@@ -1683,13 +1684,11 @@ export function DocumentUpload() {
   const handleReviewSubmit = async () => {
     if (!reviewTarget) return;
     const document = reviewTarget;
-    // The API refuses a rejection with no reason, and rightly so: the submitter
+    // The API refuses a return with no reason, and rightly so: the submitter
     // would be told to correct the file with nothing to act on.
     if (reviewDecision !== 'Passed' && !reviewNotes.trim()) {
       void dialog.validation('Add a note for the submitter', {
-        description: reviewDecision === 'Failed'
-          ? 'Say what is wrong with the document so it can be corrected.'
-          : 'Say what the submitter needs to add or change before it is reviewed again.',
+        description: 'Say what the submitter needs to add or change before it is reviewed again.',
       });
       return;
     }
@@ -1711,11 +1710,6 @@ export function DocumentUpload() {
     try {
       if (reviewDecision === 'Passed') {
         await request(`/documents/${document.id}/approve`, { method: 'POST' });
-      } else if (reviewDecision === 'Failed') {
-        await request(`/documents/${document.id}/reject`, {
-          method: 'POST',
-          body: JSON.stringify({ rejectionReason: notes }),
-        });
       } else {
         await updateDocument(document.id, {
           status: 'Reassessment' as any,
@@ -1725,11 +1719,7 @@ export function DocumentUpload() {
       }
       await refreshData();
       await dialog.success(
-        reviewDecision === 'Passed'
-          ? 'Document approved.'
-          : reviewDecision === 'Failed'
-            ? 'Document rejected.'
-            : 'Document sent for reassessment.',
+        reviewDecision === 'Passed' ? 'Document approved.' : 'Document sent for reassessment.',
         reviewDecision === 'Passed'
           ? `“${document.title}” is approved and filed.`
           : `“${document.title}” was returned with your note, and the submitter has been notified.`,
@@ -2034,7 +2024,6 @@ export function DocumentUpload() {
                 getStatusBadge={getStatusBadge}
                 onView={() => handleView(doc)}
                 onApprove={() => handleApprove(doc)}
-                onFailed={() => { setReviewTarget(doc); setReviewDecision('Failed'); setReviewNotes(''); setIsReviewDialogOpen(true); }}
                 onReassessment={() => { setReviewTarget(doc); setReviewDecision('Reassessment'); setReviewNotes(''); setIsReviewDialogOpen(true); }}
                 onReplace={() => { setReplaceTarget(doc); setReplaceFile(null); setReplaceNote(''); setReplaceError(null); }}
                 onDelete={() => { setDocumentToDelete(doc); setIsDeleteDialogOpen(true); }}
@@ -2521,7 +2510,7 @@ export function DocumentUpload() {
             groupedDocuments.length === 0 ? (
               <DocumentList docs={[]} children={children} canApprove={canApprove}
                 canDelete={canDeleteDocuments}
-                onApprove={handleApprove} onReject={() => {}} onView={handleView}
+                onApprove={handleApprove} onView={handleView}
                 onRequestAccess={openAccessRequest} onDelete={() => {}}
                 getStatusBadge={getStatusBadge} getFileIcon={getFileIcon}
                 formatFileSize={formatFileSize}
@@ -2539,7 +2528,6 @@ export function DocumentUpload() {
                       children={children}
                       canApprove={canApprove}
                       onApprove={handleApprove}
-                      onReject={(doc) => { setReviewTarget(doc); setReviewDecision('Failed'); setReviewNotes(''); setIsReviewDialogOpen(true); }}
                       onReassessment={(doc) => { setReviewTarget(doc); setReviewDecision('Reassessment'); setReviewNotes(''); setIsReviewDialogOpen(true); }}
                       onView={handleView}
                       onPrint={handlePrint}
@@ -2564,7 +2552,6 @@ export function DocumentUpload() {
               children={children}
               canApprove={canApprove}
               onApprove={handleApprove}
-              onReject={(doc) => { setReviewTarget(doc); setReviewDecision('Failed'); setReviewNotes(''); setIsReviewDialogOpen(true); }}
               onReassessment={(doc) => { setReviewTarget(doc); setReviewDecision('Reassessment'); setReviewNotes(''); setIsReviewDialogOpen(true); }}
               onView={handleView}
               onPrint={handlePrint}
@@ -2590,7 +2577,6 @@ export function DocumentUpload() {
               children={children}
               canApprove={canApprove}
               onApprove={handleApprove}
-              onReject={(doc) => { setReviewTarget(doc); setReviewDecision('Failed'); setReviewNotes(''); setIsReviewDialogOpen(true); }}
               onReassessment={(doc) => { setReviewTarget(doc); setReviewDecision('Reassessment'); setReviewNotes(''); setIsReviewDialogOpen(true); }}
               onView={handleView}
               onRequestAccess={openAccessRequest}
@@ -3088,27 +3074,12 @@ export function DocumentUpload() {
             {selectedDocument && canApprove
               && (selectedDocument.status === 'Submitted' || selectedDocument.status === 'Under Review') && (
               <>
-                <Button
-                  variant="outline"
-                  className="border-red-200 text-red-600 hover:bg-red-50"
-                  onClick={() => {
-                    const doc = selectedDocument;
-                    setIsViewDialogOpen(false);
-                    setReviewTarget(doc);
-                    setReviewDecision('Failed');
-                    setReviewNotes('');
-                    setIsReviewDialogOpen(true);
-                  }}
-                >
-                  <X className="w-4 h-4 mr-2" /> Reject
-                </Button>
                 {/*
-                  The third outcome, and the one the reviewer had to leave the
+                  The return outcome, and the one the reviewer had to leave the
                   file to reach. A notification deep-links straight to this
-                  dialog, so all three decisions belong on it: sending the
-                  submitter back for correction is as much a decision as
-                  approving or rejecting, and closing the preview to find the row
-                  was the only way to make it.
+                  dialog, so both decisions belong on it: sending the submitter
+                  back for correction is as much a decision as approving, and
+                  closing the preview to find the row was the only way to make it.
                 */}
                 <Button
                   variant="outline"
@@ -3281,33 +3252,29 @@ export function DocumentUpload() {
         </DialogContent>
       </Dialog>
 
-      {/* Reassessment Dialog — enter reason then confirm */}
+      {/* Return dialog — enter a reason, then confirm */}
       <Dialog open={isReviewDialogOpen} onOpenChange={setIsReviewDialogOpen}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle className="text-[#2F3E46] flex items-center gap-2">
-              ↺ {reviewDecision === 'Failed' ? 'Mark as Failed' : 'Request Reassessment'}
+              ↺ Request Reassessment
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
               <p className="text-sm font-semibold text-yellow-800">{reviewTarget?.title}</p>
               <p className="text-xs text-yellow-600 mt-1">
-                {reviewDecision === 'Failed'
-                  ? 'This document will be marked as Failed.'
-                  : 'This document will be sent back for revision and re-submission.'}
+                This document will be sent back for revision and re-submission.
               </p>
             </div>
             <div className="space-y-1.5">
               <label className="text-sm font-bold text-[#2F3E46]">
-                Reason {reviewDecision === 'Reassessment' ? 'for Reassessment' : 'for Failure'} *
+                Reason for Reassessment *
               </label>
               <textarea
                 value={reviewNotes}
                 onChange={e => setReviewNotes(e.target.value)}
-                placeholder={reviewDecision === 'Reassessment'
-                  ? 'Enter the reason why this document needs reassessment...'
-                  : 'Enter the reason why this document failed...'}
+                placeholder="Enter the reason why this document needs reassessment..."
                 rows={4}
                 className="w-full text-sm rounded-xl border border-gray-200 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#FFD100]"
               />
@@ -3321,11 +3288,9 @@ export function DocumentUpload() {
             <button
               disabled={!reviewNotes.trim()}
               onClick={handleReviewSubmit}
-              className={`flex-1 px-4 py-2 rounded-xl text-sm font-bold text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
-                reviewDecision === 'Failed' ? 'bg-red-600 hover:bg-red-700' : 'bg-yellow-500 hover:bg-yellow-600'
-              }`}
+              className="flex-1 px-4 py-2 rounded-xl text-sm font-bold text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed bg-yellow-500 hover:bg-yellow-600"
             >
-              {reviewDecision === 'Reassessment' ? 'Confirm Reassessment' : 'Confirm Failed'}
+              Confirm Reassessment
             </button>
           </div>
         </DialogContent>
