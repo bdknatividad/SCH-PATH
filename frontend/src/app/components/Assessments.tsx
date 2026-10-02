@@ -2,6 +2,9 @@
 // Psychological Staff forms for download
 const PSYCH_FORMS_DATA = [
   { name: 'CANS Assessment',            description: 'Child & Adolescent Needs & Strengths assessment tool',   file: '/forms/psych/cans.pdf' },
+  { name: 'Dialogue/Counseling Form',   description: 'Session purpose, flow and Psychological Staff notes',    file: '/forms/psych/dialogue-form.pdf' },
+  { name: 'Exit Form — RPSE (Form 21)', description: 'Rehabilitation Program Satisfaction Evaluation (Tagalog)', file: '/forms/psych/exit-form-rpse.pdf' },
+  { name: 'Intake Baseline Data (Form 02)', description: 'Agency type, case status and baseline data about the child', file: '/forms/intake-baseline.pdf' },
   { name: 'MBTI Personality Test',      description: 'Myers-Briggs Type Indicator personality assessment',     file: '/forms/psych/mbti.pdf' },
   { name: 'Mental Health 20 Questions', description: 'Standard 20-item mental health screening tool',          file: '/forms/psych/mental20q.pdf' },
   { name: 'SSCT (Sacks)',               description: 'Sacks Sentence Completion Test (Tagalog)',               file: '/forms/psych/ssct.pdf' },
