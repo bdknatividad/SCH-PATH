@@ -6,7 +6,8 @@
  * whose turn it is and opens the report). Two copies of this map would be two
  * chances to disagree about who signs what — and the API is the authority either
  * way: `resolveVerificationSide` refuses a line the caller does not own, and
- * refuses the Center Head until both Stage-1 lines are in.
+ * `verify` refuses a signer until the one before them has signed (the Social
+ * Worker, then the Psychological Support Staff, then the Center Head).
  *
  * @module utils/form08Signing
  */
@@ -53,7 +54,7 @@ export const FORM08_SIDE_BOX_KEY: Record<Form08Side, 'checkedBy' | 'notedBy' | '
  * the printed line each signer owns. Read from the payload rather than kept as a
  * second copy here, so the screens and the form cannot disagree.
  */
-export function form8SideEntry(report: any, side: string | null): any | null {
+export function form8SideEntry(report: any, side: string | null | undefined): any | null {
   return (report?.signatures?.sides || []).find((entry: any) => entry.side === side) || null;
 }
 

@@ -63,8 +63,9 @@ function mapIncidentReport(row) {
  * if the *report* carried a verification surface of its own, which is how three
  * separate approvals grew onto one incident.
  *
- * `nextSide` is the signer the form is waiting on: both Stage-1 sides first, in
- * any order, then the Center Head. `null` once all three have signed.
+ * `nextSide` is the signer the form is waiting on: the Social Worker first, then
+ * the Psychological Support Staff, then the Center Head. `null` once all three
+ * have signed.
  */
 function signatureState(row) {
   const sides = Object.entries(VERIFICATION_SIDES).map(([side, columns]) => ({
@@ -463,15 +464,19 @@ async function create(req, res, next) {
     const [rows] = await pool.query('SELECT * FROM incidentReports WHERE id = ?', [newId]);
 
     /*
-     * Form 08 starts at Stage 1: the Social Worker and the Psychological Support
-     * Staff read it and sign their own lines, and only then does it reach the
-     * Center Head. All three are told — a signer who is not told the form exists
-     * cannot sign it — but they are told different things, so this is two sends
-     * rather than one: `notifyUsers` delivers a single payload to everyone on its
-     * list, and the Center Head's notice has to say that his turn comes last.
+     * Form 08 starts with the Social Worker: the report is filed to that one
+     * reviewer, who reads it, signs "Checked by" — or returns it to the filer to
+     * be corrected. Only then does it reach the Psychological Support Staff, and
+     * only after both have signed does it reach the Center Head. The Psychological
+     * Staff is deliberately not told at filing time: a signer who is pinged before
+     * their turn learns to ignore the alert, and the form is not theirs to act on
+     * yet. They are told when the Social Worker signs (see `verify`).
+     *
+     * The Center Head still gets a heads-up that the form exists, because his
+     * signature is the approval and he should expect it.
      *
      * The filer is left out of both. `notifyUsers` does not skip the actor, and a
-     * Houseparent who filed the report should not be asked to sign it.
+     * Houseparent who filed the report should not be asked to review it.
      */
     try {
       const base = {
@@ -487,12 +492,12 @@ async function create(req, res, next) {
         .map((account) => account.id);
 
       await notifications.notifyUsers(
-        await accountsFor(STAGE_ONE_SIDES.map((side) => VERIFICATION_SIDES[side].role)),
+        await accountsFor([VERIFICATION_SIDES[FIRST_SIDE].role]),
         {
           ...base,
-          title: `Incident Report (Form 08) to sign - ${childName}`,
-          message: `${uploader} filed the Form 08 Incident Report for ${childName}. It needs the Social Worker's and the Psychological Support Staff's signatures.`,
-          actionRequired: 'Open the report, correct it if it needs correcting, and sign your line.',
+          title: `Incident Report (Form 08) to review - ${childName}`,
+          message: `${uploader} filed the Form 08 Incident Report for ${childName}. It needs the Social Worker to review it and sign the "Checked by" line first.`,
+          actionRequired: 'Open the report. Sign your line if it is correct, or return it to the filer if it needs correcting.',
           dedupeKey: `incident-report:${newId}:submitted`,
         },
       );
@@ -639,21 +644,20 @@ async function resubmit(req, res, next) {
 
     const [updatedRows] = await pool.query('SELECT * FROM incidentReports WHERE id = ?', [id]);
     const updated = updatedRows[0];
-    // A correction restarts Stage 1, so the people asked to sign are the two
-    // Stage-1 signers — the Center Head is not pulled in until both have signed.
-    // The person who made the correction is left out of their own notice.
+    // A correction restarts the routing from the top, so the one person asked to
+    // act is the Social Worker — the Psychological Support Staff and the Center
+    // Head are pulled in later, in turn. The person who made the correction is
+    // left out of their own notice.
     try {
-      const reviewer = await notifications.usersWithAnyRole(
-        STAGE_ONE_SIDES.map((side) => VERIFICATION_SIDES[side].role),
-      );
+      const reviewer = await notifications.usersWithAnyRole([VERIFICATION_SIDES[FIRST_SIDE].role]);
       await notifications.notifyUsers(
         reviewer.filter((account) => String(account.username) !== String(actor)).map((account) => account.id),
         {
           type: 'Incident Report Resubmitted',
           title: `Incident Report ${returned ? 'Resubmitted' : 'Corrected'} - ${childName}`,
-          message: `${actor} ${returned ? 'corrected and resubmitted' : 'corrected'} the Incident Report for ${childName}. Every signature was cleared, so it needs the Social Worker's and the Psychological Support Staff's signatures again.`,
+          message: `${actor} ${returned ? 'corrected and resubmitted' : 'corrected'} the Incident Report for ${childName}. Every signature was cleared, so it needs the Social Worker's signature again first.`,
           priority: 'High',
-          actionRequired: 'Read the corrected report and sign your line.',
+          actionRequired: 'Read the corrected report and sign your line, or return it to the filer if it still needs work.',
           residentId: existing.residentId,
           relatedRecordType: 'incidentReports',
           relatedRecordId: id,
@@ -787,17 +791,20 @@ const VERIFICATION_SIDES = {
 };
 
 /**
- * The order the form is routed in.
+ * The order the form is routed in — strictly sequential.
  *
- * Stage 1 is the Social Worker and the Psychological Support Staff, in either
- * order — they read the report, correct it if it needs correcting, and sign
- * their own line. Only when *both* have signed does it reach the Center Head,
- * whose signature is the approval. Enforced here rather than in the UI, so a
- * direct call cannot sign the form out of turn.
+ * The Social Worker reviews the filed report first and signs "Checked by". Only
+ * then does it reach the Psychological Support Staff (whose signature carries the
+ * intervention and its schedule), and only when both have signed does it reach
+ * the Center Head, whose signature is the approval. Each signer waits for the one
+ * before — enforced here rather than in the UI, so a direct call cannot sign the
+ * form out of turn.
  */
 const STAGE_ONE_SIDES = ['sw', 'psych'];
 const FINAL_SIDE = 'ch';
 const SIGNING_ORDER = [...STAGE_ONE_SIDES, FINAL_SIDE];
+/** The first reviewer: the Social Worker, and the only side told at filing time. */
+const FIRST_SIDE = SIGNING_ORDER[0];
 
 /** The sides whose stamp pairs are present on this row. */
 function signedSides(row) {
@@ -861,21 +868,25 @@ async function verify(req, res, next) {
     }
 
     /*
-     * Form 08 routes bottom-up: the Social Worker and the Psychological Support
-     * Staff sign first, in either order, and only then does it reach the Center
-     * Head. Enforced here rather than in the UI, because his signature *is* the
-     * approval — a Center Head signing a report the two people who were supposed
-     * to have read it never saw would approve it with nothing downstream to
-     * catch it.
+     * Form 08 routes strictly bottom-up: the Social Worker signs first, then the
+     * Psychological Support Staff, then the Center Head — each waiting for the one
+     * before. Enforced here rather than in the UI, because the Center Head's
+     * signature *is* the approval — a Center Head signing a report the two people
+     * who were supposed to have read it never saw would approve it with nothing
+     * downstream to catch it.
      */
-    if (side === FINAL_SIDE) {
-      const missing = STAGE_ONE_SIDES.filter((other) => !report[VERIFICATION_SIDES[other].by]);
-      if (missing.length) {
-        throw new ApiError(
-          409,
-          `The ${missing.map((other) => VERIFICATION_SIDES[other].label).join(' and ')} must sign this Incident Report before the Center Head does.`,
-        );
-      }
+    const missingBefore = SIGNING_ORDER
+      .slice(0, SIGNING_ORDER.indexOf(side))
+      .filter((other) => !report[VERIFICATION_SIDES[other].by]);
+    if (missingBefore.length) {
+      const labels = missingBefore.map((other) => VERIFICATION_SIDES[other].label);
+      const list = labels.length === 1
+        ? labels[0]
+        : `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
+      throw new ApiError(
+        409,
+        `The ${list} must sign this Incident Report before the ${VERIFICATION_SIDES[side].label} does.`,
+      );
     }
 
     // The drawn signature is the point of the endpoint — a line that records only

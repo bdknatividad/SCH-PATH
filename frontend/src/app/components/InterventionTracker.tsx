@@ -832,13 +832,14 @@ export function InterventionTracker({ embedded = false }: { embedded?: boolean }
                                       <p className="text-xs font-semibold text-blue-800">Incident Report (Form 08)</p>
                                       <p className="text-[10px] text-blue-600 mt-0.5">
                                         {form8Section(track).needsRework
-                                          ? 'Returned by the Center Head — correct it and resubmit. The intervention stays pending until this report is approved.'
+                                          ? `Returned${form8Section(track).report?.documentReviewedBy ? ` by ${form8Section(track).report.documentReviewedBy}` : ''} — correct it and resubmit. The intervention stays pending until this report is approved.`
                                           : 'Available after all checklist requirements are completed and before Mark Done.'}
                                       </p>
                                       {/* Why it came back. The decision lives on the linked document
-                                          (the Center Head approves a Form 08 through Documents), so the
-                                          reason travels with the report and is quoted here — without it
-                                          the row said "correct it" and named nothing to correct. */}
+                                          (a Form 08 is returned from the report itself, or from
+                                          Documents), so the reason travels with the report and is
+                                          quoted here — without it the row said "correct it" and
+                                          named nothing to correct. */}
                                       {form8Section(track).needsRework && form8Section(track).report?.documentRejectionReason && (
                                         <p className="mt-1 rounded border border-blue-200 bg-white px-2 py-1 text-[10px] text-blue-900">
                                           <span className="font-bold">Reason: </span>
@@ -881,13 +882,13 @@ export function InterventionTracker({ embedded = false }: { embedded?: boolean }
                                        * Still unsigned, and waiting. The row says how
                                        * many of the three signatures are in and who it
                                        * is waiting for, and offers the pad to the one
-                                       * whose turn it is — the Social Worker and the
-                                       * Psychological Support Staff first, in either
-                                       * order, and the Center Head last. The API is the
-                                       * authority on both questions (it refuses a line
-                                       * the caller does not own, and refuses the Center
-                                       * Head until both Stage-1 lines are in); this
-                                       * only decides what to show.
+                                       * whose turn it is — the Social Worker first,
+                                       * then the Psychological Support Staff, then the
+                                       * Center Head. The API is the authority on both
+                                       * questions (it refuses a line the caller does
+                                       * not own, and refuses a signer until the one
+                                       * before has signed); this only decides what to
+                                       * show.
                                        */
                                       const signatures = report.signatures;
                                       const signedCount = signatures?.signedCount ?? 0;

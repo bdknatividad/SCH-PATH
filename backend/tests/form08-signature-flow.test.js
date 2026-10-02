@@ -257,13 +257,23 @@ test('the second Stage-1 signature still does not approve it — the Center Head
   assert.equal(body.data.signatures.nextSide, 'ch', 'the form is not waiting on the Center Head');
 });
 
-test('the reverse order works the same', async () => {
-  // Either Stage-1 line may go first; only the Center Head is ordered.
-  reportRow = baseReport({ psychVerifiedBy: 'francis', psychVerifiedAt: '2026-09-02 09:00:00' });
-  const { error, body } = await sign(SW, { signature: SIG });
-  assert.equal(error, null, `verify failed: ${error && error.message}`);
-  assert.equal(body.data.signatures.nextSide, 'ch');
-  assert.equal(body.data.status, 'Submitted');
+test('the Psychological Support Staff is refused until the Social Worker has signed', async () => {
+  // Form 08 routes strictly: the Social Worker reviews the filed report first,
+  // and the clinical line opens only after that. A blank report is therefore not
+  // the Psychological Support Staff's to sign yet.
+  reportRow = baseReport();
+  const { error, writes: w } = await sign(PSYCH, { signature: SIG });
+  assert.ok(error, 'the Psychological Support Staff signed before the Social Worker');
+  assert.equal(error.statusCode, 409);
+  assert.equal(incidentWrite(w), undefined, 'the out-of-turn signature was written anyway');
+
+  // Once the Social Worker has signed, the clinical line opens and the Center
+  // Head is next.
+  reportRow = baseReport({ swVerifiedBy: 'joyce', swVerifiedAt: '2026-09-02 09:00:00' });
+  const next = await sign(PSYCH, { signature: SIG });
+  assert.equal(next.error, null, `verify failed: ${next.error && next.error.message}`);
+  assert.equal(next.body.data.signatures.nextSide, 'ch');
+  assert.equal(next.body.data.status, 'Submitted');
 });
 
 test('the Center Head is refused until both Stage-1 lines are in', async () => {
@@ -397,18 +407,19 @@ test('the clinical line does write the intervention', async () => {
 
 // ── Who is asked next ───────────────────────────────────────────────────────
 
-test('the first signature asks the other Stage-1 signer', async () => {
+test('the Social Worker signature asks the Psychologist next', async () => {
   reportRow = baseReport();
   const { notices: n } = await sign(SW, { signature: SIG });
   const waiting = n.find((payload) => /needs your verification/i.test(String(payload.title || '')));
-  assert.ok(waiting, 'nobody was asked for the other Stage-1 signature');
+  assert.ok(waiting, 'nobody was asked for the next signature');
   assert.equal(waiting.targetRole, 'psychologist', 'the Social Worker signature asked the wrong line');
 
-  reportRow = baseReport();
-  const { notices: psychNotices } = await sign(PSYCH, { signature: SIG });
-  const waitingOnSw = psychNotices.find((payload) => /needs your verification/i.test(String(payload.title || '')));
-  assert.ok(waitingOnSw, 'nobody was asked for the other Stage-1 signature');
-  assert.equal(waitingOnSw.targetRole, 'socialworker', 'the Psychological Staff signature asked the wrong line');
+  // And the notice goes to the next line only — the Social Worker is not asked
+  // for a signature that is already in.
+  assert.ok(
+    !n.some((payload) => payload.targetRole === 'socialworker'),
+    'the Social Worker was asked to sign a line that is already signed',
+  );
 });
 
 test('both Stage-1 lines in asks the Center Head, and nobody before that', async () => {
@@ -611,7 +622,7 @@ test('the report itself is where a signature is drawn', () => {
   assert.match(padBlock, /if \(isMine && signReady\)/, 'the pad is drawn for a line that is not the caller\'s turn');
 });
 
-test('a Form 08 notification opens the report, and reaches all three signers', () => {
+test('a Form 08 notification opens the report, and reaches the first reviewer and the Center Head', () => {
   // Opening the tracker alone left the signer hunting for the row; the notice
   // carries the report id so the tracker opens that Form 08 ready to sign.
   assert.match(
@@ -626,12 +637,14 @@ test('a Form 08 notification opens the report, and reaches all three signers', (
     'the deep link no longer opens the report ready to sign',
   );
 
-  // All three signers are told when a Form 08 is filed — including the Center
-  // Head, who is told his turn comes last rather than being left to discover it.
+  // The report is filed to the Social Worker — the first reviewer — and the
+  // Center Head is told his turn comes last rather than being left to discover
+  // it. The Psychological Support Staff is deliberately NOT pinged at filing
+  // time: they are told when the Social Worker signs (see `verify`).
   assert.match(
     CONTROLLER_SRC,
-    /await accountsFor\(STAGE_ONE_SIDES\.map\(\(side\) => VERIFICATION_SIDES\[side\]\.role\)\)/,
-    'the Stage-1 signers are no longer notified on submission',
+    /await accountsFor\(\[VERIFICATION_SIDES\[FIRST_SIDE\]\.role\]\)/,
+    'the first reviewer (the Social Worker) is no longer notified on submission',
   );
   assert.match(
     CONTROLLER_SRC,

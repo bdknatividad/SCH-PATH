@@ -3,7 +3,9 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '
 import { Button } from '@/app/components/ui/button';
 import { Badge } from '@/app/components/ui/badge';
 import { Alert, AlertDescription } from '@/app/components/ui/alert';
-import { Save, Download, Loader2, ShieldCheck, Clock } from 'lucide-react';
+import { Label } from '@/app/components/ui/label';
+import { Textarea } from '@/app/components/ui/textarea';
+import { Save, Download, Loader2, ShieldCheck, Clock, Undo2 } from 'lucide-react';
 import { Document as PdfDocument, Page as PdfPage, pdfjs } from 'react-pdf';
 import { request } from '@/services/api';
 import { useAuth } from '../state/AuthContext';
@@ -110,6 +112,18 @@ export interface IncidentReportData {
   interventionScheduleDate?: string | null;
   verifiedBy?: string | null;
   verifiedAt?: string | null;
+  /**
+   * The signing state the API derives for the report — which of the three lines
+   * are filled and whose turn it is. Optional because a report fetched before it
+   * was saved carries none; the screens read it through `form8SideEntry`.
+   */
+  signatures?: {
+    sides: { side: string; label: string; line: string; signed: boolean; by: string | null; at: string | null }[];
+    signedCount: number;
+    total: number;
+    complete: boolean;
+    nextSide: 'sw' | 'psych' | 'ch' | null;
+  };
 }
 
 interface Props {
@@ -451,6 +465,16 @@ export default function IncidentReportModal({
   const [signValue, setSignValue] = useState('');
   const [signing, setSigning] = useState(false);
   const [signError, setSignError] = useState<string | null>(null);
+  /**
+   * The Social Worker's return action. The report is reviewed by the Social
+   * Worker first; if something is wrong it goes back to the filer instead of
+   * being signed, so the reason is required — the filer is told to correct it
+   * and has nothing to act on without one.
+   */
+  const [returnOpen, setReturnOpen] = useState(false);
+  const [returnReason, setReturnReason] = useState('');
+  const [returning, setReturning] = useState(false);
+  const [returnError, setReturnError] = useState<string | null>(null);
 
   const role = String(user?.role || '').toLowerCase();
   // The four roles the specification names as filers. The Psychological Staff
@@ -660,6 +684,59 @@ export default function IncidentReportModal({
     }
   }
 
+  /**
+   * Return the report to the filer instead of signing it.
+   *
+   * The Social Worker reviews the filed report first, so this is their other
+   * outcome: the reason is required, and the return clears every signature and
+   * sends the incident back to the Intervention Tracker as "Fill Out Again".
+   * Both decisions reuse the Documents module's tested path — `Reject` (the
+   * document's `Failed`) and `Reassessment` — so the incident, the document and
+   * the filer's notification stay in step.
+   */
+  const canReturn = Boolean(
+    mode === 'sign'
+      && mySide === 'sw'
+      && report
+      && !report.signatures?.complete
+      && ['Submitted', 'Pending Review'].includes(String(report.status)),
+  );
+
+  async function handleReturn(decision: 'Failed' | 'Reassessment') {
+    if (!report?.pdfDocumentId) {
+      setReturnError('This report has no linked document, so it cannot be returned from here.');
+      return;
+    }
+    const reason = returnReason.trim();
+    if (!reason) {
+      setReturnError('Write a reason for the filer — they are told to correct the report and need to know what to fix.');
+      return;
+    }
+    setReturning(true);
+    setReturnError(null);
+    try {
+      if (decision === 'Failed') {
+        await request(`/documents/${report.pdfDocumentId}/reject`, {
+          method: 'POST',
+          body: JSON.stringify({ rejectionReason: reason }),
+        });
+      } else {
+        await request(`/documents/${report.pdfDocumentId}`, {
+          method: 'PUT',
+          body: JSON.stringify({ status: 'Reassessment', rejectionReason: reason }),
+        });
+      }
+      setReturnOpen(false);
+      setReturnReason('');
+      onOpenChange(false);
+      onSaved?.();
+    } catch (err: any) {
+      setReturnError(err?.message || 'The report could not be returned. Please try again.');
+    } finally {
+      setReturning(false);
+    }
+  }
+
   const title = mode === 'create'
     ? 'Incident Report'
     : mode === 'edit'
@@ -691,9 +768,9 @@ export default function IncidentReportModal({
           `create`/`edit` draw the filer's own two lines; `sign` opens the same
           form read-only with a pad on the one line the signed-in account owns, so
           a signer reads the report they are signing instead of a dialog over it.
-          The three signatures arrive in two stages — the Social Worker and the
-          Psychological Support Staff first, in either order, then the Center Head
-          — and the form is approved on the third. The API enforces all of that;
+          The three signatures arrive in strict order — the Social Worker first,
+          then the Psychological Support Staff, then the Center Head — and the
+          form is approved on the third. The API enforces all of that;
           this screen only draws what it allows.
         */}
 
@@ -738,10 +815,20 @@ export default function IncidentReportModal({
             </>
           ) : mode === 'sign' ? (
             <>
-              <Button variant="outline" onClick={() => onOpenChange(false)} disabled={signing}>Close</Button>
+              <Button variant="outline" onClick={() => onOpenChange(false)} disabled={signing || returning}>Close</Button>
+              {canReturn && (
+                <Button
+                  variant="outline"
+                  onClick={() => { setReturnError(null); setReturnReason(''); setReturnOpen(true); }}
+                  disabled={signing || returning}
+                  className="border-amber-300 text-amber-800 hover:bg-amber-50"
+                >
+                  <Undo2 className="mr-1 h-4 w-4" /> Return for Correction
+                </Button>
+              )}
               <Button
                 onClick={handleSign}
-                disabled={signing || !signValue || !signReady}
+                disabled={signing || returning || !signValue || !signReady}
                 className="bg-[#2F3E46]"
                 title={signReady ? undefined : signBlockedReason || undefined}
               >
@@ -752,6 +839,52 @@ export default function IncidentReportModal({
             <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
           )}
         </DialogFooter>
+
+        {/*
+          The return dialog. Two outcomes, both of which clear every signature and
+          hand the report back to the filer: "Reject" (the report is wrong as
+          filed) and "For Reassessment" (it needs another look). The reason is
+          required — it travels to the filer's notification and the tracker row,
+          which is the whole point of returning rather than signing.
+        */}
+        <Dialog open={returnOpen} onOpenChange={(next) => { if (!returning) setReturnOpen(next); }}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle>Return this Incident Report?</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3">
+              <p className="text-sm text-gray-600">
+                The report goes back to the person who filed it so they can correct it. Every signature is cleared, and it returns to you to review afterwards.
+              </p>
+              <div>
+                <Label htmlFor="incident-return-reason">Reason (required)</Label>
+                <Textarea
+                  id="incident-return-reason"
+                  value={returnReason}
+                  onChange={(e) => setReturnReason(e.target.value)}
+                  placeholder="What needs to be corrected?"
+                  className="mt-1 min-h-20"
+                  disabled={returning}
+                />
+              </div>
+              {returnError && <Alert variant="destructive"><AlertDescription>{returnError}</AlertDescription></Alert>}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setReturnOpen(false)} disabled={returning}>Cancel</Button>
+              <Button
+                variant="outline"
+                onClick={() => handleReturn('Reassessment')}
+                disabled={returning || !returnReason.trim()}
+                className="border-yellow-300 text-yellow-800 hover:bg-yellow-50"
+              >
+                {returning ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null} For Reassessment
+              </Button>
+              <Button onClick={() => handleReturn('Failed')} disabled={returning || !returnReason.trim()} className="bg-red-600 hover:bg-red-700">
+                {returning ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null} Reject
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </DialogContent>
     </Dialog>
   );
