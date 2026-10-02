@@ -61,7 +61,7 @@ const PHASE_NAME_MAP: Record<string, string> = {
 
 const PHASE_REQUIREMENTS: Record<string, { requiredDocuments: string[]; optionalDocuments?: string[]; requiredTasks: string[] }> = {
   Admission: {
-    requiredDocuments: ['Court order','OCP resolution','Case Information','Diversion plan referral letter','Medical Certificate','Birth/baptismal certificate'],
+    requiredDocuments: ['Court order','OCP resolution','Case Information','Diversion plan referral letter','Medical Certificate','Birth/baptismal certificate','X-ray','Pre-Admission Form','Physical Examination'],
     optionalDocuments: ['Psychological assessment (if needed)'],
     requiredTasks: [],
   },
@@ -116,6 +116,9 @@ const DOCUMENT_ROLE_PERMISSIONS: Record<string, string[]> = {
   'Medical Certificate / Birth Certificate': ['socialworker','centerhead'],
   'Birth/baptismal certificate': ['socialworker','centerhead'],
   'Baptismal Certificate': ['socialworker','centerhead'],
+  'X-ray': ['socialworker','centerhead'],
+  'Pre-Admission Form': ['socialworker','centerhead'],
+  'Physical Examination': ['nurse','centerhead'],
   'Psychological assessment (if needed)': ['psychologist','centerhead'],
   'Psychological Assessment': ['psychologist','centerhead'],
   'Psychological Testing': ['psychologist','centerhead'],

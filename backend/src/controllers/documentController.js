@@ -197,6 +197,30 @@ const DOCUMENT_READ_ROLES_BY_CATEGORY = {
   'medical quarterly report': ['nurse', 'centerhead', 'admin', 'socialworker'],
 };
 
+/**
+ * Read-only grants, keyed by document title.
+ *
+ * `DOCUMENT_ROLE_PERMISSIONS` answers "who may upload this", and
+ * `canReadDocument` reuses that answer for reading — which is right for nearly
+ * every document, because the role that files a record is the role that reads
+ * it. The Admission Phase's Physical Examination is the exception.
+ *
+ * The Nurse files it (the Center Head too), and the Social Worker owns the
+ * phase checklist that lists it as a requirement. Sharing one map meant the
+ * Social Worker could neither upload it nor read it, so the phase view showed
+ * the row as "Missing" long after the Nurse had filed and it had been approved
+ * — the file was there, they simply could not see it. Declaring the Social
+ * Worker here grants the *read* only; the upload list is untouched, so the
+ * upload button still appears for the Nurse and the Center Head alone.
+ *
+ * Kept beside `DOCUMENT_READ_ROLES_BY_CATEGORY` because both are read rules and
+ * both are consulted by `canReadDocument`, and neither has any effect on who
+ * may write.
+ */
+const DOCUMENT_READ_ROLES_BY_TITLE = {
+  'Physical Examination': ['socialworker'],
+};
+
 const DOCUMENT_READ_ROLE_KEYWORDS = [
   { roles: ['nurse'], keywords: ['medical', 'health', 'nursing', 'medication', 'checkup', 'laboratory'] },
   { roles: ['psychologist'], keywords: ['psychological', 'psychosocial', 'behavioral', 'discernment', 'mental health'] },
@@ -320,6 +344,11 @@ function canReadDocument(document, user) {
 
   const titleRoles = DOCUMENT_ROLE_PERMISSIONS[document.title];
   if (titleRoles?.includes(role)) return true;
+
+  // A read-only grant. Checked here, next to the upload-derived title map, so a
+  // document can be readable by a role that may not file it.
+  const readOnlyRoles = DOCUMENT_READ_ROLES_BY_TITLE[document.title];
+  if (readOnlyRoles?.includes(role)) return true;
 
   const category = String(document.category || '').trim().toLowerCase();
   if (DOCUMENT_READ_ROLES_BY_CATEGORY[category]?.includes(role)) return true;
@@ -609,6 +638,30 @@ async function create(req, res, next) {
     const uploaderRole = normalizeRole(req.user?.role || data.uploaderRole);
     const docTitle = data.title || '';
     const docPhase = data.phase || '';
+
+    /**
+     * Two Admission Phase documents carry a field the client does not choose.
+     *
+     * `Physical Examination` is the Nurse's medical record as well as an
+     * admission requirement, and the Child Records Medical tab lists documents
+     * whose category is exactly 'Medical'. Stamping the category here — the same
+     * way `documentCategory` is derived below — is what makes the one file show
+     * in both the phase checklist and the Medical tab, and it also routes it
+     * into the Medical Records folder the tab draws from.
+     *
+     * `X-ray` is admission paperwork, but "x-ray" is a Medical Records keyword,
+     * so without a type the keyword pass would file it with the medical records.
+     * Stamping the type lets the exact-type pass place it in Admission Files,
+     * and leaves a document titled "X-ray Result" — which carries no type — a
+     * medical record, as it was.
+     */
+    if (docTitle === 'Physical Examination') {
+      data.category = 'Medical';
+    }
+    if (docTitle === 'X-ray' && !String(data.type || '').trim()) {
+      data.type = 'X-ray';
+    }
+
     const docType = String(data.type || '').trim();
     if (docType === 'Other' && (!String(docTitle).trim() || String(docTitle).trim().toLowerCase() === 'other')) {
       throw new ApiError(422, 'Please specify the exact document type when Document Type is Other.');

@@ -62,6 +62,13 @@
       "keywords": ["violation", "incident report"]
     },
     {
+      "$note": "The Admission Phase's X-ray is admission paperwork, filed with the court order and the case information rather than with the medical records. Matched on an exact `type` because \"x-ray\" is also a Medical Records keyword and the type pass runs before the keyword pass. Deliberately does not touch a document titled \"X-ray Result\", which carries no type and still files under Medical Records.",
+      "folder": "Admission Files",
+      "types": ["X-ray"],
+      "categories": [],
+      "keywords": []
+    },
+    {
       "folder": "Medical Records",
       "types": [],
       "categories": ["Medical", "Medical Record", "Health"],
