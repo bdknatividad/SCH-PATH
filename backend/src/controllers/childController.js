@@ -5,7 +5,7 @@
  */
 
 const { pool } = require('../config/database');
-const { createController } = require('./baseController');
+const { createController, sortRows } = require('./baseController');
 const {
   calculateAge,
   generateId,
@@ -1225,20 +1225,41 @@ async function educationForResident(req, res, next) {
       throw new ApiError(403, 'You do not have access to this resident’s education record.');
     }
 
-    const rowsFor = async (label, sql) => {
+    /**
+     * Read one of the three lists, ordered **in the application**.
+     *
+     * Not `ORDER BY` in the query. MySQL sorts a row together with every column
+     * it carries, and `education_records.files` holds the uploaded files as
+     * base64 — 518 KB on the largest live record against a 256 KB
+     * `sort_buffer_size`. The filesort exhausted the buffer and the query failed
+     * with `ER_OUT_OF_SORTMEMORY`, which the catch below turned into an empty
+     * list: the tab then read "Not yet enrolled in Education Module" for a
+     * resident who was enrolled, because a failed read and an empty record
+     * looked identical. `education_records` is marked `sortInApplication` for
+     * exactly this reason — `/api/store` and `/api/education-records` already
+     * honour it, and this route was the one place still handing the ORDER BY to
+     * MySQL. Ordering all three here keeps one rule instead of two.
+     *
+     * A failure is raised, never swallowed. A reader told the read failed can do
+     * something about it; a reader shown an empty list is told the resident was
+     * never enrolled.
+     */
+    const rowsFor = async (label, resource, sql) => {
       try {
         const [rows] = await pool.query(sql, [residentId]);
-        return rows || [];
+        return sortRows(rows || [], RESOURCES[resource]?.orderBy || 'createdAt DESC');
       } catch (error) {
-        console.warn(`Education read for a resident — ${label} failed:`, error.message);
-        return [];
+        throw new ApiError(
+          500,
+          `This resident's education ${label} could not be read. (${error.message})`,
+        );
       }
     };
 
     const [records, visits, progress] = await Promise.all([
-      rowsFor('records', 'SELECT * FROM education_records WHERE residentId = ? ORDER BY createdAt DESC'),
-      rowsFor('visits', 'SELECT * FROM education_school_visits WHERE residentId = ? ORDER BY visitDate DESC'),
-      rowsFor('progress', 'SELECT * FROM education_progress_reports WHERE residentId = ? ORDER BY createdAt DESC'),
+      rowsFor('record', 'education_records', 'SELECT * FROM education_records WHERE residentId = ?'),
+      rowsFor('school visits', 'education_school_visits', 'SELECT * FROM education_school_visits WHERE residentId = ?'),
+      rowsFor('progress reports', 'education_progress_reports', 'SELECT * FROM education_progress_reports WHERE residentId = ?'),
     ]);
 
     res.json({

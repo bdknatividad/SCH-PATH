@@ -1375,12 +1375,26 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
               return <p className="py-8 text-center text-sm text-gray-400">Loading the education record…</p>;
             }
 
+            /*
+              A failed read says so, and says nothing else.
+              
+              The tab used to render the error as a thin line above a page that
+              otherwise looked complete — and, because a failed read and an empty
+              record both arrive as "no records", it printed "Not yet enrolled in
+              Education Module" underneath. A resident who *is* enrolled read as
+              one who never was, which is how the sort-buffer failure stayed
+              invisible. An error now replaces the tab rather than sitting in it.
+            */
+            if (educationError) {
+              return (
+                <div className="rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  {educationError}
+                </div>
+              );
+            }
+
             return (
               <div className="space-y-4">
-                {educationError && (
-                  <div className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-700">{educationError}</div>
-                )}
-
                 {/* The Education module's own record for this child. */}
                 <Card className="border-l-4 border-blue-400 shadow-sm">
                   <CardContent className="p-5">

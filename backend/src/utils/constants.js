@@ -190,6 +190,18 @@ const RESOURCES = {
     prefix: 'ESV',
     orderBy: 'visitDate DESC',
     jsonFields: [],
+    /*
+     * Same reason as `education_records` above, and the same measurement: this
+     * row carries the visit report as `fileData`, a LONGTEXT holding base64. A
+     * visit with a file attached is a wide row, `ORDER BY visitDate DESC` sorts
+     * it inside `sort_buffer_size`, and the store's per-table catch turns the
+     * failure into an empty list — so one visit report with an attachment would
+     * have emptied the whole School Visits list rather than erroring.
+     *
+     * No live visit has a file yet, which is why this has not been seen: the
+     * column is there and the upload path writes it.
+     */
+    sortInApplication: true,
     columns: ['id', 'educationRecordId', 'residentId', 'visitDate', 'school', 'purpose', 'findings', 'status', 'fileName', 'fileData', 'createdBy', 'modifiedBy'],
   },
   education_monthly_reports: {

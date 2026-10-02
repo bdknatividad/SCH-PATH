@@ -78,6 +78,7 @@ const {
 // Finalized reports are filed in the Quarterly Reports folder; the folder comes
 // from the routing rules so it cannot drift from the rest of the module.
 const { folderForType } = require('../utils/documentCategory');
+const { sortRows } = require('./baseController');
 
 const QUARTERLY_FOLDER = folderForType('Quarterly Progress Report');
 
@@ -476,10 +477,21 @@ async function buildIdentifyingInformation(residentId, periodEnd) {
   let education = null;
   try {
     const [rows] = await pool.query(
-      "SELECT * FROM education_records WHERE residentId = ? ORDER BY (status = 'Active') DESC, createdAt DESC LIMIT 1",
+      'SELECT * FROM education_records WHERE residentId = ?',
       [residentId]
     );
-    education = rows[0] || null;
+    /*
+     * The Active record wins; otherwise the newest — ordered here rather than in
+     * SQL. `education_records.files` holds the learner's uploads as base64, and a
+     * filesort has to carry that column with every row it sorts, so the
+     * `ORDER BY` this replaces failed outright with ER_OUT_OF_SORTMEMORY for any
+     * resident with an uploaded file (see `education_records` in constants.js for
+     * the measurement). The bare catch below then turned that into "not
+     * enrolled", and the report printed with no education details and said
+     * nothing about why.
+     */
+    const ordered = sortRows(rows || [], 'createdAt DESC');
+    education = ordered.find((row) => row.status === 'Active') || ordered[0] || null;
   } catch {
     education = null;
   }
