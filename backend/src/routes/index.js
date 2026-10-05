@@ -11,7 +11,7 @@ const { RESOURCES } = require('../utils/constants');
 const { mapRow, generateId } = require('../utils/helpers');
 const { authenticate, authorize } = require('../middleware/auth');
 const { snapshotFor, requireModule, requirePermission } = require('../middleware/rbac');
-const { requireEducationPlacement } = require('../middleware/validation');
+const { requireEducationPlacement, requireValidLrn } = require('../middleware/validation');
 const { ApiError } = require('../middleware/errorHandler');
 const { hasModuleAccess } = require('../config/rbac');
 // `sortRows` is shared so `/store` orders wide-row resources the same way
@@ -444,7 +444,90 @@ const educationResources = {
   educationProgressReports: createController('education_progress_reports'),
   educationSchoolVisits: createController('education_school_visits'),
   educationMonthlyReports: createController('education_monthly_reports'),
+  educationSubjects: createController('education_subjects'),
+  educationSubjectResults: createController('education_subject_results'),
 };
+
+/**
+ * Turn a create into an update when the row it would create already exists.
+ *
+ * `keyColumns` name what makes a row unique for its purpose — a learner per
+ * resident, a result per learner per subject. When the body carries all of them
+ * and a row already matches, the request is served as an update of that row, so
+ * a second "add" can never produce a duplicate. Without every key in the body
+ * the create proceeds unchanged.
+ *
+ * `prepare` may strip fields an update of an existing row must not overwrite.
+ */
+function updateWhenExists(table, keyColumns, controller, { orderBy = 'createdAt DESC', prepare } = {}) {
+  return async (req, res, next) => {
+    try {
+      const body = req.body || {};
+      const keys = keyColumns.map((column) => body[column]);
+      if (keys.some((value) => value === undefined || value === null || String(value).trim() === '')) return next();
+      const [rows] = await pool.query(
+        `SELECT id FROM \`${table}\` WHERE ${keyColumns.map((column) => `${column} = ?`).join(' AND ')} ORDER BY ${orderBy} LIMIT 1`,
+        keys,
+      );
+      if (rows.length === 0) return next();
+      req.params.id = rows[0].id;
+      if (prepare) prepare(req);
+      return controller.update(req, res, next);
+    } catch (error) {
+      return next(error);
+    }
+  };
+}
+
+/**
+ * An Education subject needs a level and a name, and a name may appear once per
+ * level. Checked here because a duplicate would otherwise reach the INSERT as
+ * ER_DUP_ENTRY, which the id generator reads as an id collision and retries.
+ * Comparison is case-insensitive, matching the table's collation.
+ */
+async function validateEducationSubject(req, res, next) {
+  try {
+    const body = req.body || {};
+    if (body.name !== undefined) body.name = String(body.name).trim();
+    if (body.educationLevel !== undefined) body.educationLevel = String(body.educationLevel).trim();
+
+    const isCreate = req.method === 'POST';
+    if (isCreate && (!body.name || !body.educationLevel)) {
+      throw new ApiError(400, 'A subject needs a name and an education level.');
+    }
+    if (body.name === '') throw new ApiError(400, 'A subject name cannot be blank.');
+
+    let level = body.educationLevel;
+    if (!isCreate && body.name && !level) {
+      const [current] = await pool.query('SELECT educationLevel FROM education_subjects WHERE id = ?', [req.params.id]);
+      level = current?.[0]?.educationLevel;
+    }
+    if (body.name && level) {
+      const [clash] = await pool.query(
+        'SELECT id FROM education_subjects WHERE educationLevel = ? AND LOWER(name) = LOWER(?) AND id <> ?',
+        [level, body.name, req.params.id || ''],
+      );
+      if (clash.length > 0) {
+        throw new ApiError(409, `"${body.name}" is already a subject for ${level}.`);
+      }
+    }
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+}
+
+/** A subject result is Passed or Failed; clearing one is a DELETE. */
+function validateSubjectResult(req, res, next) {
+  const result = req.body?.result;
+  if (req.method === 'POST' && (!req.body?.educationRecordId || !req.body?.subjectId)) {
+    return next(new ApiError(400, 'A subject result needs the learner and the subject.'));
+  }
+  if ((req.method === 'POST' || result !== undefined) && result !== 'Passed' && result !== 'Failed') {
+    return next(new ApiError(400, 'A subject result must be Passed or Failed.'));
+  }
+  return next();
+}
 
 /**
  * The Education module's own surface.
@@ -601,8 +684,24 @@ const educationModule = requireModule('Education');
 router.use('/education-records', authenticate, educationModule);
 router.get('/education-records', educationResources.educationRecords.getAll);
 router.get('/education-records/:id', educationResources.educationRecords.getById);
-router.post('/education-records', requirePermission('Education', 'create'), requireResidentInCare, requireEducationPlacement, notifyEducationWrite('education_records', 'added a learner'), educationResources.educationRecords.create);
-router.put('/education-records/:id', requirePermission('Education', 'edit'), requireEducationPlacement, notifyEducationWrite('education_records', 'updated a learner'), educationResources.educationRecords.update);
+// A resident already on the Student Master List can still be picked when adding
+// a student; the add then updates their existing learner record rather than
+// creating a second one for the same resident. Uploaded files and the original
+// author are never overwritten by that update.
+router.post(
+  '/education-records',
+  requirePermission('Education', 'create'),
+  requireResidentInCare,
+  requireEducationPlacement,
+  requireValidLrn,
+  notifyEducationWrite('education_records', 'added a learner'),
+  updateWhenExists('education_records', ['residentId'], educationResources.educationRecords, {
+    orderBy: "(status = 'Active') DESC, createdAt DESC",
+    prepare: (req) => { delete req.body.files; delete req.body.createdBy; },
+  }),
+  educationResources.educationRecords.create,
+);
+router.put('/education-records/:id', requirePermission('Education', 'edit'), requireEducationPlacement, requireValidLrn, notifyEducationWrite('education_records', 'updated a learner'), educationResources.educationRecords.update);
 router.delete('/education-records/:id', requirePermission('Education', 'delete'), notifyEducationWrite('education_records', 'removed a learner'), educationResources.educationRecords.delete);
 
 router.use('/education-progress-reports', authenticate, educationModule);
@@ -618,6 +717,32 @@ router.get('/education-school-visits/:id', educationResources.educationSchoolVis
 router.post('/education-school-visits', requirePermission('Education', 'create'), requireResidentInCare, notifyEducationWrite('education_school_visits', 'scheduled a school visit'), educationResources.educationSchoolVisits.create);
 router.put('/education-school-visits/:id', requirePermission('Education', 'edit'), notifyEducationWrite('education_school_visits', 'updated a school visit'), educationResources.educationSchoolVisits.update);
 router.delete('/education-school-visits/:id', requirePermission('Education', 'delete'), notifyEducationWrite('education_school_visits', 'removed a school visit'), educationResources.educationSchoolVisits.delete);
+
+// Subjects: defined by the Educator per education level, shared by every
+// learner at that level. Deleting one removes its results with it (FK cascade).
+router.use('/education-subjects', authenticate, educationModule);
+router.get('/education-subjects', educationResources.educationSubjects.getAll);
+router.get('/education-subjects/:id', educationResources.educationSubjects.getById);
+router.post('/education-subjects', requirePermission('Education', 'create'), validateEducationSubject, educationResources.educationSubjects.create);
+router.put('/education-subjects/:id', requirePermission('Education', 'edit'), validateEducationSubject, educationResources.educationSubjects.update);
+router.delete('/education-subjects/:id', requirePermission('Education', 'delete'), educationResources.educationSubjects.delete);
+
+// Subject results: one row per learner per subject. A second POST for the same
+// pair updates the existing row, so a result can be changed without the client
+// knowing its id, and two clicks can never leave two results.
+router.use('/education-subject-results', authenticate, educationModule);
+router.get('/education-subject-results', educationResources.educationSubjectResults.getAll);
+router.get('/education-subject-results/:id', educationResources.educationSubjectResults.getById);
+router.post(
+  '/education-subject-results',
+  requirePermission('Education', 'create'),
+  validateSubjectResult,
+  requireResidentInCare,
+  updateWhenExists('education_subject_results', ['educationRecordId', 'subjectId'], educationResources.educationSubjectResults),
+  educationResources.educationSubjectResults.create,
+);
+router.put('/education-subject-results/:id', requirePermission('Education', 'edit'), validateSubjectResult, educationResources.educationSubjectResults.update);
+router.delete('/education-subject-results/:id', requirePermission('Education', 'edit'), educationResources.educationSubjectResults.delete);
 
 router.use('/education-monthly-reports', authenticate, educationModule);
 router.get('/education-monthly-reports', educationResources.educationMonthlyReports.getAll);

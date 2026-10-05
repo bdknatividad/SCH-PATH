@@ -14,7 +14,6 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/app/components/ui/ta
 import { Label } from '@/app/components/ui/label';
 import { Textarea } from '@/app/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/app/components/ui/select';
-import { formatShortDate } from '@/utils/dateFormatter';
 import { ProgressReportDialog, EDUCATION_PROGRESS_PROGRAM } from './ProgressReportDialog';
 import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
@@ -29,6 +28,8 @@ import {
   ChevronDown, ChevronUp, Paperclip, CalendarDays, CheckCircle2,
 } from 'lucide-react';
 import { isActiveResident, isClosedResident } from '@/utils/residentStatus';
+import { usePermissions } from '@/app/hooks/usePermissions';
+import { EducationSubjectsDialog, type SubjectsLearner } from './EducationSubjects';
 
 // ── TYPES ────────────────────────────────────────────────────────────────────
 
@@ -221,6 +222,29 @@ const levelLabel = (level: EducationLevel): string => LEVEL_LABELS[level] || lev
  * level is a school placement and still requires both.
  */
 const isNotEnrolled = (level: EducationLevel): boolean => level === 'Tutorial';
+
+const isCmdc = (level: EducationLevel): boolean => level === 'Calamba Manpower Development Center (CMDC)';
+
+/*
+ * Whether a learner at this level has an LRN at all. A Tutorial learner is not
+ * enrolled in school, so there is no LRN to show or ask for; a CMDC trainee has
+ * a Trainee Number in its place. Everywhere the LRN appears goes through here.
+ */
+const hasLrn = (level: EducationLevel): boolean => !isNotEnrolled(level) && !isCmdc(level);
+
+/** An LRN is exactly 12 digits. */
+const LRN_LENGTH = 12;
+const sanitizeLrn = (value: string): string => value.replace(/\D/g, '').slice(0, LRN_LENGTH);
+
+/**
+ * The identifier line for a learner — LRN, Trainee Number, or nothing when the
+ * level has neither (Tutorial).
+ */
+function learnerIdentifier(student: Pick<Student, 'educationLevel' | 'lrn' | 'traineeNumber'>): { label: string; value: string } | null {
+  if (isCmdc(student.educationLevel)) return { label: 'Trainee Number', value: student.traineeNumber || '' };
+  if (hasLrn(student.educationLevel)) return { label: 'LRN', value: student.lrn || '' };
+  return null;
+}
 
 const LEVEL_COLORS: Record<EducationLevel, { bg: string; text: string; accent: string }> = {
   'Junior High School':                         { bg: '#DBEAFE', text: '#1E40AF', accent: '#3B82F6' },
@@ -444,7 +468,7 @@ async function generateQuarterlyReportPdf(fields: {
   };
 
   drawField('NAME OF RESIDENT:', fields.nameOfResident);
-  drawField(fields.idLabel.split(':')[0] + ':', fields.idLabel.split(': ')[1] || '—');
+  if (fields.idLabel) drawField(fields.idLabel.split(':')[0] + ':', fields.idLabel.split(': ')[1] || '—');
   drawField('GRADE LEVEL/SHS STRAND:', fields.gradeLevel, false);
   drawField('OBSERVATION/STATUS:', fields.observationStatus, false);
   y -= 10;
@@ -502,7 +526,27 @@ export function Education() {
   const [rosterView, setRosterView] = useState<'current' | 'past'>('current');
   const { children: residents, documents, addDocument, refreshData } = useData();
   const { user } = useAuth();
+  const { can } = usePermissions();
   const [activeTab, setActiveTab] = useState('masterlist');
+
+  // Subjects — Pass / Fail per subject. The Educator marks results (edit) and
+  // defines each level's subject list (create).
+  const [subjectsStudent, setSubjectsStudent] = useState<Student | null>(null);
+  const openSubjects = (s: Student) => setSubjectsStudent(s);
+  const subjectsLearner: SubjectsLearner | null = subjectsStudent
+    ? (() => {
+        const identifier = learnerIdentifier(subjectsStudent);
+        return {
+          id: subjectsStudent.id,
+          name: subjectsStudent.name,
+          residentId: subjectsStudent.residentId,
+          educationLevel: subjectsStudent.educationLevel,
+          levelLabel: levelLabel(subjectsStudent.educationLevel),
+          idLabel: identifier?.label,
+          idValue: identifier?.value,
+        };
+      })()
+    : null;
 
   /**
    * A learner whose resident is no longer in the shelter.
@@ -842,9 +886,9 @@ export function Education() {
     }
 
     const periodLabel = QUARTER_PERIODS.find(p => p.value === quarterlyForm.quarter)?.label || quarterlyForm.quarter;
-    const idLabel = student.educationLevel === 'Calamba Manpower Development Center (CMDC)'
-      ? `Trainee Number: ${student.traineeNumber || '—'}`
-      : `LRN: ${student.lrn || '—'}`;
+    // Empty for a Tutorial learner, who has neither an LRN nor a trainee number.
+    const identifier = learnerIdentifier(student);
+    const idLabel = identifier ? `${identifier.label}: ${identifier.value || '—'}` : '';
 
     const narrative = [
       `REPORT QUARTER: ${quarterlyForm.quarter}`,
@@ -1009,10 +1053,24 @@ export function Education() {
       guardianContact: resident?.guardianContact || s.guardianContact,
       notes: s.notes,
       lrn: s.lrn, traineeNumber: s.traineeNumber,
+      residentId: s.residentId || resident?.id,
     });
     setFormError('');
     setIsStudentDialogOpen(true);
   };
+
+  /**
+   * The learner record a resident already has on the Student Master List, if
+   * any. A resident who is already listed can still be picked when adding a
+   * student; saving then updates that record instead of creating a second one.
+   * The Active record wins when a resident has more than one.
+   */
+  const existingRecordFor = (residentId?: string, excludeId?: string): Student | undefined => {
+    if (!residentId) return undefined;
+    const matches = students.filter(s => s.residentId === residentId && s.id !== excludeId);
+    return matches.find(s => s.status === 'Active') || matches[0];
+  };
+  const existingForForm = !editingStudent ? existingRecordFor(studentForm.residentId) : undefined;
 
   const handleSaveStudent = async () => {
     setFormError('');
@@ -1027,22 +1085,52 @@ export function Education() {
       if (!studentForm.enrollmentDate) { setFormError('Enrollment date is required.'); return; }
     }
 
+    // An LRN, where the level has one, is exactly 12 digits. It is optional —
+    // a learner whose LRN is not yet known can still be saved.
+    const lrn = sanitizeLrn(studentForm.lrn || '');
+    if (hasLrn(studentForm.educationLevel) && lrn && lrn.length !== LRN_LENGTH) {
+      setFormError(`The LRN must be exactly ${LRN_LENGTH} digits.`);
+      return;
+    }
+
     // An empty date must go as NULL, not '', which MySQL refuses for a DATE
     // column under the default strict sql_mode.
-    const fields = {
+    const fields: Record<string, unknown> = {
       ...studentForm,
       school: studentForm.school.trim() || null,
       enrollmentDate: studentForm.enrollmentDate || null,
+      lrn: lrn || null,
     };
+    // A level without an LRN (Tutorial, CMDC) neither shows nor sends one, so a
+    // value stored earlier is left as it was rather than judged unseen.
+    if (!hasLrn(studentForm.educationLevel)) delete fields.lrn;
 
-    const resident = residents.find(c => c.name.trim().toLowerCase() === studentForm.name.trim().toLowerCase());
+    const residentId = studentForm.residentId
+      || residents.find(c => c.name.trim().toLowerCase() === studentForm.name.trim().toLowerCase())?.id;
     try {
       if (editingStudent) {
-        const saved = await updateResource<EducationRecordWire>('education-records', editingStudent.id, { ...fields, residentId: editingStudent.residentId || resident?.id });
+        const clash = existingRecordFor(residentId, editingStudent.id);
+        if (clash && residentId !== editingStudent.residentId) {
+          setFormError(`${clash.name} already has a record on the Student Master List. Open that record instead.`);
+          return;
+        }
+        const saved = await updateResource<EducationRecordWire>('education-records', editingStudent.id, { ...fields, residentId: residentId || editingStudent.residentId } as any);
         persist(students.map(s => s.id === editingStudent.id ? normalizeStudent(saved) : s));
       } else {
-        const saved = await createResource<EducationRecordWire>('education-records', { ...fields, residentId: resident?.id, files: [] } as any);
-        persist([...students, normalizeStudent(saved)]);
+        // A resident already on the master list is updated in place — never
+        // listed twice. The server applies the same rule, so two browsers adding
+        // the same resident still end with one record; uploaded files are kept.
+        const existing = existingRecordFor(residentId);
+        if (existing) {
+          const saved = await updateResource<EducationRecordWire>('education-records', existing.id, { ...fields, residentId } as any);
+          persist(students.map(s => s.id === existing.id ? normalizeStudent(saved) : s));
+        } else {
+          const saved = normalizeStudent(await createResource<EducationRecordWire>('education-records', { ...fields, residentId, files: [] } as any));
+          // The server may have matched a record this browser had not loaded yet.
+          persist(students.some(s => s.id === saved.id)
+            ? students.map(s => s.id === saved.id ? saved : s)
+            : [...students, saved]);
+        }
       }
       setIsStudentDialogOpen(false);
     } catch (error) {
@@ -1331,6 +1419,14 @@ export function Education() {
         onSubmitted={() => { void refreshData(); }}
       />
 
+      <EducationSubjectsDialog
+        open={Boolean(subjectsStudent)}
+        onClose={() => setSubjectsStudent(null)}
+        learner={subjectsLearner}
+        canMark={can('Education', 'edit')}
+        canManage={can('Education', 'create')}
+      />
+
       {/* Toolbar */}
       {uploadDocsWarning && (
         <div className="bg-amber-50 border border-amber-200 text-amber-800 text-xs px-4 py-2 rounded-lg flex items-center justify-between">
@@ -1428,7 +1524,7 @@ export function Education() {
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filtered.map(student => <StudentCard key={student.id} student={student} onView={openView} onEdit={openEdit} onUpload={openUpload} onDelete={s => { setDeleteTarget(s); setDeleteConfirm(''); setIsDeleteOpen(true); }} />)}
+              {filtered.map(student => <StudentCard key={student.id} student={student} onView={openView} onEdit={openEdit} onUpload={openUpload} onSubjects={openSubjects} onDelete={s => { setDeleteTarget(s); setDeleteConfirm(''); setIsDeleteOpen(true); }} />)}
             </div>
           )}
         </TabsContent>
@@ -1558,28 +1654,55 @@ export function Education() {
             <div className="grid grid-cols-2 gap-3">
               <div className="col-span-2 space-y-1.5">
                 <Label className="font-bold text-[#2F3E46]">Resident / Learner *</Label>
-                <Select value={studentForm.name} onValueChange={v => {
-                  const res = residents.find(r => r.name === v);
+                {/* Keyed by resident id, not name, so two residents who share a
+                    name cannot be confused. Residents already on the Student
+                    Master List stay selectable; picking one loads their existing
+                    record, and saving updates it rather than listing them twice. */}
+                <Select value={studentForm.residentId || ''} onValueChange={id => {
+                  const res = residents.find(r => r.id === id);
+                  if (!res) return;
+                  const existing = !editingStudent ? existingRecordFor(res.id) : undefined;
                   // Pull the rest of the learner's details off the resident
                   // record rather than making the Educator retype what the
                   // system already holds. `children` carries all three.
                   setStudentForm(p => ({
                     ...p,
-                    name: v,
-                    gender: (res?.gender as 'Male' | 'Female') || 'Male',
-                    age: ageFromBirthDate(res?.birthDate) ?? res?.age ?? p.age,
-                    address: res?.address || p.address,
-                    guardianName: res?.guardianName || p.guardianName,
-                    guardianContact: res?.guardianContact || p.guardianContact,
+                    // An existing learner record brings its own placement, so
+                    // saving does not silently overwrite it with blank fields.
+                    ...(existing ? {
+                      educationLevel: existing.educationLevel,
+                      gradeSection: existing.gradeSection,
+                      school: existing.school,
+                      enrollmentDate: existing.enrollmentDate,
+                      status: existing.status === 'Dropped' ? 'Active' : existing.status,
+                      notes: existing.notes,
+                      lrn: existing.lrn,
+                      traineeNumber: existing.traineeNumber,
+                    } : {}),
+                    residentId: res.id,
+                    name: res.name,
+                    gender: (res.gender as 'Male' | 'Female') || 'Male',
+                    age: ageFromBirthDate(res.birthDate) ?? res.age ?? p.age,
+                    address: res.address || p.address,
+                    guardianName: res.guardianName || p.guardianName,
+                    guardianContact: res.guardianContact || p.guardianContact,
                   }));
                 }}>
                   <SelectTrigger className="rounded-xl"><SelectValue placeholder="Select resident..." /></SelectTrigger>
                   <SelectContent>
-                    {residents.filter(r => !isClosedResident(r.status)).map(r => (
-                      <SelectItem key={r.id} value={r.name}>{r.name} ({r.id})</SelectItem>
+                    {residents.filter(r => !isClosedResident(r.status) || r.id === studentForm.residentId).map(r => (
+                      <SelectItem key={r.id} value={r.id}>
+                        {r.name} ({r.id}){existingRecordFor(r.id, editingStudent?.id) ? ' · on master list' : ''}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+                {existingForForm && (
+                  <p className="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
+                    {existingForForm.name} is already on the Student Master List ({existingForForm.id}). Their record has
+                    been loaded — saving updates it instead of adding them twice.
+                  </p>
+                )}
               </div>
               <ReadOnlyField
                 label="Age"
@@ -1603,19 +1726,31 @@ export function Education() {
                 <Label className="font-bold text-[#2F3E46]">Grade / Section</Label>
                 <Input value={studentForm.gradeSection} onChange={e => setStudentForm(p => ({ ...p, gradeSection: e.target.value }))} placeholder="e.g. Grade 9 - Amity" className="rounded-xl" />
               </div>
-              <div className="space-y-1.5">
-                {studentForm.educationLevel === 'Calamba Manpower Development Center (CMDC)' ? (
-                  <>
-                    <Label className="font-bold text-[#2F3E46]">Trainee Number</Label>
-                    <Input value={studentForm.traineeNumber} onChange={e => setStudentForm(p => ({ ...p, traineeNumber: e.target.value }))} placeholder="CMDC Trainee Number" className="rounded-xl" />
-                  </>
-                ) : (
-                  <>
-                    <Label className="font-bold text-[#2F3E46]">LRN (Learner Reference Number)</Label>
-                    <Input value={studentForm.lrn} onChange={e => setStudentForm(p => ({ ...p, lrn: e.target.value }))} placeholder="12-digit LRN" className="rounded-xl" />
-                  </>
-                )}
-              </div>
+              {/* Trainee Number for CMDC, LRN for a school placement, and nothing
+                  at all for Tutorial — a learner who is not enrolled has no LRN. */}
+              {isCmdc(studentForm.educationLevel) ? (
+                <div className="space-y-1.5">
+                  <Label className="font-bold text-[#2F3E46]">Trainee Number</Label>
+                  <Input value={studentForm.traineeNumber} onChange={e => setStudentForm(p => ({ ...p, traineeNumber: e.target.value }))} placeholder="CMDC Trainee Number" className="rounded-xl" />
+                </div>
+              ) : hasLrn(studentForm.educationLevel) ? (
+                <div className="space-y-1.5">
+                  <Label className="font-bold text-[#2F3E46]">LRN (Learner Reference Number)</Label>
+                  <Input
+                    value={studentForm.lrn || ''}
+                    onChange={e => setStudentForm(p => ({ ...p, lrn: sanitizeLrn(e.target.value) }))}
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    maxLength={LRN_LENGTH}
+                    autoComplete="off"
+                    placeholder="12-digit LRN"
+                    className="rounded-xl"
+                  />
+                  <p className="text-[11px] text-gray-400">
+                    Numbers only · {(studentForm.lrn || '').length}/{LRN_LENGTH}
+                  </p>
+                </div>
+              ) : null}
               <div className="space-y-1.5">
                 <Label className="font-bold text-[#2F3E46]">Status</Label>
                 <Select value={studentForm.status} onValueChange={v => setStudentForm(p => ({ ...p, status: v as Student['status'] }))}>
@@ -1680,7 +1815,7 @@ export function Education() {
                     <div className="w-14 h-14 rounded-full flex items-center justify-center font-black text-lg" style={{ backgroundColor: c.accent, color: 'white' }}>
                       {viewStudent.name.charAt(0)}
                     </div>
-                    <div>
+                    <div className="flex-1 min-w-0">
                       <h2 className="text-xl font-bold" style={{ color: c.text }}>{viewStudent.name}</h2>
                       <div className="flex items-center gap-2 mt-1 flex-wrap">
                         <Badge style={{ backgroundColor: c.accent, color: 'white', border: 'none' }} className="text-xs">{LEVEL_SHORT[viewStudent.educationLevel]}</Badge>
@@ -1688,6 +1823,16 @@ export function Education() {
                         <span className="text-xs text-gray-500">· {viewStudent.id}</span>
                       </div>
                     </div>
+                    {/* Subject results live behind this button — the old
+                        Passed / Failed tab beside Personal Info is gone. */}
+                    <Button
+                      size="sm"
+                      className="shrink-0 gap-1.5 rounded-lg font-bold"
+                      style={{ backgroundColor: '#2F3E46', color: 'white' }}
+                      onClick={() => openSubjects(viewStudent)}
+                    >
+                      <BookOpen className="w-3.5 h-3.5" /> Subjects
+                    </Button>
                   </div>
                 </div>
 
@@ -1695,7 +1840,6 @@ export function Education() {
                   <Tabs value={profileTab} onValueChange={setProfileTab}>
                     <TabsList className="mb-4">
                       <TabsTrigger value="info">Personal Info</TabsTrigger>
-                      <TabsTrigger value="evaluation">Passed / Failed</TabsTrigger>
                       <TabsTrigger value="files">
                         Files ({viewStudent.files.length})
                       </TabsTrigger>
@@ -1707,10 +1851,11 @@ export function Education() {
                           ['Age', viewStudent.age],
                           ['Gender', viewStudent.gender],
                           ['Grade / Section', viewStudent.gradeSection || '—'],
-                          [
-                            viewStudent.educationLevel === 'Calamba Manpower Development Center (CMDC)' ? 'Trainee Number' : 'LRN',
-                            (viewStudent.educationLevel === 'Calamba Manpower Development Center (CMDC)' ? viewStudent.traineeNumber : viewStudent.lrn) || '—',
-                          ],
+                          // LRN / Trainee Number — omitted for a level that has neither.
+                          ...(() => {
+                            const identifier = learnerIdentifier(viewStudent);
+                            return identifier ? [[identifier.label, identifier.value || '—']] : [];
+                          })(),
                           ['School', viewStudent.school],
                           ['Enrollment Date', viewStudent.enrollmentDate],
                           ['Status', viewStudent.status],
@@ -1732,61 +1877,6 @@ export function Education() {
                       </div>
                     </TabsContent>
 
-                    <TabsContent value="evaluation" className="space-y-4 py-2">
-                      <p className="text-sm text-gray-600 font-semibold">Evaluate educational progress for <strong>{viewStudent.name}</strong>:</p>
-                      <div className="flex gap-3">
-                        {(['Passed', 'Failed'] as const).map(result => (
-                          <button key={result} onClick={() => {
-                            const rpt: ProgressReport = {
-                              id: Date.now().toString(),
-                              studentId: viewStudent.id,
-                              month: new Date().toISOString().substring(0, 7),
-                              subject: 'General Evaluation',
-                              result,
-                              academicProgress: '',
-                              participation: '',
-                              strengths: '',
-                              areasForImprovement: '',
-                              overallDevelopment: `Marked ${result === 'Passed' ? 'Pass' : 'Fail'} by Educator on ${formatShortDate(new Date())}`,
-                              schoolVisits: 0,
-                              createdAt: new Date().toISOString(),
-                            };
-                            const updated = [...progressReports, rpt];
-                            setProgressReports(updated);
-                            saveProgress(updated);
-                            void createResource<any>('education-progress-reports', {
-                              ...rpt,
-                              educationRecordId: viewStudent.id,
-                              residentId: viewStudent.residentId,
-                            }).then(saved => {
-                              setProgressReports(prev => prev.map(r => r.id === rpt.id ? { ...r, id: saved.id } : r));
-                            }).catch(error => {
-                              console.error('Unable to persist education evaluation:', error);
-                            });
-                          }}
-                          className={`flex-1 py-4 rounded-xl border-2 text-lg font-black transition-all ${
-                            result === 'Passed'
-                              ? 'border-green-500 bg-green-50 text-green-700 hover:bg-green-100'
-                              : 'border-red-500 bg-red-50 text-red-700 hover:bg-red-100'
-                          }`}>
-                            {result === 'Passed' ? '✓ Passed' : '✕ Failed'}
-                          </button>
-                        ))}
-                      </div>
-                      <div className="border-t pt-3">
-                        <p className="text-xs font-bold text-gray-500 uppercase mb-2">Evaluation History</p>
-                        {progressReports.filter(r => r.studentId === viewStudent.id).length === 0
-                          ? <p className="text-xs text-gray-400 italic">No evaluations yet.</p>
-                          : progressReports.filter(r => r.studentId === viewStudent.id).map(r => (
-                            <div key={r.id} className="flex items-center gap-2 py-1.5 border-b border-gray-50 text-xs">
-                              <span className="text-gray-600 flex-1">{r.subject} — {r.month}</span>
-                              <span className={`font-bold px-2 py-0.5 rounded-full ${r.result === 'Passed' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>{r.result}</span>
-                              <button type="button" className="text-[#2F3E46] hover:text-blue-600 font-semibold" onClick={() => editProgressReport(r)}>Edit</button>
-                            </div>
-                          ))
-                        }
-                      </div>
-                    </TabsContent>
                     <TabsContent value="files">
                       <div className="flex justify-between items-center mb-3">
                         <p className="text-sm font-bold text-[#2F3E46]">Uploaded Documents</p>
@@ -2042,10 +2132,11 @@ export function Education() {
               </Select>
               {quarterlyForm.studentId && (() => {
                 const s = students.find(st => st.id === quarterlyForm.studentId);
-                if (!s) return null;
+                const identifier = s ? learnerIdentifier(s) : null;
+                if (!identifier) return null;
                 return (
                   <p className="text-xs text-gray-400">
-                    {s.educationLevel === 'Calamba Manpower Development Center (CMDC)' ? `Trainee Number: ${s.traineeNumber || '—'}` : `LRN: ${s.lrn || '—'}`}
+                    {identifier.label}: {identifier.value || '—'}
                   </p>
                 );
               })()}
@@ -2192,15 +2283,17 @@ export function Education() {
 // ── STUDENT CARD ──────────────────────────────────────────────────────────────
 
 function StudentCard({
-  student, onView, onEdit, onUpload, onDelete,
+  student, onView, onEdit, onUpload, onSubjects, onDelete,
 }: {
   student: Student;
   onView: (s: Student) => void;
   onEdit: (s: Student) => void;
   onUpload: (s: Student) => void;
+  onSubjects: (s: Student) => void;
   onDelete: (s: Student) => void;
 }) {
   const c = LEVEL_COLORS[student.educationLevel];
+  const identifier = learnerIdentifier(student);
   const statusColor = student.status === 'Active' ? '#10B981' : student.status === 'Completed' ? '#3B82F6' : '#EF4444';
 
   return (
@@ -2228,10 +2321,10 @@ function StudentCard({
         <div className="space-y-1 text-xs text-gray-500 mb-3">
           <p><span className="font-semibold text-gray-600">School:</span> {student.school}</p>
           {student.gradeSection && <p><span className="font-semibold text-gray-600">Grade:</span> {student.gradeSection}</p>}
-          {(student.educationLevel === 'Calamba Manpower Development Center (CMDC)' ? student.traineeNumber : student.lrn) && (
+          {identifier?.value && (
             <p>
-              <span className="font-semibold text-gray-600">{student.educationLevel === 'Calamba Manpower Development Center (CMDC)' ? 'Trainee #:' : 'LRN:'}</span>{' '}
-              {student.educationLevel === 'Calamba Manpower Development Center (CMDC)' ? student.traineeNumber : student.lrn}
+              <span className="font-semibold text-gray-600">{isCmdc(student.educationLevel) ? 'Trainee #:' : 'LRN:'}</span>{' '}
+              {identifier.value}
             </p>
           )}
           <p><span className="font-semibold text-gray-600">Enrolled:</span> {student.enrollmentDate}</p>
@@ -2244,6 +2337,9 @@ function StudentCard({
           </Button>
           <Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-[#FFD100]/20" onClick={() => onEdit(student)} title="Edit">
             <Edit className="w-3.5 h-3.5 text-[#2F3E46]" />
+          </Button>
+          <Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-amber-50" onClick={() => onSubjects(student)} title="Subjects (Pass / Fail)" aria-label="Subjects">
+            <BookOpen className="w-3.5 h-3.5 text-amber-600" />
           </Button>
           <Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-green-50" onClick={() => onUpload(student)} title="Upload File">
             <Upload className="w-3.5 h-3.5 text-green-600" />

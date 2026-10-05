@@ -2317,6 +2317,129 @@
     "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
    }
   ],
+  "education_subject_results": [
+   {
+    "name": "id",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "educationRecordId",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "residentId",
+    "type": "varchar(40)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "subjectId",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "result",
+    "type": "enum('Passed','Failed')",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "modifiedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED"
+   },
+   {
+    "name": "updatedAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+   }
+  ],
+  "education_subjects": [
+   {
+    "name": "id",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "educationLevel",
+    "type": "varchar(150)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "name",
+    "type": "varchar(150)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "sortOrder",
+    "type": "int",
+    "nullable": false,
+    "default": "0",
+    "extra": ""
+   },
+   {
+    "name": "createdBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "modifiedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED"
+   },
+   {
+    "name": "updatedAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+   }
+  ],
   "guide_interventions": [
    {
     "name": "id",

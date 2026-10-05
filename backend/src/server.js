@@ -2639,6 +2639,43 @@ async function runMigrations() {
         CONSTRAINT fk_education_monthly_resident FOREIGN KEY (residentId) REFERENCES children(id) ON DELETE SET NULL
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
+    // Subjects the Educator defines per education level, and each learner's
+    // Pass / Fail in them. Results reference both the learner and the subject,
+    // so this has to run after education_records exists.
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS education_subjects (
+        id VARCHAR(40) PRIMARY KEY,
+        educationLevel VARCHAR(150) NOT NULL,
+        name VARCHAR(150) NOT NULL,
+        sortOrder INT NOT NULL DEFAULT 0,
+        createdBy VARCHAR(100) NULL,
+        modifiedBy VARCHAR(100) NULL,
+        createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_education_subject_level_name (educationLevel, name),
+        INDEX idx_education_subject_level (educationLevel)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS education_subject_results (
+        id VARCHAR(40) PRIMARY KEY,
+        educationRecordId VARCHAR(40) NOT NULL,
+        residentId VARCHAR(40) NULL,
+        subjectId VARCHAR(40) NOT NULL,
+        result ENUM('Passed','Failed') NOT NULL,
+        createdBy VARCHAR(100) NULL,
+        modifiedBy VARCHAR(100) NULL,
+        createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uq_education_subject_result (educationRecordId, subjectId),
+        INDEX idx_education_subject_result_resident (residentId),
+        INDEX idx_education_subject_result_subject (subjectId),
+        CONSTRAINT fk_education_subject_result_record FOREIGN KEY (educationRecordId) REFERENCES education_records(id) ON DELETE CASCADE,
+        CONSTRAINT fk_education_subject_result_subject FOREIGN KEY (subjectId) REFERENCES education_subjects(id) ON DELETE CASCADE,
+        CONSTRAINT fk_education_subject_result_resident FOREIGN KEY (residentId) REFERENCES children(id) ON DELETE SET NULL
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
     console.log('Migration: Education module tables ensured.');
   } catch (err) {
     console.warn('Migration warning (Education module):', err.message);

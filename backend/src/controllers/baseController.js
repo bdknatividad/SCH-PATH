@@ -27,6 +27,10 @@ function resolveResource(resource) {
     educationProgressReports: { key: 'education_progress_reports', table: 'education_progress_reports' },
     education_school_visits: { key: 'education_school_visits', table: 'education_school_visits' },
     educationSchoolVisits: { key: 'education_school_visits', table: 'education_school_visits' },
+    education_subjects: { key: 'education_subjects', table: 'education_subjects' },
+    educationSubjects: { key: 'education_subjects', table: 'education_subjects' },
+    education_subject_results: { key: 'education_subject_results', table: 'education_subject_results' },
+    educationSubjectResults: { key: 'education_subject_results', table: 'education_subject_results' },
     education_monthly_reports: { key: 'education_monthly_reports', table: 'education_monthly_reports' },
     educationMonthlyReports: { key: 'education_monthly_reports', table: 'education_monthly_reports' },
   };

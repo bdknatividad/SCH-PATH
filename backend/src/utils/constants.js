@@ -204,6 +204,27 @@ const RESOURCES = {
     sortInApplication: true,
     columns: ['id', 'educationRecordId', 'residentId', 'visitDate', 'school', 'purpose', 'findings', 'status', 'fileName', 'fileData', 'createdBy', 'modifiedBy'],
   },
+  /*
+   * The subjects a learner is graded in, defined by the Educator per education
+   * level — every learner at that level shares the list. Small rows, so SQL
+   * ordering is safe.
+   */
+  education_subjects: {
+    prefix: 'ESB',
+    orderBy: 'sortOrder ASC, createdAt ASC',
+    jsonFields: [],
+    columns: ['id', 'educationLevel', 'name', 'sortOrder', 'createdBy', 'modifiedBy'],
+  },
+  /*
+   * One learner's Pass / Fail in one subject. Unique per (learner, subject);
+   * clearing a result deletes the row rather than storing NULL.
+   */
+  education_subject_results: {
+    prefix: 'ESR',
+    orderBy: 'createdAt ASC',
+    jsonFields: [],
+    columns: ['id', 'educationRecordId', 'residentId', 'subjectId', 'result', 'createdBy', 'modifiedBy'],
+  },
   education_monthly_reports: {
     prefix: 'EMR',
     orderBy: 'reportMonth DESC, createdAt DESC',

@@ -1448,11 +1448,13 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
                             school enrolment, which reads as a value someone
                             forgot to fill in rather than a field that does not
                             apply to that enrolment. */}
+                        {/* A Tutorial learner is not enrolled in school and has
+                            no LRN, so the slot is left out for them entirely. */}
                         {learner.educationLevel === 'Calamba Manpower Development Center (CMDC)' ? (
                           <p><span className="font-medium text-gray-500">Trainee number:</span> {learner.traineeNumber || '—'}</p>
-                        ) : (
+                        ) : learner.educationLevel !== 'Tutorial' ? (
                           <p><span className="font-medium text-gray-500">LRN:</span> {learner.lrn || '—'}</p>
-                        )}
+                        ) : null}
                         <p><span className="font-medium text-gray-500">Grade / section:</span> {learner.gradeSection || '—'}</p>
                         <p><span className="font-medium text-gray-500">Status:</span> {learner.status || '—'}</p>
                       </div>

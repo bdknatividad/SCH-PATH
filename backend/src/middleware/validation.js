@@ -230,10 +230,30 @@ function requireEducationPlacement(req, res, next) {
   return next();
 }
 
+/**
+ * A Learner Reference Number is exactly 12 digits — nothing else.
+ *
+ * Only checked when one is actually sent: a learner with no LRN (Tutorial, or a
+ * CMDC trainee, who has a Trainee Number instead) sends none, and a partial
+ * update that does not touch the LRN is not judged on a value it did not send.
+ */
+function requireValidLrn(req, res, next) {
+  const lrn = req.body?.lrn;
+  if (lrn === undefined || lrn === null) return next();
+  const value = String(lrn).trim();
+  if (value === '') return next();
+  if (!/^\d{12}$/.test(value)) {
+    return next(new ApiError(400, 'The LRN must be exactly 12 digits (numbers only).'));
+  }
+  req.body.lrn = value;
+  return next();
+}
+
 module.exports = {
   validateBody,
   validateId,
   schemas,
   sanitizeBody,
   requireEducationPlacement,
+  requireValidLrn,
 };
