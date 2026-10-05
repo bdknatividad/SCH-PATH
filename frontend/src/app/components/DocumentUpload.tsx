@@ -732,6 +732,32 @@ function isIncidentReportDocument(doc: DocumentWithApproval | null | undefined):
   return String(doc?.title || '').trim().toLowerCase() === 'incident report';
 }
 
+/**
+ * Blank forms offered from the Documents module's Available Forms panel — the
+ * same pattern as the Assessment and Court Records modules: View, Print and
+ * Download of the official PDF served from `public/forms`.
+ */
+const DOCUMENT_FORMS = [
+  { name: 'Form 00 — Pre-Admission Conference Form', description: 'Attendance, presenting problem, admission requirements and data gathered.', file: '/forms/pre-admission-conference.pdf' },
+  { name: 'Form 09 — Night Shift Monitoring Sheet', description: 'Headcount, hourly activities and observations, incidents and safety checks for the night shift.', file: '/forms/night-monitoring.pdf' },
+  { name: 'Form 17 — Trans-In and Out Form', description: 'Date, time and signatures of staff and police officer for each trans-out and trans-in.', file: '/forms/transfer-in-discharge.pdf' },
+  { name: 'Form 23 — Child Protection Policy (Sponsors, Donors & Visitors)', description: 'Policies a sponsor, donor or visitor must adhere to before visiting the facility.', file: '/forms/cpp-outreach-visitors.pdf' },
+] as const;
+
+type DocumentForm = (typeof DOCUMENT_FORMS)[number];
+
+function printForm(file: string) {
+  const w = window.open(file, '_blank');
+  w?.addEventListener('load', () => { try { w.print(); } catch {} });
+}
+
+function downloadForm(form: DocumentForm) {
+  const link = document.createElement('a');
+  link.href = form.file;
+  link.download = `${form.name.replace(/\s+—\s+/, ' - ')}.pdf`;
+  link.click();
+}
+
 export function DocumentUpload() {
   const { documents, addDocument, updateDocument, deleteDocument, children, refreshData } = useData();
   const { user } = useAuth();
@@ -753,6 +779,9 @@ export function DocumentUpload() {
   const dialog = useSystemDialog();
 
   const [isUploadDialogOpen, setIsUploadDialogOpen] = useState(false);
+  /** Available Forms panel, and the form open in the viewer. */
+  const [formsOpen, setFormsOpen] = useState(false);
+  const [formViewer, setFormViewer] = useState<DocumentForm | null>(null);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [selectedDocument, setSelectedDocument] = useState<DocumentWithApproval | null>(null);
@@ -2053,13 +2082,76 @@ export function DocumentUpload() {
           than shown and failing, which is the same rule the rest of this module
           applies to its review controls.
         */}
-        {can('Documents', 'create') && (
-          <Button className="flex items-center gap-2 bg-[#2F3E46]" onClick={() => setIsUploadDialogOpen(true)}>
-            <Upload className="w-4 h-4" />
-            <span>Upload Document</span>
-          </Button>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Available Forms — beside Upload Document, same pattern as the
+              Assessment and Court Records modules. */}
+          <button
+            type="button"
+            onClick={() => setFormsOpen(v => !v)}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl border-2 border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 font-semibold text-sm transition-all"
+          >
+            <span>📋</span>
+            {formsOpen ? 'Hide Forms' : 'Available Forms'}
+          </button>
+          {can('Documents', 'create') && (
+            <Button className="flex items-center gap-2 bg-[#2F3E46]" onClick={() => setIsUploadDialogOpen(true)}>
+              <Upload className="w-4 h-4" />
+              <span>Upload Document</span>
+            </Button>
+          )}
+        </div>
       </div>
+
+      {formsOpen && (
+        <div className="border border-blue-200 rounded-2xl overflow-hidden bg-white shadow-sm">
+          <div className="bg-blue-600 px-5 py-3 flex items-center gap-2">
+            <span className="text-white text-lg">📋</span>
+            <h3 className="font-bold text-white">Document Forms</h3>
+            <span className="text-blue-200 text-xs ml-1">— Click to download</span>
+          </div>
+          <div className="divide-y divide-gray-100">
+            {DOCUMENT_FORMS.map(form => (
+              <div key={form.file} className="flex flex-col gap-3 px-5 py-3 hover:bg-blue-50 transition-all sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-9 h-9 rounded-lg bg-blue-100 flex items-center justify-center shrink-0">
+                    <FileText className="w-4 h-4 text-blue-700" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="font-semibold text-[#2F3E46] text-sm">{form.name}</p>
+                    <p className="text-xs text-gray-400">{form.description}</p>
+                  </div>
+                </div>
+                <div className="flex shrink-0 gap-1.5">
+                  <button type="button" onClick={() => setFormViewer(form)} className="rounded-lg border border-blue-200 px-2.5 py-1.5 text-xs font-bold text-blue-600 hover:bg-blue-100">View</button>
+                  <button type="button" onClick={() => printForm(form.file)} className="rounded-lg border border-blue-200 px-2.5 py-1.5 text-xs font-bold text-blue-600 hover:bg-blue-100">Print</button>
+                  <button type="button" onClick={() => downloadForm(form)} className="rounded-lg border border-blue-200 px-2.5 py-1.5 text-xs font-bold text-blue-600 hover:bg-blue-100">Download</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {formViewer && (
+        <Dialog open={true} onOpenChange={(open) => !open && setFormViewer(null)}>
+          <DialogContent className="flex h-[92vh] w-[96vw] max-w-6xl sm:max-w-6xl flex-col gap-0 overflow-hidden rounded-2xl p-0 sm:p-0">
+            <DialogHeader className="flex shrink-0 flex-row items-center justify-between gap-3 border-b px-5 py-3">
+              <DialogTitle className="text-[#2F3E46]">{formViewer.name}</DialogTitle>
+              <div className="flex shrink-0 gap-2 pr-8">
+                <Button size="sm" variant="outline" onClick={() => printForm(formViewer.file)}>
+                  <Printer className="h-4 w-4 mr-1" /> Print
+                </Button>
+                <Button size="sm" className="bg-[#2F3E46] text-white" onClick={() => downloadForm(formViewer)}>
+                  <Download className="h-4 w-4 mr-1" /> Download
+                </Button>
+              </div>
+            </DialogHeader>
+            <div className="min-h-0 flex-1 bg-neutral-200 p-2 sm:p-4">
+              <iframe title={formViewer.name} src={formViewer.file} className="h-full w-full rounded-lg border bg-white" />
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
       
       {/* Pending review alert for Center Head */}
       {canApprove && pendingApprovalQueue.length > 0 && (
