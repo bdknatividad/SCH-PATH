@@ -21,6 +21,7 @@ DROP TABLE IF EXISTS children;
 DROP TABLE IF EXISTS users;
 DROP TABLE IF EXISTS accessRequests;
 DROP TABLE IF EXISTS residentPerformanceRatings;
+DROP TABLE IF EXISTS physical_examinations;
 DROP TABLE IF EXISTS education_subject_results;
 DROP TABLE IF EXISTS education_subjects;
 DROP TABLE IF EXISTS education_monthly_reports;
@@ -736,6 +737,28 @@ CREATE TABLE IF NOT EXISTS education_subject_results (
   CONSTRAINT fk_education_subject_result_record FOREIGN KEY (educationRecordId) REFERENCES education_records(id) ON DELETE CASCADE,
   CONSTRAINT fk_education_subject_result_subject FOREIGN KEY (subjectId) REFERENCES education_subjects(id) ON DELETE CASCADE,
   CONSTRAINT fk_education_subject_result_resident FOREIGN KEY (residentId) REFERENCES children(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Physical Examination: the structured exam (markers on the front/back body
+-- diagram) for one resident and admission. Its PDF is filed as a
+-- "Physical Examination" document, linked by documentId.
+CREATE TABLE IF NOT EXISTS physical_examinations (
+  id VARCHAR(40) PRIMARY KEY,
+  residentId VARCHAR(40) NOT NULL,
+  admissionId VARCHAR(40) NULL,
+  examDate DATE NOT NULL,
+  residentAge INT NULL,
+  admissionDate DATE NULL,
+  markings JSON NULL,
+  documentId VARCHAR(40) NULL,
+  examinedBy VARCHAR(100) NULL,
+  createdBy VARCHAR(100) NULL,
+  modifiedBy VARCHAR(100) NULL,
+  createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_physical_exam_resident (residentId),
+  INDEX idx_physical_exam_admission (admissionId),
+  CONSTRAINT fk_physical_exam_resident FOREIGN KEY (residentId) REFERENCES children(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ─── Violation & Intervention Guide Tables ─────────────────────────────────

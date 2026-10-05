@@ -428,6 +428,8 @@ router.use('/resident-assignments', authenticate, assignmentRoutes);
 router.use('/tri', authenticate, triRoutes);
 router.use('/anecdotal-reports', authenticate, anecdotalReportRoutes);
 router.use('/admissions', authenticate, admissionRoutes);
+// Physical Examination (Child Record → Medical). Its PDF is filed in Documents.
+router.use('/physical-examinations', authenticate, require('./physicalExaminationRoutes'));
 router.use('/discharge-plans', authenticate, dischargeRoutes);
 router.use('/quarterly-progress-reports', authenticate, requireModule('Reports'), quarterlyProgressReportRoutes);
 // Permission model. `/rbac/me` tells the client what it may see; the UI renders

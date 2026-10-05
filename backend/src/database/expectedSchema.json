@@ -3350,6 +3350,99 @@
     "extra": ""
    }
   ],
+  "physical_examinations": [
+   {
+    "name": "id",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "residentId",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "admissionId",
+    "type": "varchar(40)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "examDate",
+    "type": "date",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "residentAge",
+    "type": "int",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "admissionDate",
+    "type": "date",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "markings",
+    "type": "json",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "documentId",
+    "type": "varchar(40)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "examinedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "modifiedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED"
+   },
+   {
+    "name": "updatedAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+   }
+  ],
   "quarterlyProgressReportSections": [
    {
     "name": "id",

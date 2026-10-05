@@ -2701,6 +2701,34 @@ async function runMigrations() {
     console.warn('Migration warning (Education module):', err.message);
   }
 
+  // Physical Examination (Child Record → Medical). The PDF itself is a
+  // "Physical Examination" document; this row keeps the structured exam.
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS physical_examinations (
+        id VARCHAR(40) PRIMARY KEY,
+        residentId VARCHAR(40) NOT NULL,
+        admissionId VARCHAR(40) NULL,
+        examDate DATE NOT NULL,
+        residentAge INT NULL,
+        admissionDate DATE NULL,
+        markings JSON NULL,
+        documentId VARCHAR(40) NULL,
+        examinedBy VARCHAR(100) NULL,
+        createdBy VARCHAR(100) NULL,
+        modifiedBy VARCHAR(100) NULL,
+        createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_physical_exam_resident (residentId),
+        INDEX idx_physical_exam_admission (admissionId),
+        CONSTRAINT fk_physical_exam_resident FOREIGN KEY (residentId) REFERENCES children(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+    console.log('Migration: physical_examinations table ensured.');
+  } catch (err) {
+    console.warn('Migration warning (physical_examinations):', err.message);
+  }
+
   // A resident who is not enrolled in school — the enrolment window has closed,
   // or they are between schools — is recorded at the "Tutorial" level, which is
   // the facility's Academic Support Sessions / Tutorial activity. `school` and

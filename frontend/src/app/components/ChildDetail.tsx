@@ -60,6 +60,7 @@ function isImageDocument(doc: { fileType?: string | null; fileName?: string | nu
 }
 import { PhaseProgress } from './PhaseProgress';
 import { PrescriptionList } from './PrescriptionList';
+import { PhysicalExaminationCard } from './PhysicalExamination';
 import IncidentReportModal from './IncidentReportModal';
 import { isClosedResident, isActiveResident } from '@/utils/residentStatus';
 
@@ -1753,6 +1754,11 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
             canMark={can('Health', 'edit')}
             onChanged={() => refreshData()}
           />
+
+          {/* Physical Examination — the digital form with the front/back body
+              diagram. Saved exams are filed as "Physical Examination" documents
+              under the resident's current admission. */}
+          <PhysicalExaminationCard child={child} admissionDate={latestAdmission?.admissionDate} />
         </TabsContent>
 
         {hasBehavioralTab && (

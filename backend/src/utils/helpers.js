@@ -427,6 +427,7 @@ const DATETIME_COLUMN_PATTERN = /(At|DateTime|Timestamp)$/;
  */
 const DATE_ONLY_COLUMNS = new Set([
   'date',
+  'examDate',
   'admissionDate',
   'birthDate',
   'closedDate',

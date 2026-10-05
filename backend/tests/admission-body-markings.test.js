@@ -328,88 +328,18 @@ test('the edit path accepts the markings and validates them the same way', () =>
 
 // ── The form ────────────────────────────────────────────────────────────────
 
-/** The piercing/tattoo card, sliced by its own comment markers. */
-function bodyMarkingsCard() {
-  const start = RECORDS.indexOf('{/* PIERCING / TATTOO */}');
-  // The card was moved from Part 1 to Part 2 on the user's instruction, so its
-  // end is no longer the ADMISSION STATUS block — it now has its own explicit
-  // end marker. Slicing to the neighbouring element would quietly start
-  // matching whatever sits below the card after any later edit.
-  const end = RECORDS.indexOf('{/* END PIERCING / TATTOO', start);
-  assert.ok(start > 0, 'the card is gone from the admission slip');
-  assert.ok(end > start, 'the card has no end marker');
-  const card = RECORDS.slice(start, end);
-  // A slice marker that stopped matching turns the block into a few characters,
-  // and every assertion below would then pass vacuously.
-  assert.ok(card.length > 1500, `the card sliced to ${card.length} characters`);
-  return card;
-}
-
-test('the markings card sits on Part 2, with the slip replica', () => {
-  // The user asked for the card on the "Official Admission Slip", which in this
-  // editor is Part 2 (`formStep === 2`); Part 1 is the Resident Admission
-  // Details step. Moving it back would put the fields somewhere the user did not
-  // ask for, and nothing else would fail.
-  const partTwo = RECORDS.indexOf('{formStep ===\n              2 && (');
-  assert.ok(partTwo > 0, 'the Part 2 block is gone');
-
-  const cardAt = RECORDS.indexOf('{/* PIERCING / TATTOO */}');
-  const editorAt = RECORDS.indexOf('<AdmissionSlipEditor');
-  const partOneAt = RECORDS.indexOf('{formStep ===\n              1 && (');
-
-  assert.ok(cardAt > partTwo, 'the card is not inside the Part 2 block');
-  assert.ok(cardAt > editorAt, 'the card is not after the slip replica');
-  assert.ok(partOneAt < partTwo, 'Part 1 no longer precedes Part 2');
-  assert.ok(
-    cardAt > partTwo,
-    'the card drifted back into Part 1',
-  );
-
-  // Part 1's own tail must no longer carry the card: the last card in Part 1 is
-  // Admission Status, and the card marker must come after Part 2 opens.
-  const partOne = RECORDS.slice(partOneAt, partTwo);
-  assert.doesNotMatch(partOne, /PIERCING \/ TATTOO/, 'the card is still on Part 1');
+test('the Piercing / Tattoo card is no longer on the Add New Child form', () => {
+  // Removed on the user's instruction: piercings and tattoos are now recorded on
+  // the Physical Examination's body diagram (Child Record → Medical).
+  assert.doesNotMatch(RECORDS, /\{\/\* PIERCING \/ TATTOO \*\/\}/, 'the card is back on the form');
+  assert.doesNotMatch(RECORDS, /onClick=\{addBodyMarking\}/, 'the form still offers Add marking');
+  assert.doesNotMatch(RECORDS, />\s*Piercing \/ Tattoo\s*</, 'the card heading is still rendered');
 });
 
-test('the body part is a dropdown, and it is not also a text box', () => {
-  const card = bodyMarkingsCard();
-
-  assert.match(card, /BODY_MARKING_LOCATIONS\.map\(/, 'the locations are not rendered from the list');
-  assert.match(card, /BODY_MARKING_TYPES\.map\(/, 'the types are not rendered from the list');
-
-  // The location reaches the row only through the dropdown's own handler. A
-  // free-text path would be an `Input` bound to `marking.location`, so that is
-  // what is checked for — by counting the card's inputs and asserting the only
-  // one is the note.
-  const inputs = card.match(/<Input\b/g) || [];
-  assert.equal(inputs.length, 1, `the card has ${inputs.length} text inputs, not 1`);
-  assert.match(card, /<Input[\s\S]{0,300}value=\{\s*marking\.description\s*\}/);
-  assert.doesNotMatch(card, /<Input[\s\S]{0,300}marking\.location/);
-
-  // And the dropdown writes through the row updater rather than free text.
-  assert.match(card, /onValueChange=\{\(value\) =>\s*updateBodyMarking\(index, \{ location: value \}\)/);
-  assert.doesNotMatch(card, /location: event\.target\.value/);
-});
-
-test('the card can add and remove a marking, and is bounded', () => {
-  const card = bodyMarkingsCard();
-
-  assert.match(card, /onClick=\{addBodyMarking\}/, 'no way to add a marking');
-  // `\s*` before the brace: the handler call and its closing brace sit on
-  // different lines in this file's formatting.
-  assert.match(
-    card,
-    /onClick=\{\(\) =>\s*removeBodyMarking\(index\)\s*\}/,
-    'no way to remove a marking',
-  );
-  assert.match(
-    card,
-    /disabled=\{\s*form\.bodyMarkings\.length >=\s*BODY_MARKING_MAX_ENTRIES\s*\}/,
-    'the add button is not bounded by the cap the API enforces',
-  );
-
-  // The remove control is labelled for a screen reader: it has no text.
-  assert.match(card, /aria-label="Remove this marking"/);
+test('markings already saved on an admission are not erased by an edit', () => {
+  // The form still loads and sends `bodyMarkings`, so editing an admission that
+  // has markings from before the card was removed keeps them.
+  assert.match(RECORDS, /bodyMarkings:/, 'the form state no longer carries the markings');
 });
 
 test('the row updater patches only the row it was given', () => {
@@ -519,8 +449,6 @@ test('a half-filled row is caught in the form, not by the API', () => {
     'the edit path detects an unfinished row but never shows the message',
   );
 
-  // The message is shown, or the save button would appear to do nothing.
-  assert.match(bodyMarkingsCard(), /formErrors\.bodyMarkings && \(/);
 });
 
 test('the form state carries the markings through a load', () => {
