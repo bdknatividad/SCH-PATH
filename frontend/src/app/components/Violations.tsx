@@ -1195,7 +1195,7 @@ export function Violations() {
                 <table className="w-full min-w-[860px] text-sm">
                   <thead>
                     <tr className="bg-gray-50 border-b border-gray-200">
-                      <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide w-10">#</th>
+                      <th className="px-3 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wide w-14 whitespace-nowrap">#</th>
                       <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide w-[28%]">Incident Type</th>
                       <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide">Resident(s) Involved</th>
                       <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide w-24">Severity</th>
@@ -1209,7 +1209,7 @@ export function Violations() {
                       const resident = children.find(c => c.id === violation.residentId);
                       return (
                         <tr key={violation.id} className={idx % 2 === 0 ? 'bg-white hover:bg-gray-50' : 'bg-gray-50 hover:bg-gray-100'}>
-                          <td className="px-4 py-3 text-gray-400 text-xs">{idx + 1}</td>
+                          <td className="px-3 py-3 text-right text-gray-400 text-xs tabular-nums whitespace-nowrap">{idx + 1}</td>
                           <td className="px-4 py-3 align-top">
                             <p className="text-xs text-[#2F3E46] font-medium leading-5 whitespace-normal break-words">{violation.type}</p>
                             {(violation as any).incidentGroupId && <span className="text-[10px] text-gray-400">Group: {(violation as any).incidentGroupId}</span>}
@@ -1314,7 +1314,7 @@ export function Violations() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-gray-50 border-b border-gray-200">
-                      <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide w-10">#</th>
+                      <th className="px-3 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wide w-14 whitespace-nowrap">#</th>
                       <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide">Resident</th>
                       <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide">Incident Type</th>
                       <th className="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide w-24">Date</th>
@@ -1327,7 +1327,7 @@ export function Violations() {
                       const resident = children.find(c => c.id === violation.residentId);
                       return (
                         <tr key={violation.id} className={idx % 2 === 0 ? 'bg-white hover:bg-gray-50' : 'bg-gray-50 hover:bg-gray-100'}>
-                          <td className="px-4 py-3 text-gray-400 text-xs">{idx + 1}</td>
+                          <td className="px-3 py-3 text-right text-gray-400 text-xs tabular-nums whitespace-nowrap">{idx + 1}</td>
                           <td className="px-4 py-3">
                             <p className="font-semibold text-[#2F3E46] text-xs">{resident?.name || '—'}</p>
                           </td>

@@ -685,12 +685,7 @@ export function InterventionTracker({ embedded = false }: { embedded?: boolean }
 
                       {/* Intervention steps */}
                       <div className="border-t border-gray-100 pt-2 mt-1">
-                        <p className="text-[10px] font-bold uppercase text-gray-400 tracking-wider mb-1.5">
-                          Prescribed Interventions
-                          {/* The numbers only label each item. Nothing — here or on the
-                              server — requires them to be completed in sequence. */}
-                          <span className="ml-1.5 normal-case tracking-normal font-medium text-gray-400">· complete in any order</span>
-                        </p>
+                        <p className="text-[10px] font-bold uppercase text-gray-400 tracking-wider mb-1.5">Prescribed Interventions</p>
                         <ol className="space-y-1">
                           {track.interventions.length === 0 ? (
                             <p className="text-xs text-gray-400">
@@ -722,18 +717,10 @@ export function InterventionTracker({ embedded = false }: { embedded?: boolean }
                                     key={step.id || si}
                                     className={`rounded-lg border p-2 ${isCompleted ? 'border-green-200 bg-green-50' : 'border-gray-100 bg-gray-50'}`}
                                   >
-                                    <div className="flex items-start gap-2.5">
-                                      {/* A pill rather than a fixed 20px circle: it grows to fit
-                                          two digits, so item 10 onwards no longer overflows or
-                                          wraps into the text beside it. */}
-                                      <span
-                                        aria-label={isCompleted ? `Item ${si + 1}, completed` : `Item ${si + 1}`}
-                                        className={`shrink-0 inline-flex h-6 min-w-[1.75rem] items-center justify-center rounded-full px-1.5 text-[11px] font-bold leading-none tabular-nums whitespace-nowrap ${isCompleted ? 'bg-green-500 text-white' : 'bg-gray-200 text-gray-600'}`}
-                                      >
-                                        {isCompleted ? '✓' : si + 1}
-                                      </span>
-
-                                      <div className="min-w-0 flex-1 pt-1">
+                                    {/* No step numbers: prescribed interventions are not a
+                                        sequence, and each one can be completed in any order. */}
+                                    <div className="flex items-start">
+                                      <div className="min-w-0 flex-1">
                                         <p className={`text-xs break-words ${isCompleted ? 'text-green-800 line-through' : 'text-gray-700'}`}>
                                           {officialText}
                                         </p>

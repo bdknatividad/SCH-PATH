@@ -11,7 +11,7 @@ import { useData } from '@/app/state/DataContext';
 import { useAuth } from '@/app/state/AuthContext';
 import { daysBetweenDates, formatPHDate } from '@/utils/dateFormatter';
 import { ChildDetail } from './ChildDetail';
-import { isClosedResident } from '@/utils/residentStatus';
+import { isActiveResident, isClosedResident } from '@/utils/residentStatus';
 
 interface CaseloadEntry {
   userId: string;
@@ -123,9 +123,9 @@ function ResidentAvatar({ residentId, name, size = 32 }: { residentId: string; n
 /** One assigned child: photo beside the name. */
 function ResidentChip({ resident }: { resident: { id: string; name: string } }) {
   return (
-    <span className="inline-flex max-w-full items-center gap-2 rounded-full border border-gray-200 bg-white py-0.5 pl-0.5 pr-3">
-      <ResidentAvatar residentId={resident.id} name={resident.name} size={28} />
-      <span className="truncate text-xs font-medium text-[#2F3E46]">{resident.name}</span>
+    <span className="inline-flex max-w-full items-center gap-2.5 rounded-full border border-gray-200 bg-white py-1 pl-1 pr-3.5">
+      <ResidentAvatar residentId={resident.id} name={resident.name} size={40} />
+      <span className="truncate text-[13px] font-medium text-[#2F3E46]">{resident.name}</span>
     </span>
   );
 }
@@ -299,7 +299,9 @@ export function CaseLoad() {
   const unassignedResidents = useMemo(() => {
     const today = manilaToday();
     return (children || [])
-      .filter((c: any) => c && !isClosedResident(c.status) && !assignedResidentIds.has(String(c.id)))
+      // Absconded residents are left out: they cannot be given a Case Load
+      // Manager until they return. Their records are not touched.
+      .filter((c: any) => c && !isClosedResident(c.status) && isActiveResident(c.status) && !assignedResidentIds.has(String(c.id)))
       .map((c: any) => {
         const admitted = dayOf(c.admissionDate || c.createdAt);
         const due = admitted ? caseLoadDueDate(admitted) : '';
@@ -316,7 +318,8 @@ export function CaseLoad() {
   // from another Houseparent.
   const assignableResidents = useMemo(
     () => (children || [])
-      .filter((c: any) => c && !isClosedResident(c.status) && !assignedResidentIds.has(String(c.id)))
+      // Only active residents — not Absconded, not Discharged / Transferred.
+      .filter((c: any) => c && !isClosedResident(c.status) && isActiveResident(c.status) && !assignedResidentIds.has(String(c.id)))
       .sort((a: any, b: any) => String(a.name || '').localeCompare(String(b.name || ''))),
     [children, assignedResidentIds]
   );
@@ -514,7 +517,7 @@ export function CaseLoad() {
                   <div className="p-6 flex-1 flex flex-col md:flex-row md:items-center justify-between gap-6">
                     <div className="space-y-3">
                       <div className="flex items-center gap-3 flex-wrap">
-                        <ResidentAvatar residentId={String(child.id)} name={child.name} size={44} />
+                        <ResidentAvatar residentId={String(child.id)} name={child.name} size={56} />
                         <h3 className="text-xl font-bold tracking-tight">{child.name}</h3>
                         <Badge className="bg-white/10 text-[#FFD100] border-none text-[10px] uppercase font-bold">
                           {child.legalCategory || child.caseType || 'No category'}

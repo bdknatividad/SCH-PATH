@@ -70,7 +70,9 @@ export function subjectLevelFor(level: string): string {
   return level;
 }
 
-const PANEL_BORDER = '#2F3E46';
+// System theme: slate #2F3E46 with the yellow #FFD100 accent, white boxes
+// with the light grey borders used by the rest of the forms.
+const BOX_BORDER = '#E5E7EB';
 
 /** The "Pass / Fail" box: the chosen word is underlined, as on the paper form. */
 function PassFailBox({
@@ -98,7 +100,7 @@ function PassFailBox({
         aria-pressed={chosen}
         aria-label={`${label}: ${text}`}
         onClick={() => onChange?.(chosen ? null : result)}
-        className={`${classes} rounded px-1 hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#2F3E46]`}
+        className={`${classes} rounded px-1 hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#FFD100]`}
       >
         {text}
       </button>
@@ -107,13 +109,13 @@ function PassFailBox({
 
   return (
     <div
-      className="flex h-11 items-center justify-center gap-1 border-2 bg-white px-3 text-[15px]"
-      style={{ borderColor: PANEL_BORDER }}
+      className="flex h-11 items-center justify-center gap-1 rounded-lg border bg-white px-3 text-[15px]"
+      style={{ borderColor: BOX_BORDER }}
     >
       {busy ? <Loader2 className="h-4 w-4 animate-spin text-gray-400" /> : (
         <>
           {word('Passed', 'Pass')}
-          <span className="text-gray-700">/</span>
+          <span className="text-gray-400">/</span>
           {word('Failed', 'Fail')}
         </>
       )}
@@ -272,33 +274,33 @@ export function EducationSubjectsDialog({
         {learner && (
           <div className="space-y-4">
             {/* The form itself — grey panel, white boxes, as on the reference. */}
-            <div className="border-2 bg-[#A6A6A6] p-4 sm:p-5" style={{ borderColor: PANEL_BORDER }}>
-              <div className="border-2 bg-white px-4 py-2.5 text-xl text-[#1f2937]" style={{ borderColor: PANEL_BORDER }}>
+            <div className="rounded-xl border-b-4 border-[#FFD100] bg-[#2F3E46] p-4 shadow-md sm:p-5">
+              <div className="rounded-lg border bg-white px-4 py-2.5 text-xl font-bold text-[#2F3E46]" style={{ borderColor: BOX_BORDER }}>
                 {learner.name}
               </div>
 
-              <div className="mt-3 flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 px-1 text-sm text-[#1f2937]">
+              <div className="mt-3 flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 px-1 text-sm text-gray-300">
                 <span>
-                  Educational level: <span className="font-semibold">{learner.levelLabel}</span>
+                  Educational level: <span className="font-semibold text-white">{learner.levelLabel}</span>
                 </span>
                 {learner.idLabel && (
                   <span className="text-xs sm:text-sm">
-                    {learner.idLabel}: <span className="font-semibold">{learner.idValue || '—'}</span>
+                    {learner.idLabel}: <span className="font-semibold text-white">{learner.idValue || '—'}</span>
                   </span>
                 )}
               </div>
 
               <div className="mt-3 space-y-2">
                 {loading ? (
-                  <div className="flex items-center justify-center gap-2 bg-white/60 py-6 text-sm text-gray-600">
+                  <div className="flex items-center justify-center gap-2 rounded-lg bg-white/10 py-6 text-sm text-gray-300">
                     <Loader2 className="h-4 w-4 animate-spin" /> Loading subjects…
                   </div>
                 ) : loadError ? (
-                  <div className="flex items-center gap-2 bg-white px-3 py-3 text-sm text-red-700">
+                  <div className="flex items-center gap-2 rounded-lg bg-white px-3 py-3 text-sm text-red-700">
                     <AlertCircle className="h-4 w-4 shrink-0" /> {loadError}
                   </div>
                 ) : subjects.length === 0 ? (
-                  <div className="bg-white/70 px-3 py-5 text-center text-sm text-gray-700">
+                  <div className="rounded-lg bg-white/10 px-3 py-5 text-center text-sm text-gray-300">
                     No subjects have been set for {learner.levelLabel} yet.
                     {canManage ? ' Use “Manage subjects” below to add them.' : ' The Educator adds them.'}
                   </div>
@@ -306,8 +308,8 @@ export function EducationSubjectsDialog({
                   subjects.map((subject) => (
                     <div key={subject.id} className="grid grid-cols-[minmax(0,1fr)_7.5rem] gap-2 sm:grid-cols-[minmax(0,1fr)_8.5rem] sm:gap-3">
                       <div
-                        className="flex h-11 min-w-0 items-center gap-2 border-2 bg-white px-3 text-[15px] text-[#1f2937]"
-                        style={{ borderColor: PANEL_BORDER }}
+                        className="flex h-11 min-w-0 items-center gap-2 rounded-lg border bg-white px-3 text-[15px] font-medium text-[#2F3E46]"
+                        style={{ borderColor: BOX_BORDER }}
                       >
                         <span className="truncate" title={subject.name}>{subject.name}</span>
                         {managing && (
@@ -334,11 +336,11 @@ export function EducationSubjectsDialog({
 
               {/* Overall Remark — bottom right, computed, never clicked. */}
               <div className="mt-5 flex flex-wrap items-center justify-end gap-3">
-                <div className="text-right text-xs text-[#1f2937]">
-                  <p className="text-sm font-bold uppercase tracking-wide">Overall Remark</p>
+                <div className="text-right text-xs text-gray-300">
+                  <p className="text-sm font-bold uppercase tracking-wide text-[#FFD100]">Overall Remark</p>
                   <p>
                     {remark ? (
-                      <span className={remark === 'Passed' ? 'font-semibold text-green-800' : 'font-semibold text-red-700'}>{remark}</span>
+                      <span className={remark === 'Passed' ? 'font-semibold text-green-400' : 'font-semibold text-red-400'}>{remark}</span>
                     ) : 'No results yet'}
                     {subjects.length > 0 && ` · ${passed} passed, ${failed} failed${marked < subjects.length ? `, ${subjects.length - marked} not marked` : ''}`}
                   </p>
