@@ -1704,11 +1704,7 @@ export function Education() {
                   </p>
                 )}
               </div>
-              <ReadOnlyField
-                label="Age"
-                value={studentForm.age}
-                hint="Computed from the resident's birth date."
-              />
+              <ReadOnlyField label="Age" value={studentForm.age} />
               <div className="space-y-1.5">
                 <Label className="font-bold text-[#2F3E46]">Gender</Label>
                 <div className="rounded-xl border bg-gray-50 px-3 py-2 text-sm text-[#2F3E46] font-semibold">{studentForm.gender || 'Male'}</div>
@@ -1746,9 +1742,6 @@ export function Education() {
                     placeholder="12-digit LRN"
                     className="rounded-xl"
                   />
-                  <p className="text-[11px] text-gray-400">
-                    Numbers only · {(studentForm.lrn || '').length}/{LRN_LENGTH}
-                  </p>
                 </div>
               ) : null}
               <div className="space-y-1.5">
@@ -1783,9 +1776,9 @@ export function Education() {
                 )}
               </div>
               <div className="col-span-2">
-                <ReadOnlyField label="Address" value={studentForm.address} hint="From the resident's admission record." />
+                <ReadOnlyField label="Address" value={studentForm.address} />
               </div>
-              <ReadOnlyField label="Guardian Name" value={studentForm.guardianName} hint="From the resident's admission record." />
+              <ReadOnlyField label="Guardian Name" value={studentForm.guardianName} />
               <ReadOnlyField label="Guardian Contact" value={studentForm.guardianContact} />
               <div className="col-span-2 space-y-1.5">
                 <Label className="font-bold text-[#2F3E46]">Notes</Label>

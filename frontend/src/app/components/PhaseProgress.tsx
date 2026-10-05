@@ -1926,25 +1926,7 @@ ${admissionHistorySection}
                           status === 'Rejected'  ? 'bg-red-100 text-red-700' :
                                                    'bg-gray-200 text-gray-500'
                         }`}>{isReassessment ? 'Reassessment' : status}</span>
-                        </div>
-                        {isReassessment && uploaded && (
-                          <div className="flex items-center gap-2 pl-5">
-                            <span className="text-[10px] text-yellow-700">Document needs revision.</span>
-                            {uploaded.rejectionReason && (
-                              <span className="text-[10px] text-yellow-600 italic">{uploaded.rejectionReason.replace('Reassessment required. ', '')}</span>
-                            )}
-                          </div>
-                        )}
-                        {(status === 'Approved' || status === 'Submitted') && (uploaded as any)?.fileData && (
-                          <a
-                            href={(uploaded as any).fileData}
-                            download={(uploaded as any).fileName || doc}
-                            className="text-[10px] text-[#2F3E46] underline flex items-center gap-0.5 shrink-0"
-                            title="Download"
-                          >
-                            <Download className="w-3 h-3" />
-                          </a>
-                        )}
+                        {/* Upload sits on the right, beside the status badge. */}
                         {(status === 'Missing' || status === 'Rejected' || status === 'Reassessment') && (() => {
                           const allowedRoles = DOCUMENT_ROLE_PERMISSIONS[doc];
                           const userRole = (user?.role || '').toLowerCase();
@@ -1992,6 +1974,25 @@ ${admissionHistorySection}
                             </span>
                           );
                         })()}
+                        </div>
+                        {isReassessment && uploaded && (
+                          <div className="flex items-center gap-2 pl-5">
+                            <span className="text-[10px] text-yellow-700">Document needs revision.</span>
+                            {uploaded.rejectionReason && (
+                              <span className="text-[10px] text-yellow-600 italic">{uploaded.rejectionReason.replace('Reassessment required. ', '')}</span>
+                            )}
+                          </div>
+                        )}
+                        {(status === 'Approved' || status === 'Submitted') && (uploaded as any)?.fileData && (
+                          <a
+                            href={(uploaded as any).fileData}
+                            download={(uploaded as any).fileName || doc}
+                            className="text-[10px] text-[#2F3E46] underline flex items-center gap-0.5 shrink-0"
+                            title="Download"
+                          >
+                            <Download className="w-3 h-3" />
+                          </a>
+                        )}
                         {status === 'Submitted' && (
                           <span className="text-[10px] text-blue-500 italic shrink-0">Pending review</span>
                         )}
