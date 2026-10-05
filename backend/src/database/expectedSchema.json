@@ -2908,6 +2908,20 @@
     "extra": ""
    },
    {
+    "name": "filedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "filedByRole",
+    "type": "varchar(50)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
     "name": "createdAt",
     "type": "timestamp",
     "nullable": false,

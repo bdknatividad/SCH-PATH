@@ -2440,6 +2440,26 @@ async function runMigrations() {
   await ensureColumn('incidentReports', 'chVerifiedBy', 'VARCHAR(100) NULL', 'swVerifiedAt');
   await ensureColumn('incidentReports', 'chVerifiedAt', 'DATETIME NULL', 'chVerifiedBy');
 
+  // Who filed each Form 08 — the account and its role at filing time. It decides
+  // which signatures the report needs (a report a Social Worker filed is not
+  // signed by a Social Worker) and that the filer cannot sign their own report.
+  // Reports filed before this existed take the values from the Form 08 document
+  // they were filed with, whose `submittedBy` / `uploaderRole` are the filer.
+  await ensureColumn('incidentReports', 'filedBy', 'VARCHAR(100) NULL', 'chVerifiedAt');
+  await ensureColumn('incidentReports', 'filedByRole', 'VARCHAR(50) NULL', 'filedBy');
+  try {
+    const [backfilled] = await pool.query(
+      `UPDATE incidentReports ir
+         JOIN documents d ON d.id = ir.pdfDocumentId
+          SET ir.filedBy = d.submittedBy,
+              ir.filedByRole = LOWER(REPLACE(REPLACE(TRIM(d.uploaderRole), ' ', ''), '_', ''))
+        WHERE ir.filedBy IS NULL AND d.submittedBy IS NOT NULL`
+    );
+    if (backfilled?.affectedRows) console.log(`Migration: recorded the filer on ${backfilled.affectedRows} existing Incident Report(s).`);
+  } catch (err) {
+    console.warn('Migration warning (incidentReports filer backfill):', err.message);
+  }
+
 
   try {
     await pool.query('ALTER TABLE accessRequests ADD COLUMN documentId VARCHAR(40) NULL AFTER targetRole');

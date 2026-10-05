@@ -68,24 +68,34 @@ function mapIncidentReport(row) {
  * have signed.
  */
 function signatureState(row) {
+  const required = requiredSidesFor(row);
+  const stageOne = required.filter((side) => side !== FINAL_SIDE);
   const sides = Object.entries(VERIFICATION_SIDES).map(([side, columns]) => ({
     side,
     label: columns.label,
     line: columns.line,
+    // `false` for the Social Worker's line on a report a Social Worker filed:
+    // that line is not part of this report's approval.
+    required: required.includes(side),
     signed: Boolean(row[columns.by]),
     by: row[columns.by] || null,
     at: row[columns.at] || null,
   }));
-  const signedCount = sides.filter((entry) => entry.signed).length;
-  const complete = signedCount === sides.length;
+  const requiredSides = sides.filter((entry) => entry.required);
+  const signedCount = requiredSides.filter((entry) => entry.signed).length;
+  const complete = signedCount === requiredSides.length;
   return {
     sides,
     signedCount,
-    total: sides.length,
+    total: requiredSides.length,
     complete,
+    // Who filed the report. The filer never signs their own report, so the
+    // screens use this to withhold the pad and the return action from them.
+    filedBy: row.filedBy || null,
+    filedByRole: row.filedByRole || null,
     nextSide: complete
       ? null
-      : STAGE_ONE_SIDES.find((side) => !row[VERIFICATION_SIDES[side].by]) || FINAL_SIDE,
+      : stageOne.find((side) => !row[VERIFICATION_SIDES[side].by]) || FINAL_SIDE,
   };
 }
 
@@ -441,13 +451,15 @@ async function create(req, res, next) {
       // signer lines are deliberately left empty: they belong to the people who
       // sign them, and a form filed with those already filled in is the bug this
       // flow removes.
+      // `filedBy` / `filedByRole` record the account that filed the report —
+      // they decide which signatures it needs, and that its filer cannot sign it.
       await connection.query(
         `INSERT INTO incidentReports
           (id, violationId, residentId, interventionTrackerId, reportTypes, othersSpecify, incidentDateTime,
            summary, actionTaken, result, reportedBy, endorsedTo, checkedBy, notedBy,
            reportedBySignature, endorsedToSignature, checkedBySignature, notedBySignature, psychStaffSignature,
-           status, pdfDocumentId)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Submitted', ?)`,
+           status, pdfDocumentId, filedBy, filedByRole)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Submitted', ?, ?, ?)`,
         [
           incidentId, violationId, residentId, completedInterventionId, JSON.stringify(reportTypes || []), othersSpecify || null,
           incidentDateTime, summary || null, actionTaken || null, result || null,
@@ -455,6 +467,8 @@ async function create(req, res, next) {
           reportedBySignature || null, endorsedToSignature || null, null, null,
           null,
           docId,
+          req.user?.username || null,
+          normalizeRole(req.user?.role) || null,
         ]
       );
 
@@ -491,13 +505,23 @@ async function create(req, res, next) {
         .filter((account) => String(account.username) !== String(uploader))
         .map((account) => account.id);
 
+      // The first required signer: the Social Worker, unless a Social Worker
+      // filed it — then the Psychological Support Staff.
+      const required = requiredSidesFor(rows[0]);
+      const firstSide = required[0];
+      const firstSigner = VERIFICATION_SIDES[firstSide];
+      const stageOneLabels = required.filter((side) => side !== FINAL_SIDE).map((side) => VERIFICATION_SIDES[side].label);
       await notifications.notifyUsers(
-        await accountsFor([VERIFICATION_SIDES[FIRST_SIDE].role]),
+        await accountsFor([firstSigner.role]),
         {
           ...base,
           title: `Incident Report (Form 08) to review - ${childName}`,
-          message: `${uploader} filed the Form 08 Incident Report for ${childName}. It needs the Social Worker to review it and sign the "Checked by" line first.`,
-          actionRequired: 'Open the report. Sign your line if it is correct, or return it to the filer if it needs correcting.',
+          message: firstSide === FIRST_SIDE
+            ? `${uploader} filed the Form 08 Incident Report for ${childName}. It needs the Social Worker to review it and sign the "Checked by" line first.`
+            : `${uploader} (Social Worker) filed the Form 08 Incident Report for ${childName}. It needs the ${firstSigner.label} to review and sign it first.`,
+          actionRequired: firstSide === FIRST_SIDE
+            ? 'Open the report. Sign your line if it is correct, or return it to the filer if it needs correcting.'
+            : `Open the report and sign the ${firstSigner.label} line.`,
           dedupeKey: `incident-report:${newId}:submitted`,
         },
       );
@@ -505,8 +529,8 @@ async function create(req, res, next) {
       await notifications.notifyUsers(await accountsFor([VERIFICATION_SIDES[FINAL_SIDE].role]), {
         ...base,
         title: `Incident Report (Form 08) filed - ${childName}`,
-        message: `${uploader} filed the Form 08 Incident Report for ${childName}. It reaches you once the Social Worker and the Psychological Support Staff have signed it — your signature is the approval.`,
-        actionRequired: 'Read the report. You sign it last, after the Social Worker and the Psychological Support Staff.',
+        message: `${uploader} filed the Form 08 Incident Report for ${childName}. It reaches you once the ${stageOneLabels.join(' and the ')} ${stageOneLabels.length === 1 ? 'has' : 'have'} signed it — your signature is the approval.`,
+        actionRequired: `Read the report. You sign it last, after the ${stageOneLabels.join(' and the ')}.`,
         dedupeKey: `incident-report:${newId}:submitted-ch`,
       });
     } catch (notifyErr) {
@@ -643,19 +667,21 @@ async function resubmit(req, res, next) {
     }
 
     const [updatedRows] = await pool.query('SELECT * FROM incidentReports WHERE id = ?', [id]);
-    const updated = updatedRows[0];
+    const updated = await withFiler(updatedRows[0]);
     // A correction restarts the routing from the top, so the one person asked to
-    // act is the Social Worker — the Psychological Support Staff and the Center
-    // Head are pulled in later, in turn. The person who made the correction is
-    // left out of their own notice.
+    // act is the first required signer — the Social Worker, or the Psychological
+    // Support Staff on a report a Social Worker filed. The rest are pulled in
+    // later, in turn. The person who made the correction is left out of their
+    // own notice.
     try {
-      const reviewer = await notifications.usersWithAnyRole([VERIFICATION_SIDES[FIRST_SIDE].role]);
+      const firstSigner = VERIFICATION_SIDES[requiredSidesFor(updated)[0]];
+      const reviewer = await notifications.usersWithAnyRole([firstSigner.role]);
       await notifications.notifyUsers(
         reviewer.filter((account) => String(account.username) !== String(actor)).map((account) => account.id),
         {
           type: 'Incident Report Resubmitted',
           title: `Incident Report ${returned ? 'Resubmitted' : 'Corrected'} - ${childName}`,
-          message: `${actor} ${returned ? 'corrected and resubmitted' : 'corrected'} the Incident Report for ${childName}. Every signature was cleared, so it needs the Social Worker's signature again first.`,
+          message: `${actor} ${returned ? 'corrected and resubmitted' : 'corrected'} the Incident Report for ${childName}. Every signature was cleared, so it needs the ${firstSigner.label}'s signature again first.`,
           priority: 'High',
           actionRequired: 'Read the corrected report and sign your line, or return it to the filer if it still needs work.',
           residentId: existing.residentId,
@@ -806,6 +832,52 @@ const SIGNING_ORDER = [...STAGE_ONE_SIDES, FINAL_SIDE];
 /** The first reviewer: the Social Worker, and the only side told at filing time. */
 const FIRST_SIDE = SIGNING_ORDER[0];
 
+/**
+ * Which lines this report needs, decided by who FILED it.
+ *
+ * A report filed by a Social Worker does not need the Social Worker's
+ * "Checked by" line: the filer cannot approve their own report, so it goes
+ * straight to the Psychological Support Staff and then the Center Head. Any
+ * other filer's report needs all three, as before.
+ *
+ * Keyed on the filer recorded on the report (`filedByRole`, captured from the
+ * account that filed it) — never on the role of whoever is signing now. A
+ * report with no recorded filer (filed before this was tracked, with no linked
+ * document to read it from) keeps all three lines.
+ *
+ * @param {Object} row - The incidentReports row.
+ * @returns {Array<'sw'|'psych'|'ch'>}
+ */
+function requiredSidesFor(row) {
+  const filerRole = normalizeRole(row?.filedByRole);
+  if (filerRole === VERIFICATION_SIDES.sw.role) return SIGNING_ORDER.filter((side) => side !== 'sw');
+  return [...SIGNING_ORDER];
+}
+
+/** True when `user` is the account that filed this report. */
+function isFiler(row, user) {
+  const filer = String(row?.filedBy || '').trim().toLowerCase();
+  const caller = String(user?.username || '').trim().toLowerCase();
+  return Boolean(filer) && filer === caller;
+}
+
+/**
+ * Fill in the filer of a report saved before `filedBy` existed, from the
+ * Form 08 document it was filed with — that document's `submittedBy` and
+ * `uploaderRole` are the filing account. Read only; the boot migration writes
+ * the same values back once.
+ */
+async function withFiler(row) {
+  if (!row || row.filedBy || !row.pdfDocumentId) return row;
+  try {
+    const [docs] = await pool.query('SELECT submittedBy, uploaderRole FROM documents WHERE id = ? LIMIT 1', [row.pdfDocumentId]);
+    if (!docs[0]?.submittedBy) return row;
+    return { ...row, filedBy: docs[0].submittedBy, filedByRole: row.filedByRole || docs[0].uploaderRole || null };
+  } catch {
+    return row;
+  }
+}
+
 /** The sides whose stamp pairs are present on this row. */
 function signedSides(row) {
   return SIGNING_ORDER.filter((side) => Boolean(row[VERIFICATION_SIDES[side].by]));
@@ -852,13 +924,30 @@ async function verify(req, res, next) {
 
     const [rows] = await pool.query('SELECT * FROM incidentReports WHERE id = ?', [id]);
     if (rows.length === 0) throw new ApiError(404, 'Incident report not found');
-    const report = rows[0];
+    const report = await withFiler(rows[0]);
+    const required = requiredSidesFor(report);
+    const stageOne = required.filter((other) => other !== FINAL_SIDE);
 
     if (report.status === 'Verified') {
       return res.json({ success: true, data: mapIncidentReport(report), message: 'Incident report was already signed off.' });
     }
     if (!['Submitted', 'Pending Review'].includes(report.status)) {
       throw new ApiError(409, 'This Incident Report must be corrected and resubmitted before it can be signed.');
+    }
+
+    // The filer never approves their own report, whatever their role.
+    if (isFiler(report, req.user)) {
+      throw new ApiError(403, 'You filed this Incident Report, so you cannot sign or approve it. It is approved by the other required signers.');
+    }
+
+    // A line this report does not need cannot be signed: a report filed by a
+    // Social Worker is approved by the Psychological Support Staff and the Center
+    // Head only.
+    if (!required.includes(side)) {
+      throw new ApiError(
+        403,
+        `This Incident Report was filed by a ${VERIFICATION_SIDES.sw.label}, so the ${columns.label} signature is not required. It is approved by the ${required.map((other) => VERIFICATION_SIDES[other].label).join(' and the ')}.`,
+      );
     }
 
     // A line signs once. Re-sending the same side would otherwise let one account
@@ -875,8 +964,8 @@ async function verify(req, res, next) {
      * who were supposed to have read it never saw would approve it with nothing
      * downstream to catch it.
      */
-    const missingBefore = SIGNING_ORDER
-      .slice(0, SIGNING_ORDER.indexOf(side))
+    const missingBefore = required
+      .slice(0, required.indexOf(side))
       .filter((other) => !report[VERIFICATION_SIDES[other].by]);
     if (missingBefore.length) {
       const labels = missingBefore.map((other) => VERIFICATION_SIDES[other].label);
@@ -914,9 +1003,9 @@ async function verify(req, res, next) {
       : (report.interventionScheduleDate || null);
 
     const signedAfterThis = [...signedSides(report), side];
-    const complete = STAGE_ONE_SIDES.every((other) => signedAfterThis.includes(other))
+    const complete = stageOne.every((other) => signedAfterThis.includes(other))
       && signedAfterThis.includes(FINAL_SIDE);
-    const stillWaiting = STAGE_ONE_SIDES.find((other) => !signedAfterThis.includes(other)) || null;
+    const stillWaiting = stageOne.find((other) => !signedAfterThis.includes(other)) || null;
 
     /*
      * The signed PDF is rebuilt before anything is written, and carries every
@@ -965,7 +1054,8 @@ async function verify(req, res, next) {
       );
     }
 
-    const [updated] = await pool.query('SELECT * FROM incidentReports WHERE id = ?', [id]);
+    const [updatedRows] = await pool.query('SELECT * FROM incidentReports WHERE id = ?', [id]);
+    const updated = [await withFiler(updatedRows[0])];
 
     /*
      * Who has to act next. A Stage-1 signature hands the form to the other
@@ -1047,7 +1137,7 @@ async function verify(req, res, next) {
       success: true,
       data: mapIncidentReport(updated[0]),
       message: complete
-        ? 'Incident report signed off by all three signatories.'
+        ? `Incident report signed off by all ${required.length} required signatories.`
         : `Your ${columns.label} signature was recorded. The form goes to the ${nextLabel} next.`,
     });
   } catch (error) {
@@ -1067,5 +1157,5 @@ module.exports = {
   // Exported so the signing rule can be asserted directly: which line a caller
   // signs, which columns each line writes, and which lines come before which.
   VERIFICATION_SIDES, resolveVerificationSide, STAGE_ONE_SIDES, FINAL_SIDE, SIGNING_ORDER,
-  signatureState,
+  signatureState, requiredSidesFor, isFiler,
 };

@@ -412,6 +412,11 @@ CREATE TABLE incidentReports (
   swVerifiedAt DATETIME NULL,
   chVerifiedBy VARCHAR(100) NULL,
   chVerifiedAt DATETIME NULL,
+  -- The account that filed the report, and its role at filing time. A report a
+  -- Social Worker filed is approved by the Psychological Support Staff and the
+  -- Center Head only; the filer never signs their own report.
+  filedBy VARCHAR(100) NULL,
+  filedByRole VARCHAR(50) NULL,
   createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (violationId) REFERENCES violations(id) ON DELETE CASCADE,

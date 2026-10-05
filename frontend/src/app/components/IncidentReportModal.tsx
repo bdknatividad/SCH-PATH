@@ -11,7 +11,7 @@ import { request } from '@/services/api';
 import { useAuth } from '../state/AuthContext';
 import { SignaturePadModal } from '@/app/components/SignaturePad';
 import { getCurrentPHDateTime } from '@/utils/dateFormatter';
-import { form8SideForRole, form8SideEntry, FORM08_SIDE_BOX_KEY } from '@/app/utils/form08Signing';
+import { form8SideForRole, form8SideEntry, form8IsFiler, FORM08_SIDE_BOX_KEY } from '@/app/utils/form08Signing';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 
@@ -118,10 +118,14 @@ export interface IncidentReportData {
    * was saved carries none; the screens read it through `form8SideEntry`.
    */
   signatures?: {
-    sides: { side: string; label: string; line: string; signed: boolean; by: string | null; at: string | null }[];
+    /** `required: false` for a line this report does not need (the Social Worker's, on a report a Social Worker filed). */
+    sides: { side: string; label: string; line: string; required?: boolean; signed: boolean; by: string | null; at: string | null }[];
     signedCount: number;
     total: number;
     complete: boolean;
+    /** The account that filed the report, which never signs it. */
+    filedBy?: string | null;
+    filedByRole?: string | null;
     nextSide: 'sw' | 'psych' | 'ch' | null;
   };
 }
@@ -636,13 +640,20 @@ export default function IncidentReportModal({
   const mySide = mode === 'sign' ? form8SideForRole(role) : null;
   const signBoxKey = mySide ? FORM08_SIDE_BOX_KEY[mySide] : null;
   const myLine = form8SideEntry(report, mySide);
-  const signReady = Boolean(mode === 'sign' && mySide && !myLine?.signed && report?.signatures?.nextSide === mySide);
+  // The filer never signs their own report, and a line the report does not need
+  // (the Social Worker's, when a Social Worker filed it) is not offered. The API
+  // refuses both as well.
+  const iFiledIt = form8IsFiler(report, user?.username);
+  const myLineRequired = myLine?.required !== false;
+  const signReady = Boolean(mode === 'sign' && mySide && !iFiledIt && myLineRequired && !myLine?.signed && report?.signatures?.nextSide === mySide);
   const waitingOn = form8SideEntry(report, report?.signatures?.nextSide);
   const signBlockedReason = (() => {
     if (mode !== 'sign' || !report) return null;
     if (!mySide) return 'Your role has no line to sign on Form 08.';
+    if (iFiledIt) return 'You filed this Incident Report, so you cannot sign or approve it.';
+    if (!myLineRequired) return 'This report was filed by a Social Worker, so the Social Worker signature is not required. It is approved by the Psychological Support Staff and the Center Head.';
     if (myLine?.signed) return `You have already signed this report (${myLine.by}).`;
-    if (report.status === 'Verified' || report.signatures?.complete) return 'This report has all three signatures.';
+    if (report.status === 'Verified' || report.signatures?.complete) return 'This report has all its required signatures.';
     if (!signReady) {
       return waitingOn
         ? `Waiting for the ${waitingOn.label} signature first — the form reaches you after that.`
@@ -696,6 +707,8 @@ export default function IncidentReportModal({
   const canReturn = Boolean(
     mode === 'sign'
       && mySide === 'sw'
+      && !iFiledIt
+      && myLineRequired
       && report
       && !report.signatures?.complete
       && ['Submitted', 'Pending Review'].includes(String(report.status)),

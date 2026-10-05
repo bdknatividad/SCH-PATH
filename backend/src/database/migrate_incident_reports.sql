@@ -70,3 +70,15 @@ ALTER TABLE incidentReports ADD COLUMN swVerifiedBy VARCHAR(100) NULL AFTER psyc
 ALTER TABLE incidentReports ADD COLUMN swVerifiedAt DATETIME NULL AFTER swVerifiedBy;
 ALTER TABLE incidentReports ADD COLUMN chVerifiedBy VARCHAR(100) NULL AFTER swVerifiedAt;
 ALTER TABLE incidentReports ADD COLUMN chVerifiedAt DATETIME NULL AFTER chVerifiedBy;
+
+-- Who filed each Form 08 (account and role at filing time). A report filed by a
+-- Social Worker is approved by the Psychological Support Staff and the Center
+-- Head only, and the filer never signs their own report. Existing reports take
+-- the filer from their Form 08 document.
+ALTER TABLE incidentReports ADD COLUMN filedBy VARCHAR(100) NULL AFTER chVerifiedAt;
+ALTER TABLE incidentReports ADD COLUMN filedByRole VARCHAR(50) NULL AFTER filedBy;
+UPDATE incidentReports ir
+  JOIN documents d ON d.id = ir.pdfDocumentId
+   SET ir.filedBy = d.submittedBy,
+       ir.filedByRole = LOWER(REPLACE(REPLACE(TRIM(d.uploaderRole), ' ', ''), '_', ''))
+ WHERE ir.filedBy IS NULL AND d.submittedBy IS NOT NULL;

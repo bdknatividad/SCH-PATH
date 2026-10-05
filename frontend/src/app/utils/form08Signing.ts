@@ -58,6 +58,16 @@ export function form8SideEntry(report: any, side: string | null | undefined): an
   return (report?.signatures?.sides || []).find((entry: any) => entry.side === side) || null;
 }
 
+/**
+ * Did this account file the report? The filer never signs or approves their own
+ * Form 08 — the API refuses it (`verify`), and the screens withhold the pad.
+ */
+export function form8IsFiler(report: any, username: string | null | undefined): boolean {
+  const filer = String(report?.signatures?.filedBy || '').trim().toLowerCase();
+  const me = String(username || '').trim().toLowerCase();
+  return Boolean(filer) && filer === me;
+}
+
 /** Who the form is waiting on, in words: "the Social Worker", or null when done. */
 export function form8WaitingLabel(report: any): string | null {
   const next = report?.signatures?.nextSide;

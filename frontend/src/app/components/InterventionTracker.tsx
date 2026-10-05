@@ -5,7 +5,7 @@ import { usePermissions } from '@/app/hooks/usePermissions';
 import { useNavigate } from 'react-router-dom';
 import { describeError, request } from '@/services/api';
 import { systemDialog } from '@/app/components/SystemDialog';
-import { form8SideForRole, form8SideEntry } from '@/app/utils/form08Signing';
+import { form8SideForRole, form8SideEntry, form8IsFiler } from '@/app/utils/form08Signing';
 import { formatShortDate, getCurrentPHDateTime } from '@/utils/dateFormatter';
 import IncidentReportModal from './IncidentReportModal';
 import { Card, CardContent, CardHeader, CardTitle } from '@/app/components/ui/card';
@@ -892,7 +892,8 @@ export function InterventionTracker({ embedded = false }: { embedded?: boolean }
                                       const signedCount = signatures?.signedCount ?? 0;
                                       const total = signatures?.total ?? 3;
                                       const mySide = form8SideForRole(role);
-                                      const myTurn = Boolean(mySide) && signatures?.nextSide === mySide;
+                                      // The filer never signs their own report.
+                                      const myTurn = Boolean(mySide) && signatures?.nextSide === mySide && !form8IsFiler(report, user?.username);
                                       const waitingOn = form8SideEntry(report, signatures?.nextSide);
                                       return (
                                         <div className="flex items-center gap-2">

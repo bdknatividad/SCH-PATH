@@ -637,14 +637,14 @@ test('a Form 08 notification opens the report, and reaches the first reviewer an
     'the deep link no longer opens the report ready to sign',
   );
 
-  // The report is filed to the Social Worker — the first reviewer — and the
+  // The report is filed to its first REQUIRED reviewer — the Social Worker, or
+  // the Psychological Support Staff when a Social Worker filed it — and the
   // Center Head is told his turn comes last rather than being left to discover
-  // it. The Psychological Support Staff is deliberately NOT pinged at filing
-  // time: they are told when the Social Worker signs (see `verify`).
+  // it. Nobody else is pinged at filing time: they are told in turn (see `verify`).
   assert.match(
     CONTROLLER_SRC,
-    /await accountsFor\(\[VERIFICATION_SIDES\[FIRST_SIDE\]\.role\]\)/,
-    'the first reviewer (the Social Worker) is no longer notified on submission',
+    /const firstSide = required\[0\];[\s\S]*?await accountsFor\(\[firstSigner\.role\]\)/,
+    'the first required reviewer is no longer notified on submission',
   );
   assert.match(
     CONTROLLER_SRC,
@@ -656,4 +656,71 @@ test('a Form 08 notification opens the report, and reaches the first reviewer an
     /your signature is the approval/,
     'the Center Head is no longer told that his signature is the approval',
   );
+});
+
+// ── Who filed it decides who signs ──────────────────────────────────────────
+
+test('a report a Social Worker filed needs only the Psychological Support Staff and the Center Head', () => {
+  const { requiredSidesFor } = incidentReportController;
+  assert.deepEqual(requiredSidesFor({ filedByRole: 'socialworker' }), ['psych', 'ch']);
+  assert.deepEqual(requiredSidesFor({ filedByRole: 'Social Worker' }), ['psych', 'ch']);
+  assert.deepEqual(requiredSidesFor({ filedByRole: 'houseparent' }), ['sw', 'psych', 'ch']);
+  assert.deepEqual(requiredSidesFor({ filedByRole: 'psychologist' }), ['sw', 'psych', 'ch']);
+  // A report with no recorded filer keeps all three lines.
+  assert.deepEqual(requiredSidesFor({}), ['sw', 'psych', 'ch']);
+});
+
+test('the Social Worker cannot sign a report a Social Worker filed — not even another Social Worker', async () => {
+  reportRow = baseReport({ filedBy: 'maria', filedByRole: 'socialworker' });
+  const { error, writes } = await sign(SW, { signature: SIG });
+  assert.equal(error?.statusCode, 403);
+  assert.match(error.message, /not required/);
+  assert.equal(incidentWrite(writes), undefined, 'nothing may be written');
+});
+
+test('the filer can never sign their own report', async () => {
+  reportRow = baseReport({ filedBy: 'joyce', filedByRole: 'socialworker' });
+  let result = await sign(SW, { signature: SIG });
+  assert.equal(result.error?.statusCode, 403);
+  assert.match(result.error.message, /You filed this Incident Report/);
+
+  // Same rule for any role: a Psychological Support Staff who filed it cannot
+  // sign the clinical line on it.
+  reportRow = baseReport({ filedBy: 'francis', filedByRole: 'psychologist', swVerifiedBy: 'joyce', swVerifiedAt: '2026-09-02' });
+  result = await sign(PSYCH, { signature: SIG });
+  assert.equal(result.error?.statusCode, 403);
+  assert.equal(incidentWrite(result.writes), undefined);
+});
+
+test('on a Social Worker\'s report the Psychological Support Staff signs first, without waiting for a Social Worker', async () => {
+  reportRow = baseReport({ filedBy: 'joyce', filedByRole: 'socialworker' });
+  const { error, body, notices } = await sign(PSYCH, { signature: SIG });
+  assert.equal(error, null);
+  assert.equal(body.data.status, 'Submitted');
+  assert.equal(body.data.signatures.total, 2);
+  assert.equal(body.data.signatures.nextSide, 'ch');
+  assert.equal(body.data.signatures.sides.find((s) => s.side === 'sw').required, false);
+  assert.equal(notices[0]?.targetRole, 'centerhead', 'the Center Head is next');
+});
+
+test('on a Social Worker\'s report the Center Head\'s signature completes it with two signatures', async () => {
+  reportRow = baseReport({
+    filedBy: 'joyce', filedByRole: 'socialworker',
+    psychVerifiedBy: 'francis', psychVerifiedAt: '2026-09-02 08:00:00',
+  });
+  const { error, body } = await sign(CENTER_HEAD, { signature: SIG });
+  assert.equal(error, null);
+  assert.equal(body.data.status, 'Verified');
+  assert.equal(body.data.signatures.complete, true);
+  assert.equal(body.data.swVerifiedBy, null, 'no Social Worker signature was needed');
+});
+
+test('a report another user filed still needs the Social Worker first', async () => {
+  reportRow = baseReport({ filedBy: 'hp1', filedByRole: 'houseparent' });
+  const blocked = await sign(PSYCH, { signature: SIG });
+  assert.equal(blocked.error?.statusCode, 409, 'the Psychological Support Staff still waits for the Social Worker');
+  const { error, body } = await sign(SW, { signature: SIG });
+  assert.equal(error, null);
+  assert.equal(body.data.signatures.total, 3);
+  assert.equal(body.data.signatures.nextSide, 'psych');
 });
