@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { Card, CardContent, CardHeader, CardTitle } from '@/app/components/ui/card';
+import { Card, CardContent } from '@/app/components/ui/card';
 import { Badge } from '@/app/components/ui/badge';
 import { Button } from '@/app/components/ui/button';
 import { Users, ChevronRight, ArrowLeft, User, Calendar, AlertCircle, Search, UserPlus, Repeat } from 'lucide-react';
@@ -62,6 +62,72 @@ function caseLoadDueDate(admissionDay: string): string {
   const lastDay = new Date(targetYear, targetMonth, 0).getDate();
   const day = Math.min(d, lastDay);
   return `${targetYear}-${String(targetMonth).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+}
+
+/**
+ * Resident photos, fetched once per resident per page load.
+ *
+ * The roster refreshes every minute; caching the promise keeps that refresh
+ * from downloading every photo again. A refused or failed request (a resident
+ * outside a Houseparent's own case load) settles to `null` and shows initials.
+ */
+const photoCache = new Map<string, Promise<string | null>>();
+
+function loadResidentPhoto(residentId: string): Promise<string | null> {
+  const key = String(residentId);
+  let pending = photoCache.get(key);
+  if (!pending) {
+    pending = request<{ success: boolean; data: string | null }>(`/admissions/resident/${encodeURIComponent(key)}/photo`)
+      .then((res) => (typeof res?.data === 'string' && res.data.startsWith('data:image/') ? res.data : null))
+      .catch(() => null);
+    photoCache.set(key, pending);
+  }
+  return pending;
+}
+
+function initialsOf(name: string): string {
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '?';
+  return ((parts[0][0] || '') + (parts.length > 1 ? parts[parts.length - 1][0] : '')).toUpperCase();
+}
+
+/** The child's photo from their admission slip, or their initials. */
+function ResidentAvatar({ residentId, name, size = 32 }: { residentId: string; name: string; size?: number }) {
+  const [photo, setPhoto] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setPhoto(null);
+    void loadResidentPhoto(residentId).then((value) => { if (!cancelled) setPhoto(value); });
+    return () => { cancelled = true; };
+  }, [residentId]);
+
+  const box = { width: size, height: size };
+  return photo ? (
+    <img
+      src={photo}
+      alt={`Photo of ${name}`}
+      style={box}
+      className="shrink-0 rounded-full border border-gray-200 object-cover bg-gray-100"
+    />
+  ) : (
+    <span
+      style={{ ...box, fontSize: Math.max(10, Math.round(size * 0.36)) }}
+      className="shrink-0 inline-flex items-center justify-center rounded-full bg-[#2F3E46]/10 font-bold text-[#2F3E46]"
+      aria-label={`${name} (no photo)`}
+    >
+      {initialsOf(name)}
+    </span>
+  );
+}
+
+/** One assigned child: photo beside the name. */
+function ResidentChip({ resident }: { resident: { id: string; name: string } }) {
+  return (
+    <span className="inline-flex max-w-full items-center gap-2 rounded-full border border-gray-200 bg-white py-0.5 pl-0.5 pr-3">
+      <ResidentAvatar residentId={resident.id} name={resident.name} size={28} />
+      <span className="truncate text-xs font-medium text-[#2F3E46]">{resident.name}</span>
+    </span>
+  );
 }
 
 type AssignTarget =
@@ -448,6 +514,7 @@ export function CaseLoad() {
                   <div className="p-6 flex-1 flex flex-col md:flex-row md:items-center justify-between gap-6">
                     <div className="space-y-3">
                       <div className="flex items-center gap-3 flex-wrap">
+                        <ResidentAvatar residentId={String(child.id)} name={child.name} size={44} />
                         <h3 className="text-xl font-bold tracking-tight">{child.name}</h3>
                         <Badge className="bg-white/10 text-[#FFD100] border-none text-[10px] uppercase font-bold">
                           {child.legalCategory || child.caseType || 'No category'}
@@ -541,44 +608,48 @@ export function CaseLoad() {
         {loading && data.length === 0 ? (
           <p className="text-sm text-gray-500">Loading case loads...</p>
         ) : sortedHPs.length > 0 ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {sortedHPs.map((hp) => {
-              const isOwn = isOwnCard(hp, user?.username);
-
-              return (
-                <Card key={hp.userId} className="border-gray-200 shadow-sm bg-white">
-                  <CardHeader className="pb-2">
-                    <CardTitle className="flex items-center gap-2 text-base font-medium text-[#2F3E46]">
-                      <Users className="w-4 h-4 text-gray-400" />
-                      <span>{hp.label}</span>
-                      {isOwn && <Badge className="bg-[#FFD100]/30 text-[#2F3E46] border-none text-[10px]">You</Badge>}
-                      <span className="ml-auto text-xs font-semibold text-gray-500" data-hp-assigned-count>
-                        {hp.assignedCount} resident{hp.assignedCount === 1 ? '' : 's'}
-                      </span>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="flex items-end justify-between gap-4 min-h-[58px]">
-                      <div className="min-w-0 flex-1">
+          <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm">
+            <table className="w-full min-w-[560px] text-sm">
+              <thead className="bg-[#2F3E46] text-left text-[11px] uppercase tracking-wider text-white">
+                <tr>
+                  <th className="px-4 py-3 font-bold w-[30%]">Houseparent</th>
+                  <th className="px-4 py-3 font-bold">Assigned Children</th>
+                  <th className="px-4 py-3 font-bold text-right w-28">Residents</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {sortedHPs.map((hp) => {
+                  const isOwn = isOwnCard(hp, user?.username);
+                  return (
+                    <tr key={hp.userId} className={`align-top ${isOwn ? 'bg-[#FFFDF0]' : ''}`}>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2 font-medium text-[#2F3E46]">
+                          <Users className="w-4 h-4 shrink-0 text-gray-400" />
+                          <span>{hp.label}</span>
+                          {isOwn && <Badge className="bg-[#FFD100]/30 text-[#2F3E46] border-none text-[10px]">You</Badge>}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
                         {/* The assignment list is visible for every HP. */}
                         {hp.residents?.length > 0 ? (
-                          <p className="max-w-full whitespace-normal break-words text-[11px] leading-4 text-gray-500">
-                            {hp.residents.map(r => (
-                              <span key={r.id} className="block">{r.name}</span>
-                            ))}
-                          </p>
+                          <div className="flex flex-wrap gap-1.5">
+                            {hp.residents.map(r => <ResidentChip key={r.id} resident={r} />)}
+                          </div>
                         ) : (
-                          <p className="text-[11px] italic text-gray-400">No residents assigned</p>
+                          <p className="text-xs italic text-gray-400">No residents assigned</p>
                         )}
                         {!isOwn && hp.residents?.length > 0 && (
-                          <p className="mt-1 text-[10px] text-gray-400">Open a resident from the Child Records module.</p>
+                          <p className="mt-1.5 text-[10px] text-gray-400">Open a resident from the Child Records module.</p>
                         )}
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
+                      </td>
+                      <td className="px-4 py-3 text-right text-xs font-semibold text-gray-500 whitespace-nowrap" data-hp-assigned-count>
+                        {hp.assignedCount} resident{hp.assignedCount === 1 ? '' : 's'}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         ) : (
           <div className="text-center py-16 text-gray-400">
@@ -650,72 +721,90 @@ export function CaseLoad() {
 
       {loading && data.length === 0 ? (
         <p className="text-sm text-gray-500">Loading case loads...</p>
+      ) : filteredData.length === 0 ? (
+        <div className="text-center py-16 text-gray-400">
+          <AlertCircle className="w-10 h-10 mx-auto mb-2 opacity-20" />
+          <p>No Houseparent accounts found.</p>
+        </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {[...filteredData].sort((a, b) => String(a.label).localeCompare(String(b.label), undefined, { numeric: true, sensitivity: 'base' })).map((hp) => {
-            const isOwnHouseparent = isHouseparent && isOwnCard(hp, user?.username);
-            const isClickable = !isHouseparent || isOwnHouseparent;
+        <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm">
+          <table className="w-full min-w-[720px] text-sm">
+            <thead className="bg-[#2F3E46] text-left text-[11px] uppercase tracking-wider text-white">
+              <tr>
+                <th className="px-4 py-3 font-bold w-[24%]">Houseparent</th>
+                <th className="px-4 py-3 font-bold">Assigned Children</th>
+                <th className="px-4 py-3 font-bold text-center w-28">Case Load</th>
+                <th className="px-4 py-3 font-bold text-right w-[15rem]">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {[...filteredData].sort((a, b) => String(a.label).localeCompare(String(b.label), undefined, { numeric: true, sensitivity: 'base' })).map((hp) => {
+                const isOwnHouseparent = isHouseparent && isOwnCard(hp, user?.username);
+                const isClickable = !isHouseparent || isOwnHouseparent;
+                const isFull = hp.assignedCount >= hp.maxCaseload;
 
-            return (
-            <Card
-              key={hp.userId}
-              onClick={() => { if (isClickable) setSelectedHP(hp); }}
-              role={isClickable ? 'button' : undefined}
-              tabIndex={isClickable ? 0 : -1}
-              onKeyDown={(e) => { if (isClickable && e.key === 'Enter') setSelectedHP(hp); }}
-              className={`transition-all border-gray-200 ${
-                isOwnHouseparent
-                  ? 'ring-2 ring-[#FFD100] bg-[#FFFDF0] shadow-md'
-                  : isHouseparent
-                    ? 'cursor-default opacity-90'
-                    : 'cursor-pointer hover:shadow-md hover:-translate-y-0.5'
-              }`}
-            >
-              <CardHeader className="pb-2">
-                <CardTitle className="flex items-center justify-between text-base">
-                  <span className="flex items-center gap-2">
-                    <Users className="w-4 h-4 text-gray-400" />
-                    <span>
-                      {hp.label}
-                      {hp.displayName && <span className="block text-[10px] font-normal text-gray-400">{hp.username}</span>}
-                    </span>
-                  </span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="flex items-center justify-between">
-                  <div className="min-w-0">
-                    
-                    {hp.residents?.length > 0 && (
-                      <p className="mt-2 max-w-full whitespace-normal break-words text-[11px] leading-4 text-gray-500" title={hp.residents.map(r => r.name).join(', ')}>
-                        {hp.residents.map(r => <span key={r.id} className="block">{r.name}</span>)}
-                      </p>
-                    )}
-                  </div>
-                  <span className={`shrink-0 flex items-center gap-0.5 text-[11px] font-semibold ${isClickable ? 'text-[#2F3E46]' : 'text-gray-400'}`}>
-                    {isOwnHouseparent ? 'View my residents' : 'View residents'}
-                    {isClickable && <ChevronRight className="w-3.5 h-3.5" />}
-                  </span>
-                </div>
-                {canAssignCaseLoad && (
-                  <div className="mt-3 flex items-center justify-between gap-2 border-t border-gray-100 pt-2">
-                    <span className="text-[11px] text-gray-500">{hp.assignedCount}/{hp.maxCaseload} residents</span>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-7 gap-1 text-xs"
-                      disabled={hp.assignedCount >= hp.maxCaseload}
-                      onClick={(e) => { e.stopPropagation(); openAssign({ mode: 'resident', hpUserId: String(hp.userId) }); }}
-                      onKeyDown={(e) => e.stopPropagation()}
-                    >
-                      <UserPlus className="w-3.5 h-3.5" /> Assign Resident
-                    </Button>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-            );
-          })}
+                return (
+                  <tr
+                    key={hp.userId}
+                    onClick={() => { if (isClickable) setSelectedHP(hp); }}
+                    role={isClickable ? 'button' : undefined}
+                    tabIndex={isClickable ? 0 : -1}
+                    onKeyDown={(e) => { if (isClickable && e.key === 'Enter') setSelectedHP(hp); }}
+                    className={`align-top transition-colors ${
+                      isOwnHouseparent
+                        ? 'bg-[#FFFDF0]'
+                        : isClickable ? 'cursor-pointer hover:bg-gray-50 focus:bg-gray-50 focus:outline-none' : ''
+                    }`}
+                  >
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2 font-medium text-[#2F3E46]">
+                        <Users className="w-4 h-4 shrink-0 text-gray-400" />
+                        <span>
+                          {hp.label}
+                          {hp.displayName && <span className="block text-[10px] font-normal text-gray-400">{hp.username}</span>}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3">
+                      {hp.residents?.length > 0 ? (
+                        <div className="flex flex-wrap gap-1.5">
+                          {hp.residents.map(r => <ResidentChip key={r.id} resident={r} />)}
+                        </div>
+                      ) : (
+                        <p className="text-xs italic text-gray-400">No residents assigned</p>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-center whitespace-nowrap">
+                      <span className={`text-xs font-semibold ${isFull ? 'text-amber-700' : 'text-gray-600'}`}>
+                        {hp.assignedCount}/{hp.maxCaseload}
+                      </span>
+                      {isFull && <span className="block text-[10px] text-amber-600">Full</span>}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center justify-end gap-2">
+                        {canAssignCaseLoad && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 gap-1 text-xs"
+                            disabled={isFull}
+                            onClick={(e) => { e.stopPropagation(); openAssign({ mode: 'resident', hpUserId: String(hp.userId) }); }}
+                            onKeyDown={(e) => e.stopPropagation()}
+                          >
+                            <UserPlus className="w-3.5 h-3.5" /> Assign Resident
+                          </Button>
+                        )}
+                        <span className={`shrink-0 flex items-center gap-0.5 text-[11px] font-semibold ${isClickable ? 'text-[#2F3E46]' : 'text-gray-400'}`}>
+                          {isOwnHouseparent ? 'View my residents' : 'View residents'}
+                          {isClickable && <ChevronRight className="w-3.5 h-3.5" />}
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
       {assignDialog}

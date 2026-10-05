@@ -82,17 +82,6 @@ import {
 } from '@/app/components/ui/dialog';
 
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/app/components/ui/alert-dialog';
-
-import {
   PDFDocument,
   StandardFonts,
   rgb,
@@ -1869,7 +1858,6 @@ export function ChildRecords() {
 
   const {
     children,
-    deleteChild,
     refreshData,
   } = useData();
 
@@ -1954,13 +1942,6 @@ export function ChildRecords() {
     setFormStep,
   ] = useState<FormStep>(
     1
-  );
-
-  const [
-    childToDelete,
-    setChildToDelete,
-  ] = useState<string | null>(
-    null
   );
 
   const [
@@ -4195,18 +4176,6 @@ export function ChildRecords() {
       }
     };
 
-  /* ==============================================================
-     DELETE
-     ============================================================== */
-
-  const handleDelete =
-    (
-      childId: string
-    ) => {
-      setChildToDelete(
-        childId
-      );
-    };
 
   /* ==============================================================
      LIST
@@ -5883,22 +5852,6 @@ export function ChildRecords() {
                         Edit
                       </Button>
 
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="text-red-400 hover:text-red-300 hover:bg-red-500/10 gap-2"
-                        onClick={() =>
-                          handleDelete(
-                            child.id
-                          )
-                        }
-                      >
-                        <Trash2
-                          size={16}
-                        />
-
-                        Delete
-                      </Button>
 
                     </div>
 
@@ -5925,77 +5878,6 @@ export function ChildRecords() {
 
       </div>
 
-      {/* ==========================================================
-          DELETE CONFIRMATION
-          ========================================================== */}
-
-      <AlertDialog
-        open={
-          !!childToDelete
-        }
-        onOpenChange={(open) => {
-          if (!open) {
-            setChildToDelete(
-              null
-            );
-          }
-        }}
-      >
-        <AlertDialogContent className="bg-white rounded-2xl">
-
-          <AlertDialogHeader>
-
-            <AlertDialogTitle className="text-[#2F3E46] font-bold">
-              Confirm Delete
-            </AlertDialogTitle>
-
-            <AlertDialogDescription>
-              Delete record for{' '}
-
-              <strong>
-                {
-                  children.find(
-                    (child: any) =>
-                      child.id ===
-                      childToDelete
-                  )?.name
-                }
-              </strong>
-
-              ? This action cannot be undone.
-            </AlertDialogDescription>
-
-          </AlertDialogHeader>
-
-          <AlertDialogFooter>
-
-            <AlertDialogCancel>
-              Cancel
-            </AlertDialogCancel>
-
-            <AlertDialogAction
-              className="bg-red-600 hover:bg-red-700 text-white"
-              onClick={() => {
-                if (
-                  childToDelete
-                ) {
-                  deleteChild(
-                    childToDelete
-                  );
-                }
-
-                setChildToDelete(
-                  null
-                );
-              }}
-            >
-              Delete
-            </AlertDialogAction>
-
-          </AlertDialogFooter>
-
-        </AlertDialogContent>
-      </AlertDialog>
 
     </div>
   );

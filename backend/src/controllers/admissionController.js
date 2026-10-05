@@ -220,6 +220,36 @@ async function getLatestForResident(req, res, next) {
   }
 }
 
+/**
+ * GET /api/admissions/resident/:residentId/photo
+ *
+ * Only the resident photo from the latest admission — what the Case Load table
+ * shows beside each child's name. Reading the whole admission would also carry
+ * every signature image just to show one small picture. Same access rule as the
+ * Admission Slip, so a Houseparent gets photos of their own case load only.
+ */
+async function getPhotoForResident(req, res, next) {
+  try {
+    const { residentId } = req.params;
+    if (!await canAccessResident(req.user, residentId, { area: 'child-records' })) {
+      throw new ApiError(403, 'You are not assigned to this resident');
+    }
+
+    const [rows] = await pool.query(
+      `SELECT residentImage
+         FROM admissions
+        WHERE residentId = ? AND residentImage IS NOT NULL AND residentImage <> ''
+        ORDER BY admissionNumber DESC
+        LIMIT 1`,
+      [residentId]
+    );
+
+    res.json({ success: true, data: rows[0]?.residentImage || null });
+  } catch (error) {
+    next(error);
+  }
+}
+
 async function getByResident(req, res, next) {
   try {
     const { residentId } = req.params;
@@ -1017,6 +1047,7 @@ module.exports = {
   create,
   getByResident,
   getLatestForResident,
+  getPhotoForResident,
   getById,
   update,
 };

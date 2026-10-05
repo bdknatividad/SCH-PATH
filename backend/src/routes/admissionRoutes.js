@@ -17,6 +17,13 @@ router.get(
   asyncHandler(admissionController.getLatestForResident)
 );
 
+// The resident photo alone, for the Case Load table. Same access rule as the
+// latest admission above.
+router.get(
+  '/resident/:residentId/photo',
+  asyncHandler(admissionController.getPhotoForResident)
+);
+
 router.get(
   '/resident/:residentId',
   asyncHandler(admissionController.getByResident)
