@@ -609,6 +609,9 @@ async function create(req, res, next) {
       // A new incident starts unverified by either side.
       psychVerifiedBy: undefined, psychVerifiedAt: undefined, psychVerification: undefined,
       swVerifiedBy: undefined, swVerifiedAt: undefined,
+      // The account that logged the incident, taken from the session — never
+      // from the request — because it decides who may not verify it.
+      createdBy: req.user?.username || null,
       residentId,
       type: guide.name,
       severity: guide.category,
@@ -935,6 +938,27 @@ function ensureViolationVerificationColumns() {
   return verificationColumnsReady;
 }
 
+/**
+ * The account that logged this incident: `createdBy`, which the server stamps
+ * from the session on create. An incident logged before that was stamped falls
+ * back to `reportedBy`, which the log form fills with the logger's username.
+ */
+function loggedByOf(violation) {
+  return String(violation?.createdBy || violation?.reportedBy || '').trim().toLowerCase();
+}
+
+/**
+ * A Social Worker may not approve or reject an incident they logged themselves.
+ * It is verified by the Psychological Support Staff and the Center Head (or a
+ * different Social Worker) instead. Other roles and other loggers are unaffected.
+ */
+function isSocialWorkerOwnIncident(user, violation) {
+  const role = String(user?.role || '').toLowerCase().replace(/[\s_-]+/g, '');
+  if (role !== 'socialworker') return false;
+  const me = String(user?.username || '').trim().toLowerCase();
+  return Boolean(me) && loggedByOf(violation) === me;
+}
+
 async function review(req, res, next) {
   try {
     await ensureViolationVerificationColumns();
@@ -951,6 +975,12 @@ async function review(req, res, next) {
     if (!rows.length) throw new ApiError(404, 'Violation not found');
     const violation = rows[0];
     if (violation.status !== 'Pending Review') throw new ApiError(400, 'This violation has already been reviewed.');
+
+    // Both decisions — Reviewed and Rejected — are refused on the Social
+    // Worker's own incident.
+    if (isSocialWorkerOwnIncident(req.user, violation)) {
+      throw new ApiError(403, 'You logged this incident, so you cannot approve or reject it. It is verified by the Psychological Support Staff and the Center Head.');
+    }
 
     /**
      * What this reviewer typed in the dialog's Review Notes field.
@@ -1506,6 +1536,8 @@ async function update(req, res, next) {
   // plain edit, or a verification could be recorded without being given.
   if (req.body) {
     for (const field of ['psychVerifiedBy', 'psychVerifiedAt', 'psychVerification', 'swVerifiedBy', 'swVerifiedAt']) delete req.body[field];
+    // Who logged the incident is fixed at creation; an edit cannot change it.
+    delete req.body.createdBy;
   }
   if (req.body && req.body.severity !== undefined) {
     req.body.points = pointsForSeverity(req.body.severity);
@@ -1515,6 +1547,7 @@ async function update(req, res, next) {
 
 module.exports = {
   resolveViolationVerificationSide,
+  isSocialWorkerOwnIncident,
   getAll,
   getById,
   create,

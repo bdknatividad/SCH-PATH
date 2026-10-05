@@ -189,6 +189,19 @@ export function Violations() {
   const { user } = useAuth();
   const { can } = usePermissions();
   const isSocialWorker = ['socialworker', 'centerhead', 'admin'].includes(user?.role?.toLowerCase() || '');
+
+  /**
+   * A Social Worker may not approve or reject an incident they logged. The
+   * logger is `createdBy` (stamped by the server), or `reportedBy` on an older
+   * incident. The API refuses the same review, so this only decides what to show.
+   */
+  const isOwnLoggedIncident = (violation: any): boolean => {
+    const role = String(user?.role || '').toLowerCase().replace(/[\s_-]+/g, '');
+    if (role !== 'socialworker' || !violation) return false;
+    const me = String(user?.username || '').trim().toLowerCase();
+    const logger = String(violation.createdBy || violation.reportedBy || '').trim().toLowerCase();
+    return Boolean(me) && logger === me;
+  };
   const isCenterHead = user?.role === 'centerhead';
   // Houseparents add incidents for residents on their own Case Load.
   const isHouseparentUser = String(user?.role || '').toLowerCase() === 'houseparent';
@@ -1347,6 +1360,9 @@ export function Violations() {
                             >
                               Review
                             </Button>
+                            {isOwnLoggedIncident(violation) && (
+                              <p className="mt-1 text-[10px] text-gray-500">Logged by you — view only</p>
+                            )}
                           </td>
                         </tr>
                       );
@@ -1832,6 +1848,12 @@ export function Violations() {
             const isPsychosocial = clinicalSide && interventions.some(interventionIsPsychosocial);
             const sv = selectedViolation as any;
             return <div className="space-y-4 py-2">
+              {isOwnLoggedIncident(sv) && (
+                <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                  <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                  <p>You logged this incident, so you cannot approve or reject it. It is verified by the Psychological Support Staff and the Center Head.</p>
+                </div>
+              )}
               {/* Dual verification status — the incident proceeds only when both
                   the Psychological Support Staff and the Social Worker verify. */}
               <div className="rounded-lg border border-purple-200 bg-purple-50/40 p-3 text-xs space-y-1.5" data-dual-verification>
@@ -1913,8 +1935,8 @@ export function Violations() {
           })()}
           <DialogFooter>
             <Button variant="outline" disabled={isReviewSubmitting} onClick={() => setIsReviewDialogOpen(false)}>Cancel</Button>
-            <Button disabled={isReviewSubmitting || !!reviewSuccess} onClick={() => handleReview('reject')} className="bg-red-600 hover:bg-red-700 text-white">{reviewPending === 'reject' ? 'Saving…' : 'Reject'}</Button>
-            <Button disabled={isReviewSubmitting || !!reviewSuccess || Boolean(selectedViolation && (verificationSide === 'psych' ? (selectedViolation as any).psychVerifiedBy : (selectedViolation as any).swVerifiedBy))} onClick={() => handleReview('verify')} className="bg-green-600 hover:bg-green-700 text-white"><Check className="w-4 h-4 mr-1" /> {reviewPending === 'verify' ? 'Saving…' : 'Verify'}</Button>
+            <Button disabled={isReviewSubmitting || !!reviewSuccess || isOwnLoggedIncident(selectedViolation)} onClick={() => handleReview('reject')} className="bg-red-600 hover:bg-red-700 text-white">{reviewPending === 'reject' ? 'Saving…' : 'Reject'}</Button>
+            <Button disabled={isReviewSubmitting || !!reviewSuccess || isOwnLoggedIncident(selectedViolation) || Boolean(selectedViolation && (verificationSide === 'psych' ? (selectedViolation as any).psychVerifiedBy : (selectedViolation as any).swVerifiedBy))} onClick={() => handleReview('verify')} className="bg-green-600 hover:bg-green-700 text-white"><Check className="w-4 h-4 mr-1" /> {reviewPending === 'verify' ? 'Saving…' : 'Verify'}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
