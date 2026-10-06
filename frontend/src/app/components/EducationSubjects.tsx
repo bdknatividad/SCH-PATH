@@ -129,6 +129,7 @@ export function EducationSubjectsDialog({
   learner,
   canMark,
   canManage,
+  onChanged,
 }: {
   open: boolean;
   onClose: () => void;
@@ -137,6 +138,8 @@ export function EducationSubjectsDialog({
   canMark: boolean;
   /** May add or remove subjects for the level (the Educator). */
   canManage: boolean;
+  /** Called after a result or the subject list was saved, so other views refresh. */
+  onChanged?: () => void;
 }) {
   const [subjects, setSubjects] = useState<EducationSubject[]>([]);
   const [results, setResults] = useState<SubjectResultRow[]>([]);
@@ -216,6 +219,7 @@ export function EducationSubjectsDialog({
         } as SubjectResultRow);
         setResults((rows) => rows.map((row) => (row.subjectId === subject.id ? saved : row)));
       }
+      onChanged?.();
     } catch (error) {
       setResults(previous);
       void systemDialog.failure('Could not save the result', describeError(error, `The result for ${subject.name} was not changed.`));
@@ -238,6 +242,7 @@ export function EducationSubjectsDialog({
       const saved = await createResource<EducationSubject>('education-subjects', { educationLevel: level, name, sortOrder } as EducationSubject);
       setSubjects((list) => [...list, saved]);
       setNewSubject('');
+      onChanged?.();
     } catch (error) {
       setManageError(describeError(error, 'The subject was not added.'));
     } finally {
@@ -257,6 +262,7 @@ export function EducationSubjectsDialog({
       await deleteResource('education-subjects', subject.id);
       setSubjects((list) => list.filter((s) => s.id !== subject.id));
       setResults((rows) => rows.filter((row) => row.subjectId !== subject.id));
+      onChanged?.();
     } catch (error) {
       void systemDialog.failure('Could not remove the subject', describeError(error, `${subject.name} is still on the list.`));
     }

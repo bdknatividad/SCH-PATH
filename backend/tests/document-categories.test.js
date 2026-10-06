@@ -184,7 +184,7 @@ test('the folder list is the thirteen canonical folders, in order', () => {
     'Anecdotal Reports',
     'Assessments',
     'Medical Records',
-    'Educational Records',
+    'Education Files/Records',
     'Behavioral Records',
     'Violation Records',
     'Intervention Records',
@@ -230,7 +230,7 @@ test('every document category the module publishes routes to its own folder', ()
     ['an Anecdotal Report', { title: 'Anecdotal Report — May 2026', type: 'Anecdotal Report', category: 'Anecdotal' }, 'Anecdotal Reports'],
     ['a Psychological Assessment', { title: 'Psychological Assessment', category: 'Assessment' }, 'Assessments'],
     ['a Medical Certificate', { title: 'Medical Certificate', category: 'Medical' }, 'Medical Records'],
-    ['a Quarterly Education Report', { title: 'Quarterly Education Report', category: 'Educational' }, 'Educational Records'],
+    ['a Quarterly Education Report', { title: 'Quarterly Education Report', category: 'Educational' }, 'Education Files/Records'],
     ['a Violation Report', { title: 'Violation Report', category: 'Violation' }, 'Violation Records'],
     ['an Incident Report', { title: 'Incident Report', type: 'PDF', category: 'Incident Reports' }, 'Violation Records'],
     ['an Intervention Plan', { title: 'Intervention Plan', category: 'Intervention' }, 'Intervention Records'],
@@ -263,7 +263,7 @@ test('an explicit type outranks a category that belongs to another folder', () =
 test('a keyword in the title alone is enough to file a document', () => {
   assert.equal(categoryForDocument({ title: 'Laboratory Result' }), 'Medical Records');
   assert.equal(categoryForDocument({ title: 'X-ray Result' }), 'Medical Records');
-  assert.equal(categoryForDocument({ title: 'Report Card' }), 'Educational Records');
+  assert.equal(categoryForDocument({ title: 'Report Card' }), 'Education Files/Records');
   assert.equal(categoryForDocument({ title: 'Behavioral Incident Log' }), 'Behavioral Records');
   assert.equal(categoryForDocument({ title: 'Intervention Plan' }), 'Intervention Records');
   assert.equal(categoryForDocument({ title: 'Counseling Session Notes' }), 'Behavioral Records');
@@ -297,10 +297,10 @@ test('a stored folder is trusted, and anything else is resolved', () => {
     'Medical Records'
   );
   // A legacy row with no folder (or a stale one) is resolved from its own fields.
-  assert.equal(folderForDocument({ title: 'Report Card' }), 'Educational Records');
+  assert.equal(folderForDocument({ title: 'Report Card' }), 'Education Files/Records');
   assert.equal(
     folderForDocument({ documentCategory: 'Not A Folder', title: 'Report Card' }),
-    'Educational Records'
+    'Education Files/Records'
   );
   assert.equal(folderForDocument({ documentCategory: '   ' }), DEFAULT_DOCUMENT_FOLDER);
 });

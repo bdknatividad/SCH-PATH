@@ -17,6 +17,9 @@ const { hasModuleAccess } = require('../config/rbac');
 // `sortRows` is shared so `/store` orders wide-row resources the same way
 // `baseController.getAll` does instead of asking MySQL to filesort them.
 const { sortRows } = require('../controllers/baseController');
+const documentController = require('../controllers/documentController');
+const { subjectSummaries } = require('../utils/educationSubjects');
+const { invokeHandler } = require('../utils/invokeHandler');
 
 const userRoutes = require('./userRoutes');
 const childRoutes = require('./childRoutes');
@@ -293,7 +296,7 @@ router.get('/store', authenticate, async (req, res, next) => {
                     fileName, fileSize, filePath, fileType, uploaderRole, status, revision, phase, requiredFor,
                     submittedBy, submittedAt, uploadedBy, uploadedAt, reviewedBy, reviewedAt,
                     approvedBy, approvedAt, rejectedBy, rejectedAt, rejectionReason, notes, reportData,
-                    healthRecordId, triRecordId, quarterlyReportId, anecdotalReportId,
+                    healthRecordId, triRecordId, quarterlyReportId, anecdotalReportId, educationRecordId,
                     createdBy, modifiedBy, createdAt, updatedAt
              FROM documents ORDER BY createdAt DESC`
           );
@@ -519,6 +522,127 @@ async function validateEducationSubject(req, res, next) {
   }
 }
 
+/**
+ * GET /api/education-subject-results/summary
+ *
+ * Every learner's subject results and Overall Remark, computed from the stored
+ * results (see utils/educationSubjects.js). The student cards and the
+ * Passed / Failed tiles read this, so they always agree with the database.
+ */
+async function educationSubjectSummary(req, res, next) {
+  try {
+    res.json({ success: true, data: await subjectSummaries(pool) });
+  } catch (error) {
+    next(error);
+  }
+}
+
+const EDUCATION_FILE_CATEGORIES = ['Performance', 'Evaluation', 'Certificate', 'Monthly Report', 'Progress Report', 'Other'];
+
+/**
+ * POST /api/education-records/:id/files
+ *
+ * Upload a file from the Education module. The file is filed ONCE, as a
+ * document in the resident's admission folder (Education Files/Records), through
+ * the Documents module's own create handler — so admission, approval, history
+ * and notifications are those of any other upload. The learner record keeps a
+ * reference to that document (`documentId`), not a second copy of the file, and
+ * the document carries `educationRecordId` back to the learner.
+ */
+async function uploadEducationFile(req, res, next) {
+  try {
+    const [rows] = await pool.query('SELECT id, residentId, name, files FROM education_records WHERE id = ?', [req.params.id]);
+    if (!rows.length) throw new ApiError(404, 'Education record not found');
+    const record = rows[0];
+
+    // The learner's resident. A record from before the link existed is matched
+    // by its exact name, as the module always did.
+    let residentId = record.residentId || null;
+    if (!residentId) {
+      const [matches] = await pool.query('SELECT id FROM children WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))', [record.name]);
+      if (matches.length === 1) residentId = matches[0].id;
+    }
+    if (!residentId) {
+      throw new ApiError(422, `"${record.name}" is not linked to a resident record, so the file cannot be filed in Documents. Edit the student and choose the resident first.`);
+    }
+
+    const body = req.body || {};
+    const category = String(body.category || '').trim();
+    if (!EDUCATION_FILE_CATEGORIES.includes(category)) throw new ApiError(400, 'Choose the document category.');
+    const otherLabel = String(body.otherLabel || '').trim();
+    if (category === 'Other' && !otherLabel) throw new ApiError(400, 'Please specify what this document is.');
+    const fileData = String(body.fileData || '');
+    if (!/^data:[^;,]*;base64,/.test(fileData)) throw new ApiError(400, 'Select a file to upload.');
+    const fileName = String(body.fileName || '').trim().slice(0, 200) || 'Education file';
+    const label = category === 'Other' ? otherLabel : category;
+
+    const [[child]] = await pool.query('SELECT name FROM children WHERE id = ?', [residentId]);
+    const [[clock]] = await pool.query("SELECT DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i:%s') AS now");
+    const now = clock?.now || null;
+
+    const filed = await invokeHandler(documentController.create, {
+      ...req,
+      body: {
+        residentId,
+        residentName: child?.name || record.name,
+        title: `Education — ${label}`,
+        category: 'Education',
+        phase: '',
+        description: `${label} uploaded via Education Module for ${record.name} (education record ${record.id}).`,
+        fileName,
+        fileType: String(body.fileType || '').slice(0, 100) || null,
+        fileSize: Number(body.fileSize) || Math.round((fileData.length * 3) / 4),
+        fileData,
+        educationRecordId: record.id,
+        uploaderRole: req.user?.role,
+        uploadedBy: req.user?.username,
+        uploadedAt: now,
+        status: 'Submitted',
+        submittedBy: req.user?.username,
+        submittedAt: now,
+        requiresAssessment: false,
+        assessmentTriggered: false,
+      },
+    });
+    const documentId = filed?.body?.data?.id;
+    if (!documentId) throw new ApiError(500, 'The file could not be filed in Documents.');
+
+    try {
+      let files = record.files;
+      if (typeof files === 'string') { try { files = JSON.parse(files); } catch { files = []; } }
+      if (!Array.isArray(files)) files = [];
+      files.push({
+        id: `EF${Date.now()}`,
+        documentId,
+        name: fileName,
+        type: String(body.fileType || ''),
+        size: Number(body.fileSize) || 0,
+        uploadDate: String(now || '').slice(0, 10),
+        category,
+        ...(category === 'Other' ? { otherLabel } : {}),
+      });
+      await pool.query('UPDATE education_records SET files = ?, modifiedBy = ? WHERE id = ?', [
+        JSON.stringify(files), req.user?.username || null, record.id,
+      ]);
+    } catch (error) {
+      // Never leave a filed document the learner record does not know about.
+      await pool.query('DELETE FROM documentRevisions WHERE documentId = ?', [documentId]).catch(() => {});
+      await pool.query('DELETE FROM documents WHERE id = ?', [documentId]).catch(() => {});
+      throw error;
+    }
+
+    const [updated] = await pool.query('SELECT * FROM education_records WHERE id = ?', [record.id]);
+    res.status(201).json({
+      success: true,
+      data: mapRow('education_records', updated[0]),
+      documentId,
+      message: 'File saved and filed in the resident\'s Documents (Education Files/Records).',
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 /** A subject result is Passed or Failed; clearing one is a DELETE. */
 function validateSubjectResult(req, res, next) {
   const result = req.body?.result;
@@ -683,6 +807,11 @@ function notifyEducationWrite(resource, fallbackLabel) {
 
 const educationModule = requireModule('Education');
 
+// The learners' Overall Remarks. Declared ahead of every `/<resource>/:id`
+// route so no parameterised path can claim "summary"; it carries its own
+// authentication and module check because it sits before their mounts.
+router.get('/education-subject-results/summary', authenticate, educationModule, educationSubjectSummary);
+
 router.use('/education-records', authenticate, educationModule);
 router.get('/education-records', educationResources.educationRecords.getAll);
 router.get('/education-records/:id', educationResources.educationRecords.getById);
@@ -703,6 +832,7 @@ router.post(
   }),
   educationResources.educationRecords.create,
 );
+router.post('/education-records/:id/files', requirePermission('Education', 'edit'), uploadEducationFile);
 router.put('/education-records/:id', requirePermission('Education', 'edit'), requireEducationPlacement, requireValidLrn, notifyEducationWrite('education_records', 'updated a learner'), educationResources.educationRecords.update);
 router.delete('/education-records/:id', requirePermission('Education', 'delete'), notifyEducationWrite('education_records', 'removed a learner'), educationResources.educationRecords.delete);
 

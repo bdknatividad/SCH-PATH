@@ -25,6 +25,7 @@ const { activeAdmissionIdFor } = require('../services/admissionLink');
 const { ABSCONDED_STATUS, assertResidentNotAbsconded } = require('../utils/abscond');
 const { admissionCompletion } = require('../utils/phaseCompletion');
 const { isClosedResidentStatus, NOT_CLOSED_SQL } = require('../utils/residentStatus');
+const { subjectSummaries } = require('../utils/educationSubjects');
 
 const baseController = createController('children');
 
@@ -1262,12 +1263,28 @@ async function educationForResident(req, res, next) {
       rowsFor('progress reports', 'education_progress_reports', 'SELECT * FROM education_progress_reports WHERE residentId = ?'),
     ]);
 
+    /*
+     * Subject results and the Overall Remark, from the same stored rows the
+     * Education module reads (utils/educationSubjects.js) — so this tab, the
+     * student card and the Passed / Failed tiles always agree. A database that
+     * predates the subject tables has none to show, which is not an error.
+     */
+    let subjects = [];
+    try {
+      subjects = await subjectSummaries(pool, { residentId });
+    } catch (error) {
+      if (error?.code !== 'ER_NO_SUCH_TABLE') {
+        throw new ApiError(500, `This resident's subject results could not be read. (${error.message})`);
+      }
+    }
+
     res.json({
       success: true,
       data: {
         records: records.map((row) => mapRow('education_records', row)),
         visits: visits.map((row) => mapRow('education_school_visits', row)),
         progress: progress.map((row) => mapRow('education_progress_reports', row)),
+        subjects,
       },
     });
   } catch (error) { next(error); }

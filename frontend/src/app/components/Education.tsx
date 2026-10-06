@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import { useData } from '@/app/state/DataContext';
-import { request, createResource, updateResource, deleteResource, describeError } from '@/services/api';
+import { request, createResource, updateResource, deleteResource, describeError, fetchBinary } from '@/services/api';
 import { systemDialog } from '@/app/components/SystemDialog';
 import { useAuth } from '@/app/state/AuthContext';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
@@ -66,6 +66,23 @@ export interface EducationFile {
    */
   otherLabel?: string;
   dataUrl?: string;
+  /** The document in the resident's Documents folder this file was filed as. */
+  documentId?: string;
+}
+
+/**
+ * A learner's subject results and Overall Remark, computed by the API from the
+ * stored subject results (`GET /education-subject-results/summary`). The card,
+ * the Passed / Failed tiles and Child Record → Education all read this.
+ */
+export interface SubjectSummary {
+  educationRecordId: string;
+  residentId: string | null;
+  passed: number;
+  failed: number;
+  total: number;
+  marked: number;
+  overall: 'Passed' | 'Failed' | null;
 }
 
 export interface Student {
@@ -600,6 +617,20 @@ export function Education() {
 
   // School Visit Reports
   const [visitReports, setVisitReports] = useState<SchoolVisitReport[]>(() => loadVisits());
+
+  // Overall Remark per learner, from the database.
+  const [subjectSummary, setSubjectSummary] = useState<Record<string, SubjectSummary>>({});
+  const loadSubjectSummary = async () => {
+    try {
+      const res = await request<{ success: boolean; data: SubjectSummary[] }>('/education-subject-results/summary');
+      const map: Record<string, SubjectSummary> = {};
+      for (const row of Array.isArray(res.data) ? res.data : []) map[row.educationRecordId] = row;
+      setSubjectSummary(map);
+    } catch (error) {
+      console.warn('Education subject summary could not be loaded.', error);
+    }
+  };
+  useEffect(() => { void loadSubjectSummary(); }, []);
   const [isVisitUploadOpen, setIsVisitUploadOpen] = useState(false);
   const [pendingVisitFile, setPendingVisitFile] = useState<File | null>(null);
   const [visitForm, setVisitForm] = useState({ studentId: '', visitDate: new Date().toISOString().split('T')[0], school: '', purpose: '', findings: '', status: 'Completed' as 'Scheduled' | 'Completed' });
@@ -958,8 +989,11 @@ export function Education() {
   const totalVisits = visitReports.length; // each report = 1 visit
 
 
-  const passCount = progressReports.filter(r => r.result === 'Passed').length;
-  const failCount = progressReports.filter(r => r.result === 'Failed').length;
+  // Learners on the current roster by Overall Remark. Each learner is counted
+  // once, and a learner with no subject marked yet is counted in neither.
+  const currentRoster = students.filter(s => !isPastLearner(s));
+  const passCount = currentRoster.filter(s => subjectSummary[s.id]?.overall === 'Passed').length;
+  const failCount = currentRoster.filter(s => subjectSummary[s.id]?.overall === 'Failed').length;
 
   const handleSaveProgress = () => {
     if (!progressStudent || !progressForm.subject.trim() || !progressForm.result) return;
@@ -1167,72 +1201,63 @@ export function Education() {
       setUploadError('Please specify what this document is.');
       return;
     }
-    const documentLabel = uploadCategory === 'Other' ? otherLabel : uploadCategory;
     setUploadDocsWarning('');
+    setUploadError('');
+    const target = uploadTarget;
+    const file = pendingFile;
     const reader = new FileReader();
     reader.onloadend = async () => {
-      const fileData = reader.result as string;
-      const newFile: EducationFile = {
-        id: `EF${Date.now()}`,
-        name: pendingFile.name,
-        type: pendingFile.type,
-        size: pendingFile.size,
-        uploadDate: new Date().toISOString().split('T')[0],
-        category: uploadCategory,
-        otherLabel: uploadCategory === 'Other' ? otherLabel : undefined,
-        dataUrl: fileData,
-      };
-      const updated = students.map(s =>
-        s.id === uploadTarget.id
-          ? { ...s, files: [...s.files, newFile] }
-          : s
-      );
-      persist(updated);
-      void updateResource<Student>('education-records', uploadTarget.id, { files: updated.find(s => s.id === uploadTarget.id)?.files || [] })
-        .then(saved => setStudents(prev => prev.map(s => s.id === saved.id ? normalizeStudent(saved) : s)))
-        .catch(error => console.error('Unable to persist education file:', error));
-      // also update viewStudent if open
-      if (viewStudent?.id === uploadTarget.id) {
-        setViewStudent(updated.find(s => s.id === uploadTarget.id) || null);
-      }
-      setIsUploadOpen(false);
-
-      // Every education upload must also land in the Document Module, inside
-      // the correct child's folder — not just kept locally in this module.
-      const resident = residents.find(c => c.id === uploadTarget.residentId) || residents.find(c => c.name === uploadTarget.name);
-      if (resident) {
-        setUploadingToDocs(true);
-        try {
-          await addDocument({
-            residentId: resident.id,
-            residentName: resident.name,
-            title: `Education — ${documentLabel}`,
-            category: 'Education',
-            phase: '',
-            description: `${documentLabel} uploaded via Education Module for ${uploadTarget.name}.`,
-            fileName: pendingFile.name,
-            fileType: pendingFile.type,
-            fileSize: pendingFile.size,
-            fileData,
-            uploaderRole: user?.role || 'educator',
-            uploadedBy: user?.username || 'Educator',
-            uploadedAt: new Date().toISOString(),
-            status: 'Submitted',
-            submittedBy: user?.username || 'Educator',
-            submittedAt: new Date().toISOString(),
-            requiresAssessment: false,
-            assessmentTriggered: false,
-          } as any);
-        } catch {
-          setUploadDocsWarning(`"${pendingFile.name}" saved in Education, but couldn't be copied to the Document Module.`);
-        } finally {
-          setUploadingToDocs(false);
-        }
-      } else {
-        setUploadDocsWarning(`"${pendingFile.name}" saved in Education, but "${uploadTarget.name}" doesn't match a resident record — it won't appear in the Document Module until the name matches.`);
+      /*
+       * One request: the server files the document in the resident's admission
+       * folder (Documents → Education Files/Records) and records it on this
+       * learner, linked both ways — so the file is stored once, under the right
+       * resident, admission and education record.
+       */
+      setUploadingToDocs(true);
+      try {
+        const result = await request<{ success: boolean; data: EducationRecordWire }>(
+          `/education-records/${encodeURIComponent(target.id)}/files`,
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              category: uploadCategory,
+              otherLabel: uploadCategory === 'Other' ? otherLabel : undefined,
+              fileName: file.name,
+              fileType: file.type,
+              fileSize: file.size,
+              fileData: reader.result as string,
+            }),
+          },
+        );
+        const saved = result.data;
+        const record = normalizeStudent(saved);
+        persist(students.map(s => (s.id === record.id ? record : s)));
+        if (viewStudent?.id === record.id) setViewStudent(record);
+        setIsUploadOpen(false);
+        void refreshData();
+      } catch (error) {
+        setUploadError(describeError(error, 'The file was not uploaded. Please try again.'));
+      } finally {
+        setUploadingToDocs(false);
       }
     };
-    reader.readAsDataURL(pendingFile);
+    reader.readAsDataURL(file);
+  };
+
+  /** A file filed in Documents is read from there — it is stored only once. */
+  const downloadEducationFile = async (f: EducationFile) => {
+    if (!f.documentId) return;
+    try {
+      const { blob } = await fetchBinary(`/documents/${encodeURIComponent(f.documentId)}/file`);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = f.name;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (error) {
+      void systemDialog.failure('Could not download the file', describeError(error, 'Open it from the resident\'s Documents folder instead.'));
+    }
   };
 
   const handleDeleteFile = (student: Student, fileId: string) => {
@@ -1374,12 +1399,12 @@ export function Education() {
           <div className="bg-white/10 rounded-xl p-3 border border-white/10">
             <p className="text-[10px] font-bold text-[#4ade80] uppercase tracking-wider">Passed</p>
             <p className="text-2xl font-black text-white mt-0.5">{passCount}</p>
-            <p className="text-[10px] text-gray-400">Passed evaluations</p>
+            <p className="text-[10px] text-gray-400">Students passed</p>
           </div>
           <div className="bg-white/10 rounded-xl p-3 border border-white/10">
             <p className="text-[10px] font-bold text-[#f87171] uppercase tracking-wider">Failed</p>
             <p className="text-2xl font-black text-white mt-0.5">{failCount}</p>
-            <p className="text-[10px] text-gray-400">Failed evaluations</p>
+            <p className="text-[10px] text-gray-400">Students failed</p>
           </div>
         </div>
         <div className="flex gap-2 mt-4 flex-wrap items-center">
@@ -1425,6 +1450,7 @@ export function Education() {
         learner={subjectsLearner}
         canMark={can('Education', 'edit')}
         canManage={can('Education', 'create')}
+        onChanged={() => { void loadSubjectSummary(); }}
       />
 
       {/* Toolbar */}
@@ -1524,7 +1550,7 @@ export function Education() {
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filtered.map(student => <StudentCard key={student.id} student={student} onView={openView} onEdit={openEdit} onUpload={openUpload} onSubjects={openSubjects} onDelete={s => { setDeleteTarget(s); setDeleteConfirm(''); setIsDeleteOpen(true); }} />)}
+              {filtered.map(student => <StudentCard key={student.id} student={student} onView={openView} onEdit={openEdit} onUpload={openUpload} onSubjects={openSubjects} summary={subjectSummary[student.id]} onDelete={s => { setDeleteTarget(s); setDeleteConfirm(''); setIsDeleteOpen(true); }} />)}
             </div>
           )}
         </TabsContent>
@@ -1897,7 +1923,11 @@ export function Education() {
                                 <p className="text-[10px] text-gray-400">{f.category === 'Other' && f.otherLabel ? f.otherLabel : f.category} · {formatBytes(f.size)} · {f.uploadDate}</p>
                               </div>
                               <div className="flex gap-1 shrink-0">
-                                {f.dataUrl && (
+                                {f.documentId ? (
+                                  <Button size="icon" variant="ghost" className="h-7 w-7 hover:bg-blue-50" title="Download" onClick={() => void downloadEducationFile(f)}>
+                                    <Download className="w-3.5 h-3.5 text-blue-500" />
+                                  </Button>
+                                ) : f.dataUrl && (
                                   <a href={f.dataUrl} download={f.name}>
                                     <Button size="icon" variant="ghost" className="h-7 w-7 hover:bg-blue-50">
                                       <Download className="w-3.5 h-3.5 text-blue-500" />
@@ -1994,8 +2024,8 @@ export function Education() {
           </div>
           <DialogFooter className="gap-2">
             <Button variant="outline" className="rounded-xl" onClick={() => setIsUploadOpen(false)}>Cancel</Button>
-            <Button className="rounded-xl font-bold" style={{ backgroundColor: '#2F3E46', color: 'white' }} onClick={handleUploadConfirm}>
-              Upload
+            <Button className="rounded-xl font-bold" style={{ backgroundColor: '#2F3E46', color: 'white' }} onClick={handleUploadConfirm} disabled={uploadingToDocs}>
+              {uploadingToDocs ? 'Uploading…' : 'Upload'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -2276,9 +2306,10 @@ export function Education() {
 // ── STUDENT CARD ──────────────────────────────────────────────────────────────
 
 function StudentCard({
-  student, onView, onEdit, onUpload, onSubjects, onDelete,
+  student, onView, onEdit, onUpload, onSubjects, onDelete, summary,
 }: {
   student: Student;
+  summary?: SubjectSummary;
   onView: (s: Student) => void;
   onEdit: (s: Student) => void;
   onUpload: (s: Student) => void;
@@ -2322,6 +2353,21 @@ function StudentCard({
           )}
           <p><span className="font-semibold text-gray-600">Enrolled:</span> {student.enrollmentDate}</p>
           <p><span className="font-semibold text-gray-600">Files:</span> {student.files.length} document{student.files.length !== 1 ? 's' : ''}</p>
+        </div>
+
+        {/* Overall Remark from the subject results (Subjects button). */}
+        <div className="mb-3 flex items-center justify-between gap-2 rounded-lg bg-gray-50 px-3 py-2">
+          <span className="text-[11px] font-semibold text-gray-600">Overall Remark</span>
+          {summary?.overall ? (
+            <span className="flex items-center gap-1.5">
+              <span className="text-[10px] text-gray-400">{summary.passed}P · {summary.failed}F{summary.total > summary.marked ? ` · ${summary.total - summary.marked} unmarked` : ''}</span>
+              <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${summary.overall === 'Passed' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                {summary.overall}
+              </span>
+            </span>
+          ) : (
+            <span className="text-[10px] italic text-gray-400">No results yet</span>
+          )}
         </div>
 
         <div className="flex justify-between items-center pt-2 border-t border-gray-100 gap-1">

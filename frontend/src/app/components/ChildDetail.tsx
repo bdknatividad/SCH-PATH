@@ -664,7 +664,7 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
    * Fetched when the tab is opened rather than on mount, because most visits to
    * this page never look at it.
    */
-  const [education, setEducation] = useState<{ records: any[]; visits: any[]; progress: any[] } | null>(null);
+  const [education, setEducation] = useState<{ records: any[]; visits: any[]; progress: any[]; subjects?: any[] } | null>(null);
   const [educationError, setEducationError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -673,7 +673,7 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
     setEducationError(null);
     (async () => {
       try {
-        const result = await request<{ success: boolean; data?: { records: any[]; visits: any[]; progress: any[] } }>(
+        const result = await request<{ success: boolean; data?: { records: any[]; visits: any[]; progress: any[]; subjects?: any[] } }>(
           `/children/${encodeURIComponent(child.id)}/education`,
         );
         if (!cancelled) setEducation(result?.data || { records: [], visits: [], progress: [] });
@@ -1369,14 +1369,14 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
 
               The folder is resolved from the document's own fields with the
               shared resolver rather than matched on a title, so a file filed by
-              hand in the Documents module under the child's Educational Records
+              hand in the Documents module under the child's Education Files/Records
               folder appears here too. The two titles the sections below already
               render are excluded: listing them twice is the same duplication the
               Medical tab had to undo for the Health module's published copies.
             */
             const previewDocs = documents.filter(d =>
               d.residentId === child.id
-              && folderForDocument(d as any) === 'Educational Records'
+              && folderForDocument(d as any) === 'Education Files/Records'
               && d.title !== 'School Visit Report'
               && d.title !== 'Quarterly Education Report',
             );
@@ -1390,8 +1390,12 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
             // The quarterly review outcome is not lost: it is the Pass / Fail
             // badge on each row of the Quarterly Reports list, which is where a
             // reviewed report belongs.
-            const passCount = progress.filter(p => p.result === 'Passed').length;
-            const failCount = progress.filter(p => p.result === 'Failed').length;
+            // The learner's subject results and Overall Remark, from the same
+            // stored rows the Education module's Subjects popup, student card and
+            // Passed / Failed tiles read — so all of them agree.
+            const subjectSummary = (education?.subjects || []).find((sm: any) => sm.educationRecordId === learner?.id) || null;
+            const passCount = subjectSummary?.passed ?? 0;
+            const failCount = subjectSummary?.failed ?? 0;
 
             if (education === null) {
               return <p className="py-8 text-center text-sm text-gray-400">Loading the education record…</p>;
@@ -1417,6 +1421,41 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
 
             return (
               <div className="space-y-4">
+                {/* Subject results, as marked in the Education module's Subjects popup. */}
+                {learner && (
+                  <Card className="border-none shadow-sm">
+                    <CardContent className="p-4">
+                      <div className="mb-3 flex items-center justify-between gap-2">
+                        <h4 className="font-bold text-[#2F3E46] text-sm">Subject Results</h4>
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] font-semibold text-gray-500">Overall Remark</span>
+                          {subjectSummary?.overall ? (
+                            <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${subjectSummary.overall === 'Passed' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                              {subjectSummary.overall}
+                            </span>
+                          ) : (
+                            <span className="text-[11px] italic text-gray-400">No results yet</span>
+                          )}
+                        </div>
+                      </div>
+                      {subjectSummary && subjectSummary.subjects?.length > 0 ? (
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                          {subjectSummary.subjects.map((subject: any) => (
+                            <div key={subject.subjectId} className="flex items-center justify-between gap-3 rounded-xl bg-gray-50 px-3 py-2">
+                              <p className="truncate text-xs font-semibold text-[#2F3E46]" title={subject.name}>{subject.name}</p>
+                              <span className={`shrink-0 text-[11px] font-bold ${subject.result === 'Passed' ? 'text-green-700' : subject.result === 'Failed' ? 'text-red-600' : 'text-gray-400'}`}>
+                                {subject.result || 'Not marked'}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-xs italic text-gray-400">No subjects have been set for this learner's level yet.</p>
+                      )}
+                    </CardContent>
+                  </Card>
+                )}
+
                 {/* The Education module's own record for this child. */}
                 <Card className="border-l-4 border-blue-400 shadow-sm">
                   <CardContent className="p-5">
@@ -1463,7 +1502,7 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
                   </CardContent>
                 </Card>
 
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3"><Card className="border-none shadow-sm"><CardContent className="p-4 text-center"><p className="text-2xl font-black text-blue-600">{visits.length}</p><p className="text-xs text-gray-500 mt-0.5">School Visits</p></CardContent></Card><Card className="border-none shadow-sm"><CardContent className="p-4 text-center"><p className="text-2xl font-black text-green-600">{passCount}</p><p className="text-xs text-gray-500 mt-0.5">Passed</p></CardContent></Card><Card className="border-none shadow-sm"><CardContent className="p-4 text-center"><p className="text-2xl font-black text-red-500">{failCount}</p><p className="text-xs text-gray-500 mt-0.5">Failed</p></CardContent></Card></div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3"><Card className="border-none shadow-sm"><CardContent className="p-4 text-center"><p className="text-2xl font-black text-blue-600">{visits.length}</p><p className="text-xs text-gray-500 mt-0.5">School Visits</p></CardContent></Card><Card className="border-none shadow-sm"><CardContent className="p-4 text-center"><p className="text-2xl font-black text-green-600">{passCount}</p><p className="text-xs text-gray-500 mt-0.5">Subjects Passed</p></CardContent></Card><Card className="border-none shadow-sm"><CardContent className="p-4 text-center"><p className="text-2xl font-black text-red-500">{failCount}</p><p className="text-xs text-gray-500 mt-0.5">Subjects Failed</p></CardContent></Card></div>
 
                 {/* School visits, from the Education module — the scheduled ones
                     and the findings recorded against them. */}

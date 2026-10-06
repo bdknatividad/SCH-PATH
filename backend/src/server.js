@@ -1126,6 +1126,10 @@ async function runMigrations() {
     // what makes that idempotent, so a re-approve updates the same entry instead of
     // leaving two copies of the same month's assessment.
     await ensureColumn('documents', 'triRecordId', 'VARCHAR(40) NULL', 'residentId');
+    // The Education module's uploads name the learner record they belong to, so a
+    // file in the resident's Education Files/Records folder can be traced back to
+    // its student record (and the record lists the document, not a copy of it).
+    await ensureColumn('documents', 'educationRecordId', 'VARCHAR(40) NULL', 'residentId');
     await ensureUniqueIndex('documents', 'uq_documents_tri_record', 'triRecordId');
     try { await pool.query('CREATE INDEX idx_documents_assessmentId ON documents (assessmentId)'); } catch (err) { if (err.code !== 'ER_DUP_KEYNAME') console.warn('Migration warning (documents assessment index):', err.message); }
 
@@ -1162,6 +1166,19 @@ async function runMigrations() {
         INDEX idx_document_revisions (documentId, revision, createdAt)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
     console.log('Migration: documentRevisions table ensured.');
+
+    // The education folder was renamed from "Educational Records" to
+    // "Education Files/Records". Documents already filed under the old name move
+    // with it — same resident, same admission, only the folder label changes.
+    // Idempotent: once moved, nothing matches the old name.
+    try {
+      const [moved] = await pool.query(
+        "UPDATE documents SET documentCategory = 'Education Files/Records' WHERE documentCategory = 'Educational Records'"
+      );
+      if (moved?.affectedRows) console.log(`Migration: moved ${moved.affectedRows} document(s) into Education Files/Records.`);
+    } catch (err) {
+      console.warn('Migration warning (education folder rename):', err.message);
+    }
 
     // Backfill: file every existing document. The folder is computed in JS from
     // the same rules the API uses, so a row is filed exactly as a new upload

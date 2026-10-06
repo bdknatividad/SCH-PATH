@@ -15,7 +15,7 @@ const { pool } = require('../config/database');
 const { categoryForDocument } = require('../utils/documentCategory');
 
 /** The folder the Education module's own uploads are filed into. */
-const EDUCATION_FOLDER = 'Educational Records';
+const EDUCATION_FOLDER = 'Education Files/Records';
 
 /**
  * The module each generated quarterly Progress Report is filed from.

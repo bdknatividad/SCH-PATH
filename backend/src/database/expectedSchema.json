@@ -1602,6 +1602,13 @@
     "extra": ""
    },
    {
+    "name": "educationRecordId",
+    "type": "varchar(40)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
     "name": "admissionId",
     "type": "varchar(40)",
     "nullable": true,

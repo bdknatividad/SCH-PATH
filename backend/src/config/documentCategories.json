@@ -6,7 +6,7 @@
     "Anecdotal Reports",
     "Assessments",
     "Medical Records",
-    "Educational Records",
+    "Education Files/Records",
     "Behavioral Records",
     "Violation Records",
     "Intervention Records",
@@ -88,7 +88,7 @@
       "keywords": ["home visit", "home/school visit", "home visitation", "social case study"]
     },
     {
-      "folder": "Educational Records",
+      "folder": "Education Files/Records",
       "types": [],
       "categories": ["Education", "Educational"],
       "keywords": ["education", "educational", "school", "academic", "learning", "enrollment", "form 137", "report card", "quarterly education report"]
