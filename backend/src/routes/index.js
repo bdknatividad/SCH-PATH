@@ -19,6 +19,7 @@ const { hasModuleAccess } = require('../config/rbac');
 const { sortRows } = require('../controllers/baseController');
 const documentController = require('../controllers/documentController');
 const { subjectSummaries } = require('../utils/educationSubjects');
+const { resolveEducationResident } = require('../utils/educationResident');
 const { invokeHandler } = require('../utils/invokeHandler');
 
 const userRoutes = require('./userRoutes');
@@ -555,13 +556,13 @@ async function uploadEducationFile(req, res, next) {
     if (!rows.length) throw new ApiError(404, 'Education record not found');
     const record = rows[0];
 
-    // The learner's resident. A record from before the link existed is matched
-    // by its exact name, as the module always did.
-    let residentId = record.residentId || null;
-    if (!residentId) {
-      const [matches] = await pool.query('SELECT id FROM children WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))', [record.name]);
-      if (matches.length === 1) residentId = matches[0].id;
-    }
+    // The learner's resident, decided on the server (see resolveEducationResident):
+    // the linked resident — or, for a learner added before the link existed, the
+    // resident of the same name, which is then linked — preferring the row
+    // that is in care now, so a returning resident's file lands under the
+    // current admission.
+    const owner = await resolveEducationResident(pool, record);
+    const residentId = owner?.residentId || null;
     if (!residentId) {
       throw new ApiError(422, `"${record.name}" is not linked to a resident record, so the file cannot be filed in Documents. Edit the student and choose the resident first.`);
     }

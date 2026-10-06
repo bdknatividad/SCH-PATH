@@ -15,6 +15,7 @@ const { normalizeRole, isSystemWide } = require('../utils/authorization');
 const { contentDisposition } = require('../utils/contentDisposition');
 const { buildAnecdotalReportDocument, isOfficialAnecdotalPdf } = require('../utils/anecdotalReportPdf');
 const { categoryForDocument, folderForDocument, DOCUMENT_FOLDERS } = require('../utils/documentCategory');
+const { resolveEducationResident } = require('../utils/educationResident');
 const notifications = require('../services/notificationService');
 const alertStream = require('../services/alertStream');
 const { activeAdmissionIdFor } = require('../services/admissionLink');
@@ -662,6 +663,22 @@ async function create(req, res, next) {
     const uploaderRole = normalizeRole(req.user?.role || data.uploaderRole);
     const docTitle = data.title || '';
     const docPhase = data.phase || '';
+
+    /**
+     * A document the Education Module files names its learner record, and the
+     * resident is taken from that record rather than from the browser — so an
+     * uploaded education file, a School Visit Report or a Quarterly Education
+     * Report always lands in its own learner's folder, under that resident's
+     * current admission (stamped below from `residentId`).
+     */
+    if (data.educationRecordId) {
+      const owner = await resolveEducationResident(pool, String(data.educationRecordId));
+      if (!owner) {
+        throw new ApiError(422, 'This learner is not linked to a resident record, so the document cannot be filed in Documents. Edit the student and choose the resident first.');
+      }
+      data.residentId = owner.residentId;
+      data.residentName = owner.residentName;
+    }
 
     /**
      * Two Admission Phase documents carry a field the client does not choose.

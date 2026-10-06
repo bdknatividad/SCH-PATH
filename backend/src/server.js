@@ -2989,7 +2989,11 @@ async function runMigrations() {
  *
  * Idempotent: a file is skipped when a document already carries its resident,
  * its title and its file name — which is also what keeps a later re-upload from
- * producing a duplicate of a row this repair created.
+ * producing a duplicate of a row this repair created. Such a document is adopted
+ * instead: the file entry gets its `documentId` and the document its
+ * `educationRecordId`, so the learner record and the Documents row point at
+ * each other. The resident comes from `resolveEducationResident`, the same rule
+ * a new upload follows, so a learner that was never linked is filed too.
  *
  * `admissionId` is left NULL and filled by `backfillDocumentAdmissions()`, which
  * already knows how to place a document under the admission that was open when
@@ -3006,8 +3010,10 @@ async function backfillEducationDocuments() {
     const { RESOURCES } = require('./utils/constants');
     const prefix = RESOURCES?.documents?.prefix || 'DOC';
     const { categoryForDocument } = require('./utils/documentCategory');
+    const { resolveEducationResident } = require('./utils/educationResident');
 
     let filed = 0;
+    let linked = 0;
 
     for (const record of records) {
       let files = record.files;
@@ -3016,23 +3022,53 @@ async function backfillEducationDocuments() {
       }
       if (!Array.isArray(files) || !files.length) continue;
 
-      const residentId = record.residentId;
+      // The learner's resident, decided the same way a new upload decides it —
+      // which also links a learner added before the masterlist link existed.
+      const owner = await resolveEducationResident(pool, record);
+      const residentId = owner?.residentId;
       if (!residentId) continue;
 
       const [existing] = await pool.query(
-        'SELECT title, fileName FROM documents WHERE residentId = ?',
-        [residentId],
+        'SELECT id, title, fileName, educationRecordId FROM documents WHERE residentId = ? OR educationRecordId = ?',
+        [residentId, record.id],
       );
-      const alreadyFiled = new Set(existing.map((row) => `${row.title}|${row.fileName}`));
+      const byId = new Map(existing.map((row) => [row.id, row]));
+      const byKey = new Map(existing.map((row) => [`${row.title}|${row.fileName}`, row]));
+      const claimed = new Set(files.map((file) => file?.documentId).filter(Boolean));
+      let changed = false;
 
       for (const file of files) {
-        if (!file || !file.dataUrl) continue;
+        if (!file) continue;
 
         const label = file.otherLabel || file.category || 'File';
         const title = `Education — ${label}`;
-        if (alreadyFiled.has(`${title}|${file.name}`)) continue;
 
-        const description = `${label} uploaded via Education Module for ${record.name || residentId}.`;
+        // Already filed: make sure the document names its learner record.
+        let document = file.documentId ? byId.get(file.documentId) : null;
+        // Filed by the earlier repair (or an earlier upload) without the link:
+        // adopt that document instead of filing a second copy.
+        if (!document) {
+          const match = byKey.get(`${title}|${file.name}`);
+          if (match && !claimed.has(match.id)) document = match;
+        }
+        if (document) {
+          if (file.documentId !== document.id) {
+            file.documentId = document.id;
+            claimed.add(document.id);
+            changed = true;
+          }
+          if (document.educationRecordId !== record.id) {
+            await pool.query('UPDATE documents SET educationRecordId = ? WHERE id = ?', [record.id, document.id]);
+            document.educationRecordId = record.id;
+            linked += 1;
+          }
+          continue;
+        }
+
+        // Never filed, and its content is still on the learner record.
+        if (!file.dataUrl) continue;
+
+        const description = `${label} uploaded via Education Module for ${record.name || residentId} (education record ${record.id}).`;
         const uploadedAt = file.uploadDate ? new Date(file.uploadDate) : new Date();
         const documentFolder = categoryForDocument({ title, category: 'Education', fileName: file.name });
         // The education record's own author is the closest thing to the uploader
@@ -3040,29 +3076,39 @@ async function backfillEducationDocuments() {
         // role is safe to state — only an Educator writes an education record.
         const actor = record.modifiedBy || record.createdBy || 'Educator';
 
-        await insertWithGeneratedId(pool, {
+        const documentId = await insertWithGeneratedId(pool, {
           table: 'documents',
           prefix,
           insert: (id) => pool.query(
             `INSERT INTO documents
-               (id, residentId, residentName, title, category, documentCategory, description,
+               (id, residentId, educationRecordId, residentName, title, category, documentCategory, description,
                 fileName, fileType, fileSize, fileData, uploaderRole, uploadedBy, uploadedAt,
                 status, submittedBy, submittedAt, createdBy, modifiedBy)
-             VALUES (?, ?, ?, ?, 'Education', ?, ?, ?, ?, ?, ?, 'educator', ?, ?,
+             VALUES (?, ?, ?, ?, ?, 'Education', ?, ?, ?, ?, ?, ?, 'educator', ?, ?,
                      'Submitted', ?, ?, ?, ?)`,
             [
-              id, residentId, record.name || null, title, documentFolder, description,
+              id, residentId, record.id, owner.residentName || record.name || null, title, documentFolder, description,
               file.name || null, file.type || null, file.size || null, file.dataUrl,
               actor, uploadedAt, actor, uploadedAt, actor, actor,
             ],
           ),
         });
 
-        alreadyFiled.add(`${title}|${file.name}`);
+        if (documentId) {
+          file.documentId = documentId;
+          claimed.add(documentId);
+          byKey.set(`${title}|${file.name}`, { id: documentId, title, fileName: file.name, educationRecordId: record.id });
+          changed = true;
+        }
         filed += 1;
+      }
+
+      if (changed) {
+        await pool.query('UPDATE education_records SET files = ? WHERE id = ?', [JSON.stringify(files), record.id]);
       }
     }
 
+    if (linked) console.log(`Migration: ${linked} education document(s) linked to their learner record.`);
     if (filed) {
       console.log(`Migration: ${filed} education file(s) filed into Documents.`);
       await backfillDocumentAdmissions();

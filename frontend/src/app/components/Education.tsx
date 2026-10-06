@@ -694,6 +694,9 @@ export function Education() {
         await addDocument({
           residentId: resident.id,
           residentName: resident.name,
+          // The learner record: the server files the report under this
+          // learner's resident and current admission.
+          educationRecordId: student?.id,
           title: 'School Visit Report',
           category: 'Education',
           phase: '',
@@ -957,6 +960,9 @@ export function Education() {
       await addDocument({
         residentId: resident.id,
         residentName: resident.name,
+        // The learner record: the server files the report under this
+        // learner's resident and current admission.
+        educationRecordId: student.id,
         title: 'Quarterly Education Report',
         category: 'Education',
         phase: '',
