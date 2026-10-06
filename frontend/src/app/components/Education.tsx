@@ -1905,9 +1905,6 @@ export function Education() {
                     <TabsContent value="files">
                       <div className="flex justify-between items-center mb-3">
                         <p className="text-sm font-bold text-[#2F3E46]">Uploaded Documents</p>
-                        <Button size="sm" className="rounded-lg gap-1.5 font-bold" style={{ backgroundColor: '#FFD100', color: '#2F3E46' }} onClick={() => { openUpload(viewStudent); }}>
-                          <Upload className="w-3.5 h-3.5" /> Upload
-                        </Button>
                       </div>
 
                       {viewStudent.files.length === 0 ? (
