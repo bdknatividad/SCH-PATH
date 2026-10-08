@@ -22,6 +22,7 @@ DROP TABLE IF EXISTS users;
 DROP TABLE IF EXISTS accessRequests;
 DROP TABLE IF EXISTS residentPerformanceRatings;
 DROP TABLE IF EXISTS physical_examinations;
+DROP TABLE IF EXISTS education_progress_monitoring;
 DROP TABLE IF EXISTS education_subject_results;
 DROP TABLE IF EXISTS education_subjects;
 DROP TABLE IF EXISTS education_monthly_reports;
@@ -726,7 +727,10 @@ CREATE TABLE IF NOT EXISTS education_subject_results (
   educationRecordId VARCHAR(40) NOT NULL,
   residentId VARCHAR(40) NULL,
   subjectId VARCHAR(40) NOT NULL,
-  result ENUM('Passed','Failed') NOT NULL,
+  result ENUM('Passed','Failed') NULL,
+  progressStatus VARCHAR(20) NULL,
+  outputsSubmitted INT NULL,
+  outputsTotal INT NULL,
   createdBy VARCHAR(100) NULL,
   modifiedBy VARCHAR(100) NULL,
   createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -737,6 +741,29 @@ CREATE TABLE IF NOT EXISTS education_subject_results (
   CONSTRAINT fk_education_subject_result_record FOREIGN KEY (educationRecordId) REFERENCES education_records(id) ON DELETE CASCADE,
   CONSTRAINT fk_education_subject_result_subject FOREIGN KEY (subjectId) REFERENCES education_subjects(id) ON DELETE CASCADE,
   CONSTRAINT fk_education_subject_result_resident FOREIGN KEY (residentId) REFERENCES children(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Education Progress Monitoring: one record per learner (replaces Pass / Fail).
+CREATE TABLE IF NOT EXISTS education_progress_monitoring (
+  id VARCHAR(40) PRIMARY KEY,
+  educationRecordId VARCHAR(40) NOT NULL,
+  residentId VARCHAR(40) NULL,
+  admissionId VARCHAR(40) NULL,
+  monitoringDate DATE NULL,
+  modulesCompleted TEXT NULL,
+  modulesPending TEXT NULL,
+  outputsSubmitted TEXT NULL,
+  outputsNotSubmitted TEXT NULL,
+  participationNotes TEXT NULL,
+  concerns TEXT NULL,
+  createdBy VARCHAR(100) NULL,
+  modifiedBy VARCHAR(100) NULL,
+  createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_education_progress_monitoring_record (educationRecordId),
+  INDEX idx_education_progress_monitoring_resident (residentId),
+  CONSTRAINT fk_education_progress_monitoring_record FOREIGN KEY (educationRecordId) REFERENCES education_records(id) ON DELETE CASCADE,
+  CONSTRAINT fk_education_progress_monitoring_resident FOREIGN KEY (residentId) REFERENCES children(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Physical Examination: the structured exam (markers on the front/back body

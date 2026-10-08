@@ -223,7 +223,17 @@ const RESOURCES = {
     prefix: 'ESR',
     orderBy: 'createdAt ASC',
     jsonFields: [],
-    columns: ['id', 'educationRecordId', 'residentId', 'subjectId', 'result', 'createdBy', 'modifiedBy'],
+    // `result` (Passed / Failed) is no longer written or read; kept so the
+    // stored values are not lost. Progress is `progressStatus` with the
+    // outputs submitted against the outputs expected.
+    columns: ['id', 'educationRecordId', 'residentId', 'subjectId', 'result', 'progressStatus', 'outputsSubmitted', 'outputsTotal', 'createdBy', 'modifiedBy'],
+  },
+  // A learner's Education Progress Monitoring record — one per learner.
+  education_progress_monitoring: {
+    prefix: 'EPM',
+    orderBy: 'createdAt DESC',
+    jsonFields: [],
+    columns: ['id', 'educationRecordId', 'residentId', 'admissionId', 'monitoringDate', 'modulesCompleted', 'modulesPending', 'outputsSubmitted', 'outputsNotSubmitted', 'participationNotes', 'concerns', 'createdBy', 'modifiedBy'],
   },
   education_monthly_reports: {
     prefix: 'EMR',

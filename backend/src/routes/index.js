@@ -18,7 +18,7 @@ const { hasModuleAccess } = require('../config/rbac');
 // `baseController.getAll` does instead of asking MySQL to filesort them.
 const { sortRows } = require('../controllers/baseController');
 const documentController = require('../controllers/documentController');
-const { subjectSummaries } = require('../utils/educationSubjects');
+const educationProgress = require('../controllers/educationProgressController');
 const { resolveEducationResident } = require('../utils/educationResident');
 const { invokeHandler } = require('../utils/invokeHandler');
 
@@ -523,21 +523,6 @@ async function validateEducationSubject(req, res, next) {
   }
 }
 
-/**
- * GET /api/education-subject-results/summary
- *
- * Every learner's subject results and Overall Remark, computed from the stored
- * results (see utils/educationSubjects.js). The student cards and the
- * Passed / Failed tiles read this, so they always agree with the database.
- */
-async function educationSubjectSummary(req, res, next) {
-  try {
-    res.json({ success: true, data: await subjectSummaries(pool) });
-  } catch (error) {
-    next(error);
-  }
-}
-
 const EDUCATION_FILE_CATEGORIES = ['Performance', 'Evaluation', 'Certificate', 'Monthly Report', 'Progress Report', 'Other'];
 
 /**
@@ -642,18 +627,6 @@ async function uploadEducationFile(req, res, next) {
   } catch (error) {
     next(error);
   }
-}
-
-/** A subject result is Passed or Failed; clearing one is a DELETE. */
-function validateSubjectResult(req, res, next) {
-  const result = req.body?.result;
-  if (req.method === 'POST' && (!req.body?.educationRecordId || !req.body?.subjectId)) {
-    return next(new ApiError(400, 'A subject result needs the learner and the subject.'));
-  }
-  if ((req.method === 'POST' || result !== undefined) && result !== 'Passed' && result !== 'Failed') {
-    return next(new ApiError(400, 'A subject result must be Passed or Failed.'));
-  }
-  return next();
 }
 
 /**
@@ -808,10 +781,15 @@ function notifyEducationWrite(resource, fallbackLabel) {
 
 const educationModule = requireModule('Education');
 
-// The learners' Overall Remarks. Declared ahead of every `/<resource>/:id`
-// route so no parameterised path can claim "summary"; it carries its own
-// authentication and module check because it sits before their mounts.
-router.get('/education-subject-results/summary', authenticate, educationModule, educationSubjectSummary);
+// Education Progress Monitoring (replaces Pass / Fail): every learner's
+// progress for the cards and tiles, one learner's for View → Education
+// Progress, and the Educator's save. The summary is declared ahead of the
+// learner route so `:educationRecordId` can never claim "summary". Reading
+// follows the Education module; saving is the Educator's alone (checked in the
+// controller as well as by Education: edit here).
+router.get('/education-progress/summary', authenticate, educationModule, educationProgress.summary);
+router.get('/education-progress/:educationRecordId', authenticate, educationModule, educationProgress.getOne);
+router.put('/education-progress/:educationRecordId', authenticate, educationModule, requirePermission('Education', 'edit'), educationProgress.save);
 
 router.use('/education-records', authenticate, educationModule);
 router.get('/education-records', educationResources.educationRecords.getAll);
@@ -860,22 +838,12 @@ router.post('/education-subjects', requirePermission('Education', 'create'), val
 router.put('/education-subjects/:id', requirePermission('Education', 'edit'), validateEducationSubject, educationResources.educationSubjects.update);
 router.delete('/education-subjects/:id', requirePermission('Education', 'delete'), educationResources.educationSubjects.delete);
 
-// Subject results: one row per learner per subject. A second POST for the same
-// pair updates the existing row, so a result can be changed without the client
-// knowing its id, and two clicks can never leave two results.
+// Subject rows: one per learner per subject, now holding the progress status.
+// They are read here and written only through PUT /education-progress/:id —
+// the Pass / Fail writes (POST / PUT / DELETE) were removed with Pass / Fail.
 router.use('/education-subject-results', authenticate, educationModule);
 router.get('/education-subject-results', educationResources.educationSubjectResults.getAll);
 router.get('/education-subject-results/:id', educationResources.educationSubjectResults.getById);
-router.post(
-  '/education-subject-results',
-  requirePermission('Education', 'create'),
-  validateSubjectResult,
-  requireResidentInCare,
-  updateWhenExists('education_subject_results', ['educationRecordId', 'subjectId'], educationResources.educationSubjectResults),
-  educationResources.educationSubjectResults.create,
-);
-router.put('/education-subject-results/:id', requirePermission('Education', 'edit'), validateSubjectResult, educationResources.educationSubjectResults.update);
-router.delete('/education-subject-results/:id', requirePermission('Education', 'edit'), educationResources.educationSubjectResults.delete);
 
 router.use('/education-monthly-reports', authenticate, educationModule);
 router.get('/education-monthly-reports', educationResources.educationMonthlyReports.getAll);

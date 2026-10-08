@@ -2356,7 +2356,28 @@
    {
     "name": "result",
     "type": "enum('Passed','Failed')",
-    "nullable": false,
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "progressStatus",
+    "type": "varchar(20)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "outputsSubmitted",
+    "type": "int",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "outputsTotal",
+    "type": "int",
+    "nullable": true,
     "default": null,
     "extra": ""
    },
@@ -4746,6 +4767,113 @@
    {
     "name": "guideId",
     "type": "varchar(40)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "modifiedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "createdAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED"
+   },
+   {
+    "name": "updatedAt",
+    "type": "timestamp",
+    "nullable": false,
+    "default": "CURRENT_TIMESTAMP",
+    "extra": "DEFAULT_GENERATED on update CURRENT_TIMESTAMP"
+   }
+  ],
+  "education_progress_monitoring": [
+   {
+    "name": "id",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "educationRecordId",
+    "type": "varchar(40)",
+    "nullable": false,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "residentId",
+    "type": "varchar(40)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "admissionId",
+    "type": "varchar(40)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "monitoringDate",
+    "type": "date",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "modulesCompleted",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "modulesPending",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "outputsSubmitted",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "outputsNotSubmitted",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "participationNotes",
+    "type": "text",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "concerns",
+    "type": "text",
     "nullable": true,
     "default": null,
     "extra": ""

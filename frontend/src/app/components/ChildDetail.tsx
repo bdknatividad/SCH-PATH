@@ -24,7 +24,8 @@ import {
 } from '@/app/components/ui/dialog';
 import { Input } from '@/app/components/ui/input';
 import { Label } from '@/app/components/ui/label';
-import { formatShortDate, formatShortDateTime } from '@/utils/dateFormatter';
+import { formatShortDate, formatShortDateTime } from '@/utils/dateFormatter';
+import { EducationProgressReadOnly, type LearnerProgress } from './EducationSubjects';
 import { triTrend } from '@/utils/triRating';
 import { folderForDocument } from '@/utils/documentCategory';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
@@ -664,7 +665,7 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
    * Fetched when the tab is opened rather than on mount, because most visits to
    * this page never look at it.
    */
-  const [education, setEducation] = useState<{ records: any[]; visits: any[]; progress: any[]; subjects?: any[] } | null>(null);
+  const [education, setEducation] = useState<{ records: any[]; visits: any[]; progress: any[]; educationProgress?: LearnerProgress[] } | null>(null);
   const [educationError, setEducationError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -673,7 +674,7 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
     setEducationError(null);
     (async () => {
       try {
-        const result = await request<{ success: boolean; data?: { records: any[]; visits: any[]; progress: any[]; subjects?: any[] } }>(
+        const result = await request<{ success: boolean; data?: { records: any[]; visits: any[]; progress: any[]; educationProgress?: LearnerProgress[] } }>(
           `/children/${encodeURIComponent(child.id)}/education`,
         );
         if (!cancelled) setEducation(result?.data || { records: [], visits: [], progress: [] });
@@ -1381,21 +1382,13 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
               && d.title !== 'Quarterly Education Report',
             );
 
-            // Passed / Failed count the Educator's own evaluations, which is
-            // exactly what the Progress Reports list below renders. They used to
-            // count quarterly reports the Center Head had *approved*, so a learner
-            // the Educator had just marked Passed showed "Passed 0" directly above
-            // a list containing that same Passed evaluation.
-            //
-            // The quarterly review outcome is not lost: it is the Pass / Fail
-            // badge on each row of the Quarterly Reports list, which is where a
-            // reviewed report belongs.
-            // The learner's subject results and Overall Remark, from the same
-            // stored rows the Education module's Subjects popup, student card and
-            // Passed / Failed tiles read — so all of them agree.
-            const subjectSummary = (education?.subjects || []).find((sm: any) => sm.educationRecordId === learner?.id) || null;
-            const passCount = subjectSummary?.passed ?? 0;
-            const failCount = subjectSummary?.failed ?? 0;
+            // The learner's Education Progress Monitoring — each subject's
+            // progress status and the monitoring record — from the same stored
+            // rows the Education module's View → Education Progress, student
+            // card and tiles read, so all of them agree. (Pass / Fail is gone.)
+            const learnerProgress: LearnerProgress | null = (education?.educationProgress || []).find((row) => row.educationRecordId === learner?.id) || null;
+            const completedCount = learnerProgress?.counts?.Completed ?? 0;
+            const pendingCount = learnerProgress?.counts?.Pending ?? 0;
 
             if (education === null) {
               return <p className="py-8 text-center text-sm text-gray-400">Loading the education record…</p>;
@@ -1421,37 +1414,13 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
 
             return (
               <div className="space-y-4">
-                {/* Subject results, as marked in the Education module's Subjects popup. */}
+                {/* Education Progress Monitoring, as recorded in the Education
+                    module (View → Education Progress). Read-only here. */}
                 {learner && (
                   <Card className="border-none shadow-sm">
                     <CardContent className="p-4">
-                      <div className="mb-3 flex items-center justify-between gap-2">
-                        <h4 className="font-bold text-[#2F3E46] text-sm">Subject Results</h4>
-                        <div className="flex items-center gap-2">
-                          <span className="text-[11px] font-semibold text-gray-500">Overall Remark</span>
-                          {subjectSummary?.overall ? (
-                            <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold ${subjectSummary.overall === 'Passed' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                              {subjectSummary.overall}
-                            </span>
-                          ) : (
-                            <span className="text-[11px] italic text-gray-400">No results yet</span>
-                          )}
-                        </div>
-                      </div>
-                      {subjectSummary && subjectSummary.subjects?.length > 0 ? (
-                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                          {subjectSummary.subjects.map((subject: any) => (
-                            <div key={subject.subjectId} className="flex items-center justify-between gap-3 rounded-xl bg-gray-50 px-3 py-2">
-                              <p className="truncate text-xs font-semibold text-[#2F3E46]" title={subject.name}>{subject.name}</p>
-                              <span className={`shrink-0 text-[11px] font-bold ${subject.result === 'Passed' ? 'text-green-700' : subject.result === 'Failed' ? 'text-red-600' : 'text-gray-400'}`}>
-                                {subject.result || 'Not marked'}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="text-xs italic text-gray-400">No subjects have been set for this learner's level yet.</p>
-                      )}
+                      <h4 className="mb-3 font-bold text-[#2F3E46] text-sm">Education Progress</h4>
+                      <EducationProgressReadOnly progress={learnerProgress} />
                     </CardContent>
                   </Card>
                 )}
@@ -1502,16 +1471,16 @@ export function ChildDetail({ id: idProp, onBack, initialTab }: ChildDetailProps
                   </CardContent>
                 </Card>
 
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3"><Card className="border-none shadow-sm"><CardContent className="p-4 text-center"><p className="text-2xl font-black text-blue-600">{visits.length}</p><p className="text-xs text-gray-500 mt-0.5">School Visits</p></CardContent></Card><Card className="border-none shadow-sm"><CardContent className="p-4 text-center"><p className="text-2xl font-black text-green-600">{passCount}</p><p className="text-xs text-gray-500 mt-0.5">Subjects Passed</p></CardContent></Card><Card className="border-none shadow-sm"><CardContent className="p-4 text-center"><p className="text-2xl font-black text-red-500">{failCount}</p><p className="text-xs text-gray-500 mt-0.5">Subjects Failed</p></CardContent></Card></div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3"><Card className="border-none shadow-sm"><CardContent className="p-4 text-center"><p className="text-2xl font-black text-blue-600">{visits.length}</p><p className="text-xs text-gray-500 mt-0.5">School Visits</p></CardContent></Card><Card className="border-none shadow-sm"><CardContent className="p-4 text-center"><p className="text-2xl font-black text-green-600">{completedCount}</p><p className="text-xs text-gray-500 mt-0.5">Subjects Completed</p></CardContent></Card><Card className="border-none shadow-sm"><CardContent className="p-4 text-center"><p className="text-2xl font-black text-amber-500">{pendingCount}</p><p className="text-xs text-gray-500 mt-0.5">Subjects Pending</p></CardContent></Card></div>
 
                 {/* School visits, from the Education module — the scheduled ones
                     and the findings recorded against them. */}
                 {visits.length > 0 && <Card className="border-none shadow-sm"><CardContent className="p-4"><h4 className="font-bold text-[#2F3E46] text-sm mb-3">School Visits</h4><div className="space-y-2">{visits.map((v) => (<div key={v.id} className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl"><div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center shrink-0"><span className="text-sm">🏫</span></div><div className="flex-1 min-w-0"><p className="text-xs font-semibold text-[#2F3E46]">{v.visitDate ? formatShortDate(String(v.visitDate).slice(0, 10)) : '—'}{v.school ? ` · ${v.school}` : ''}</p>{v.purpose && <p className="text-xs text-gray-600 mt-0.5">{v.purpose}</p>}{v.findings && <p className="text-[11px] text-gray-500 mt-0.5">{v.findings}</p>}<p className="text-[10px] text-gray-400 mt-0.5">{v.status || '—'}</p></div></div>))}</div></CardContent></Card>}
 
                 {/* Progress reports, from the Education module. */}
-                {progress.length > 0 && <Card className="border-none shadow-sm"><CardContent className="p-4"><h4 className="font-bold text-[#2F3E46] text-sm mb-3">Progress Reports</h4><div className="space-y-2">{progress.map((p) => (<div key={p.id} className="flex items-center justify-between gap-3 p-3 bg-gray-50 rounded-xl"><div className="min-w-0"><p className="text-xs font-semibold text-[#2F3E46] truncate">{p.subject || 'Progress report'}</p><p className="text-[10px] text-gray-400">{p.month || '—'}</p></div><span className="text-[11px] font-bold text-gray-600 shrink-0">{p.result || '—'}</span></div>))}</div></CardContent></Card>}
+                {progress.length > 0 && <Card className="border-none shadow-sm"><CardContent className="p-4"><h4 className="font-bold text-[#2F3E46] text-sm mb-3">Progress Reports</h4><div className="space-y-2">{progress.map((p) => (<div key={p.id} className="flex items-center justify-between gap-3 p-3 bg-gray-50 rounded-xl"><div className="min-w-0"><p className="text-xs font-semibold text-[#2F3E46] truncate">{p.subject || 'Progress report'}</p><p className="text-[10px] text-gray-400">{p.month || '—'}</p></div></div>))}</div></CardContent></Card>}
 
-                {quarterlyDocs.length > 0 && <Card className="border-none shadow-sm"><CardContent className="p-4"><h4 className="font-bold text-[#2F3E46] text-sm mb-3">Quarterly Reports</h4><div className="space-y-2">{quarterlyDocs.map((d) => { const firstLines = (d.description || '').split('\n').slice(0, 2).join(' '); const badge = d.status === 'Approved' ? { label: 'Pass', cls: 'bg-green-100 text-green-700' } : d.status === 'Rejected' ? { label: 'Fail', cls: 'bg-red-100 text-red-700' } : (d.status as string) === 'Reassessment' ? { label: 'Reassessment', cls: 'bg-yellow-100 text-yellow-700' } : { label: 'Pending Review', cls: 'bg-gray-100 text-gray-600' }; return (<div key={d.id} className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl"><div className="flex-1 min-w-0"><div className="flex items-center gap-2 flex-wrap"><p className="text-xs font-bold text-[#2F3E46] truncate">{firstLines}</p><span className={`px-2 py-0.5 rounded-full font-bold text-[10px] shrink-0 ${badge.cls}`}>{badge.label}</span></div><p className="text-[10px] text-gray-400 mt-0.5">Submitted {d.submittedAt ? formatShortDate(d.submittedAt) : '—'} by {d.uploadedBy || 'Educator'}</p></div></div>); })}</div></CardContent></Card>}
+                {quarterlyDocs.length > 0 && <Card className="border-none shadow-sm"><CardContent className="p-4"><h4 className="font-bold text-[#2F3E46] text-sm mb-3">Quarterly Reports</h4><div className="space-y-2">{quarterlyDocs.map((d) => { const firstLines = (d.description || '').split('\n').slice(0, 2).join(' '); const badge = d.status === 'Approved' ? { label: 'Approved', cls: 'bg-green-100 text-green-700' } : d.status === 'Rejected' ? { label: 'Rejected', cls: 'bg-red-100 text-red-700' } : (d.status as string) === 'Reassessment' ? { label: 'Reassessment', cls: 'bg-yellow-100 text-yellow-700' } : { label: 'Pending Review', cls: 'bg-gray-100 text-gray-600' }; return (<div key={d.id} className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl"><div className="flex-1 min-w-0"><div className="flex items-center gap-2 flex-wrap"><p className="text-xs font-bold text-[#2F3E46] truncate">{firstLines}</p><span className={`px-2 py-0.5 rounded-full font-bold text-[10px] shrink-0 ${badge.cls}`}>{badge.label}</span></div><p className="text-[10px] text-gray-400 mt-0.5">Submitted {d.submittedAt ? formatShortDate(d.submittedAt) : '—'} by {d.uploadedBy || 'Educator'}</p></div></div>); })}</div></CardContent></Card>}
                 {visitDocs.length > 0 && <Card className="border-none shadow-sm"><CardContent className="p-4"><h4 className="font-bold text-[#2F3E46] text-sm mb-3">School Visit Reports</h4><div className="space-y-2">{visitDocs.map((d) => (<div key={d.id} className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl"><div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center shrink-0"><span className="text-sm">🏫</span></div><div className="flex-1 min-w-0"><p className="text-xs text-gray-600">{d.description}</p><p className="text-[10px] text-gray-400 mt-0.5">{d.uploadedAt ? formatShortDate(d.uploadedAt) : ''}</p></div></div>))}</div></CardContent></Card>}
                 {/* The files the Education module filed for this learner, read
                     back out of the child's own folder in Documents. Every

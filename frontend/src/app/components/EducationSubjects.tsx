@@ -1,26 +1,33 @@
 import { useEffect, useMemo, useState } from 'react';
-import { request, createResource, updateResource, deleteResource, describeError } from '@/services/api';
+import { request, createResource, deleteResource, describeError } from '@/services/api';
 import { systemDialog } from '@/app/components/SystemDialog';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/app/components/ui/dialog';
 import { Button } from '@/app/components/ui/button';
 import { Input } from '@/app/components/ui/input';
-import { BookOpen, Plus, Settings2, Trash2, AlertCircle, Loader2 } from 'lucide-react';
+import { Textarea } from '@/app/components/ui/textarea';
+import { formatShortDate } from '@/utils/dateFormatter';
+import { Plus, Settings2, Trash2, AlertCircle, Loader2, Pencil, Save, X, ClipboardList, Wand2 } from 'lucide-react';
 
 /**
- * Subjects — Pass / Fail per subject, with an automatic Overall Remark.
+ * Education Progress Monitoring — replaces Pass / Fail.
  *
- * The subject list belongs to the **education level**, not to the learner: the
- * Educator defines it once per level and every learner at that level is graded
- * against the same list. Each learner's results are stored per subject
- * (`education_subject_results`, one row per learner per subject; clearing a
- * mark deletes the row).
+ * Every subject (module, activity) on the learner's level list carries its own
+ * progress status — Not Started, Ongoing, Submitted, Completed or Pending — and
+ * the outputs submitted against the outputs expected. Each learner also has one
+ * monitoring record: modules / activities completed and pending, outputs
+ * submitted and not submitted, progress / participation notes, the date of
+ * monitoring and education-related concerns.
  *
- * Laid out after the facility's paper form: the learner's name across the top,
- * the level and LRN beneath it, then one row per subject with a Pass / Fail box,
- * and the overall Pass / Fail at the bottom right.
+ * Everything is stored by the API (`/education-progress`) and read back from
+ * it, so the Education module and Child Record → Education show the same rows.
+ * Only the Educator may edit; everyone else with access reads.
+ *
+ * The subject list still belongs to the **education level**: the Educator
+ * defines it once per level and every learner at that level is monitored
+ * against the same list.
  */
 
-export type SubjectResultValue = 'Passed' | 'Failed';
+export const PROGRESS_STATUSES = ['Not Started', 'Ongoing', 'Submitted', 'Completed', 'Pending'] as const;
+export type ProgressStatus = typeof PROGRESS_STATUSES[number];
 
 export interface EducationSubject {
   id: string;
@@ -29,40 +36,52 @@ export interface EducationSubject {
   sortOrder: number;
 }
 
-interface SubjectResultRow {
-  id: string;
-  educationRecordId: string;
-  residentId?: string | null;
+export interface SubjectProgress {
   subjectId: string;
-  result: SubjectResultValue;
+  name: string;
+  status: ProgressStatus;
+  outputsSubmitted: number | null;
+  outputsTotal: number | null;
 }
 
-export interface SubjectsLearner {
+export interface ProgressMonitoring {
+  id?: string;
+  admissionId?: string | null;
+  monitoringDate: string | null;
+  modulesCompleted: string;
+  modulesPending: string;
+  outputsSubmitted: string;
+  outputsNotSubmitted: string;
+  participationNotes: string;
+  concerns: string;
+  updatedBy?: string | null;
+  updatedAt?: string | null;
+}
+
+/** One learner's Education Progress, as the API computes it. */
+export interface LearnerProgress {
+  educationRecordId: string;
+  residentId: string | null;
+  educationLevel: string;
+  total: number;
+  counts: Record<ProgressStatus, number>;
+  outputsSubmitted: number;
+  outputsTotal: number;
+  subjects: SubjectProgress[];
+  monitoring: ProgressMonitoring | null;
+}
+
+export interface ProgressLearner {
   id: string;
   name: string;
   residentId?: string;
   educationLevel: string;
-  /** Shown beneath the level. Omit (undefined) where the learner has none. */
-  idLabel?: string;
-  idValue?: string;
   levelLabel: string;
 }
 
 /**
- * The Overall Remark, from the number of Passed and Failed subjects.
- *
- * More subjects passed than failed is Passed; anything else (including a tie)
- * is Failed. With nothing marked yet there is no remark. Only marked subjects
- * count, and the remark recomputes on every change.
- */
-export function overallRemark(passed: number, failed: number): SubjectResultValue | null {
-  if (passed + failed === 0) return null;
-  return passed > failed ? 'Passed' : 'Failed';
-}
-
-/**
  * A legacy level name resolves to the level whose subject list it now shares,
- * so a record written before a rename is graded against the current list.
+ * so a record written before a rename is monitored against the current list.
  */
 export function subjectLevelFor(level: string): string {
   if (level === 'High School') return 'Junior High School';
@@ -70,178 +89,327 @@ export function subjectLevelFor(level: string): string {
   return level;
 }
 
-// System theme: slate #2F3E46 with the yellow #FFD100 accent, white boxes
-// with the light grey borders used by the rest of the forms.
-const BOX_BORDER = '#E5E7EB';
+/**
+ * Status colours, on the system's slate panel. Each status has its own hue and
+ * a dot, so it reads at a glance and never relies on colour alone (the word is
+ * always printed).
+ */
+const STATUS_STYLE: Record<ProgressStatus, { pill: string; dot: string; light: string }> = {
+  'Not Started': { pill: 'bg-white/10 text-gray-200 ring-white/20', dot: 'bg-gray-400', light: 'bg-gray-100 text-gray-700' },
+  Ongoing: { pill: 'bg-sky-400/15 text-sky-200 ring-sky-300/30', dot: 'bg-sky-400', light: 'bg-sky-100 text-sky-800' },
+  Submitted: { pill: 'bg-violet-400/15 text-violet-200 ring-violet-300/30', dot: 'bg-violet-400', light: 'bg-violet-100 text-violet-800' },
+  Completed: { pill: 'bg-emerald-400/15 text-emerald-200 ring-emerald-300/30', dot: 'bg-emerald-400', light: 'bg-emerald-100 text-emerald-800' },
+  Pending: { pill: 'bg-[#FFD100]/15 text-[#FFD100] ring-[#FFD100]/40', dot: 'bg-[#FFD100]', light: 'bg-amber-100 text-amber-800' },
+};
 
-/** The "Pass / Fail" box: the chosen word is underlined, as on the paper form. */
-function PassFailBox({
-  value,
-  onChange,
-  disabled,
-  busy,
-  label,
-}: {
-  value: SubjectResultValue | null;
-  onChange?: (next: SubjectResultValue | null) => void;
-  disabled?: boolean;
-  busy?: boolean;
-  label: string;
-}) {
-  const interactive = Boolean(onChange) && !disabled;
-  const word = (result: SubjectResultValue, text: string) => {
-    const chosen = value === result;
-    const colour = chosen ? (result === 'Passed' ? 'text-green-700' : 'text-red-600') : 'text-gray-500';
-    const classes = `${colour} ${chosen ? 'font-bold underline underline-offset-4 decoration-2' : 'font-medium'}`;
-    if (!interactive) return <span className={classes}>{text}</span>;
-    return (
-      <button
-        type="button"
-        aria-pressed={chosen}
-        aria-label={`${label}: ${text}`}
-        onClick={() => onChange?.(chosen ? null : result)}
-        className={`${classes} rounded px-1 hover:bg-gray-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#FFD100]`}
-      >
-        {text}
-      </button>
-    );
-  };
+export function statusStyle(status: ProgressStatus) {
+  return STATUS_STYLE[status] || STATUS_STYLE['Not Started'];
+}
 
+/** "3/5 submitted", "3 submitted", or "—" when nothing is recorded. */
+export function outputsLabel(submitted: number | null, total: number | null): string {
+  if (total !== null && total !== undefined) return `${submitted ?? 0}/${total} submitted`;
+  if (submitted !== null && submitted !== undefined) return `${submitted} submitted`;
+  return '—';
+}
+
+function StatusPill({ status }: { status: ProgressStatus }) {
+  const style = statusStyle(status);
   return (
-    <div
-      className="flex h-11 items-center justify-center gap-1 rounded-lg border bg-white px-3 text-[15px]"
-      style={{ borderColor: BOX_BORDER }}
-    >
-      {busy ? <Loader2 className="h-4 w-4 animate-spin text-gray-400" /> : (
-        <>
-          {word('Passed', 'Pass')}
-          <span className="text-gray-400">/</span>
-          {word('Failed', 'Fail')}
-        </>
+    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-semibold ring-1 ring-inset ${style.pill}`}>
+      <span className={`h-1.5 w-1.5 rounded-full ${style.dot}`} aria-hidden />
+      {status}
+    </span>
+  );
+}
+
+/** Counts per status, shown above the table. */
+export function StatusCounts({ counts, light = false }: { counts: Record<ProgressStatus, number>; light?: boolean }) {
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {PROGRESS_STATUSES.map((status) => (
+        <span
+          key={status}
+          className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${light ? statusStyle(status).light : `ring-1 ring-inset ${statusStyle(status).pill}`}`}
+        >
+          <span className={`h-1.5 w-1.5 rounded-full ${statusStyle(status).dot}`} aria-hidden />
+          {status} · {counts?.[status] ?? 0}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+const GRID = 'grid grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)_minmax(0,1fr)] items-center gap-3';
+
+/**
+ * The progress table: Subject / Learning Area · Status · Outputs — laid out
+ * after the reference (dark panel, bold header, one thin-ruled row per
+ * subject), in the system's slate with its yellow accent.
+ */
+export function ProgressTable({ subjects, emptyText }: { subjects: SubjectProgress[]; emptyText?: string }) {
+  return (
+    <div className="overflow-hidden rounded-xl border-b-4 border-[#FFD100] bg-[#2F3E46] shadow-md">
+      <div className={`${GRID} border-b border-white/15 px-4 py-3 text-sm font-bold text-white`}>
+        <span>Subject / Learning Area</span>
+        <span>Status</span>
+        <span>Outputs</span>
+      </div>
+      {subjects.length === 0 ? (
+        <p className="px-4 py-6 text-center text-sm text-gray-300">{emptyText || 'No subjects have been set for this level yet.'}</p>
+      ) : (
+        <ul>
+          {subjects.map((subject, index) => (
+            <li
+              key={subject.subjectId}
+              className={`${GRID} px-4 py-3 text-sm text-gray-100 ${index < subjects.length - 1 ? 'border-b border-white/10' : ''}`}
+            >
+              <span className="truncate" title={subject.name}>{subject.name}</span>
+              <span><StatusPill status={subject.status} /></span>
+              <span className="text-gray-200">{outputsLabel(subject.outputsSubmitted, subject.outputsTotal)}</span>
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );
 }
 
-export function EducationSubjectsDialog({
-  open,
-  onClose,
+const MONITORING_ROWS: { key: keyof ProgressMonitoring; label: string }[] = [
+  { key: 'modulesCompleted', label: 'Modules/Activities Completed' },
+  { key: 'modulesPending', label: 'Modules/Activities Pending' },
+  { key: 'outputsSubmitted', label: 'Outputs Submitted' },
+  { key: 'outputsNotSubmitted', label: 'Outputs Not Submitted' },
+  { key: 'participationNotes', label: 'Progress/Participation Notes' },
+  { key: 'concerns', label: 'Education-Related Concerns' },
+];
+
+/** The learner's Education Progress Monitoring record, read-only. */
+export function MonitoringDetails({ monitoring }: { monitoring: ProgressMonitoring | null }) {
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-4">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h4 className="flex items-center gap-2 text-sm font-bold text-[#2F3E46]">
+          <ClipboardList className="h-4 w-4" /> Education Progress Monitoring
+        </h4>
+        {monitoring && (
+          <span className="text-[11px] text-gray-500">
+            Date of Monitoring:{' '}
+            <span className="font-semibold text-[#2F3E46]">{monitoring.monitoringDate ? formatShortDate(monitoring.monitoringDate) : '—'}</span>
+            {monitoring.updatedBy ? ` · by ${monitoring.updatedBy}` : ''}
+          </span>
+        )}
+      </div>
+      {!monitoring ? (
+        <p className="text-xs italic text-gray-400">No monitoring has been recorded yet.</p>
+      ) : (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {MONITORING_ROWS.map(({ key, label }) => (
+            <div key={key} className={`rounded-lg bg-gray-50 px-3 py-2 ${key === 'participationNotes' || key === 'concerns' ? 'sm:col-span-2' : ''}`}>
+              <p className="text-[10px] font-bold uppercase tracking-wider text-gray-400">{label}</p>
+              <p className="mt-0.5 whitespace-pre-wrap text-sm text-[#2F3E46]">{String(monitoring[key] || '') || '—'}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Read-only Education Progress, from data already loaded (Child Record). */
+export function EducationProgressReadOnly({ progress }: { progress: LearnerProgress | null }) {
+  if (!progress) {
+    return <p className="text-xs italic text-gray-400">No education progress has been recorded yet.</p>;
+  }
+  return (
+    <div className="space-y-3">
+      {progress.total > 0 && <StatusCounts counts={progress.counts} light />}
+      <ProgressTable subjects={progress.subjects} emptyText="No subjects have been set for this learner's level yet." />
+      <MonitoringDetails monitoring={progress.monitoring} />
+    </div>
+  );
+}
+
+function manilaToday(): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila' }).format(new Date());
+}
+
+const EMPTY_MONITORING: ProgressMonitoring = {
+  monitoringDate: null,
+  modulesCompleted: '',
+  modulesPending: '',
+  outputsSubmitted: '',
+  outputsNotSubmitted: '',
+  participationNotes: '',
+  concerns: '',
+};
+
+interface DraftSubject {
+  subjectId: string;
+  name: string;
+  status: ProgressStatus;
+  outputsSubmitted: string;
+  outputsTotal: string;
+}
+
+const toDraft = (s: SubjectProgress): DraftSubject => ({
+  subjectId: s.subjectId,
+  name: s.name,
+  status: s.status,
+  outputsSubmitted: s.outputsSubmitted === null || s.outputsSubmitted === undefined ? '' : String(s.outputsSubmitted),
+  outputsTotal: s.outputsTotal === null || s.outputsTotal === undefined ? '' : String(s.outputsTotal),
+});
+
+/**
+ * The Education module's Education Progress view for one learner: the table,
+ * the monitoring record, the Educator's Edit, and (for whoever may create
+ * subjects) the level's subject list.
+ */
+export function EducationProgressPanel({
   learner,
-  canMark,
-  canManage,
+  canManageSubjects,
   onChanged,
 }: {
-  open: boolean;
-  onClose: () => void;
-  learner: SubjectsLearner | null;
-  /** May set a subject's Pass / Fail. */
-  canMark: boolean;
-  /** May add or remove subjects for the level (the Educator). */
-  canManage: boolean;
-  /** Called after a result or the subject list was saved, so other views refresh. */
+  learner: ProgressLearner;
+  /** May add or remove subjects for the level. */
+  canManageSubjects: boolean;
+  /** Called after progress or the subject list was saved, so other views refresh. */
   onChanged?: () => void;
 }) {
-  const [subjects, setSubjects] = useState<EducationSubject[]>([]);
-  const [results, setResults] = useState<SubjectResultRow[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState<LearnerProgress | null>(null);
+  const [canEdit, setCanEdit] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
-  const [savingSubjectId, setSavingSubjectId] = useState<string | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  const [editing, setEditing] = useState(false);
+  const [draftSubjects, setDraftSubjects] = useState<DraftSubject[]>([]);
+  const [draftMonitoring, setDraftMonitoring] = useState<ProgressMonitoring>(EMPTY_MONITORING);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
+
   const [managing, setManaging] = useState(false);
   const [newSubject, setNewSubject] = useState('');
   const [manageError, setManageError] = useState('');
   const [adding, setAdding] = useState(false);
 
-  const level = learner ? subjectLevelFor(learner.educationLevel) : '';
+  const level = subjectLevelFor(learner.educationLevel);
 
   useEffect(() => {
-    if (!open || !learner) return;
     let cancelled = false;
     setLoading(true);
     setLoadError('');
-    setManaging(false);
-    setNewSubject('');
-    setManageError('');
     (async () => {
       try {
-        const [subjectResult, resultResult] = await Promise.all([
-          request<{ data: EducationSubject[] }>(`/education-subjects?educationLevel=${encodeURIComponent(level)}`),
-          request<{ data: SubjectResultRow[] }>(`/education-subject-results?educationRecordId=${encodeURIComponent(learner.id)}`),
-        ]);
+        const res = await request<{ data: LearnerProgress; canEdit?: boolean }>(`/education-progress/${encodeURIComponent(learner.id)}`);
         if (cancelled) return;
-        setSubjects(Array.isArray(subjectResult.data) ? subjectResult.data : []);
-        setResults(Array.isArray(resultResult.data) ? resultResult.data : []);
+        setProgress(res.data || null);
+        setCanEdit(Boolean(res.canEdit));
       } catch (error) {
-        if (!cancelled) setLoadError(describeError(error, 'Could not load the subjects.'));
+        if (!cancelled) setLoadError(describeError(error, 'Could not load the education progress.'));
       } finally {
         if (!cancelled) setLoading(false);
       }
     })();
     return () => { cancelled = true; };
-  }, [open, learner?.id, level]);
+  }, [learner.id, reloadKey]);
 
-  const resultBySubject = useMemo(() => {
-    const map = new Map<string, SubjectResultRow>();
-    for (const row of results) map.set(row.subjectId, row);
-    return map;
-  }, [results]);
+  // A different learner never inherits an open edit.
+  useEffect(() => { setEditing(false); setManaging(false); setSaveError(''); }, [learner.id]);
 
-  // Only results for subjects still on the level's list count toward the remark.
-  const passed = subjects.filter((s) => resultBySubject.get(s.id)?.result === 'Passed').length;
-  const failed = subjects.filter((s) => resultBySubject.get(s.id)?.result === 'Failed').length;
-  const remark = overallRemark(passed, failed);
-  const marked = passed + failed;
+  const startEdit = () => {
+    if (!progress) return;
+    setDraftSubjects(progress.subjects.map(toDraft));
+    setDraftMonitoring(progress.monitoring
+      ? { ...EMPTY_MONITORING, ...progress.monitoring }
+      : { ...EMPTY_MONITORING, monitoringDate: manilaToday() });
+    setSaveError('');
+    setManaging(false);
+    setEditing(true);
+  };
 
-  const setResult = async (subject: EducationSubject, next: SubjectResultValue | null) => {
-    if (!learner) return;
-    const previous = results;
-    const existing = resultBySubject.get(subject.id);
-    // Optimistic, so the Overall Remark moves the moment a box is clicked.
-    setResults((rows) => {
-      const others = rows.filter((row) => row.subjectId !== subject.id);
-      return next
-        ? [...others, { ...(existing || { id: `tmp-${subject.id}`, educationRecordId: learner.id, subjectId: subject.id }), result: next }]
-        : others;
-    });
-    setSavingSubjectId(subject.id);
-    try {
-      if (!next) {
-        if (existing && !existing.id.startsWith('tmp-')) {
-          await deleteResource('education-subject-results', existing.id);
-        }
-      } else {
-        // The server updates the learner's existing result for this subject
-        // rather than adding a second one.
-        const saved = await createResource<SubjectResultRow>('education-subject-results', {
-          educationRecordId: learner.id,
-          residentId: learner.residentId || null,
-          subjectId: subject.id,
-          result: next,
-        } as SubjectResultRow);
-        setResults((rows) => rows.map((row) => (row.subjectId === subject.id ? saved : row)));
+  const setDraft = (subjectId: string, patch: Partial<DraftSubject>) =>
+    setDraftSubjects((rows) => rows.map((row) => (row.subjectId === subjectId ? { ...row, ...patch } : row)));
+
+  /** Fill the four list fields from the statuses set above (the Educator can then edit them). */
+  const fillFromSubjects = () => {
+    const names = (statuses: ProgressStatus[]) =>
+      draftSubjects.filter((s) => statuses.includes(s.status)).map((s) => s.name).join(', ');
+    const submitted = draftSubjects
+      .filter((s) => Number(s.outputsSubmitted) > 0)
+      .map((s) => `${s.name}: ${outputsLabel(Number(s.outputsSubmitted), s.outputsTotal === '' ? null : Number(s.outputsTotal))}`)
+      .join('\n');
+    const missing = draftSubjects
+      .filter((s) => s.outputsTotal !== '' && Number(s.outputsTotal) > Number(s.outputsSubmitted || 0))
+      .map((s) => `${s.name}: ${Number(s.outputsTotal) - Number(s.outputsSubmitted || 0)} not submitted`)
+      .join('\n');
+    setDraftMonitoring((m) => ({
+      ...m,
+      modulesCompleted: names(['Completed']),
+      modulesPending: names(['Pending', 'Ongoing', 'Not Started', 'Submitted']),
+      outputsSubmitted: submitted,
+      outputsNotSubmitted: missing,
+    }));
+  };
+
+  const save = async () => {
+    setSaveError('');
+    if (!draftMonitoring.monitoringDate) { setSaveError('Enter the Date of Monitoring.'); return; }
+    for (const row of draftSubjects) {
+      if (row.outputsSubmitted !== '' && row.outputsTotal !== '' && Number(row.outputsSubmitted) > Number(row.outputsTotal)) {
+        setSaveError(`${row.name}: outputs submitted cannot be more than the total outputs.`);
+        return;
       }
+    }
+    setSaving(true);
+    try {
+      const res = await request<{ data: LearnerProgress; canEdit?: boolean }>(`/education-progress/${encodeURIComponent(learner.id)}`, {
+        method: 'PUT',
+        body: JSON.stringify({
+          subjects: draftSubjects.map((row) => ({
+            subjectId: row.subjectId,
+            status: row.status,
+            outputsSubmitted: row.outputsSubmitted === '' ? null : Number(row.outputsSubmitted),
+            outputsTotal: row.outputsTotal === '' ? null : Number(row.outputsTotal),
+          })),
+          monitoring: {
+            monitoringDate: draftMonitoring.monitoringDate,
+            modulesCompleted: draftMonitoring.modulesCompleted,
+            modulesPending: draftMonitoring.modulesPending,
+            outputsSubmitted: draftMonitoring.outputsSubmitted,
+            outputsNotSubmitted: draftMonitoring.outputsNotSubmitted,
+            participationNotes: draftMonitoring.participationNotes,
+            concerns: draftMonitoring.concerns,
+          },
+        }),
+      });
+      setProgress(res.data || null);
+      setEditing(false);
       onChanged?.();
     } catch (error) {
-      setResults(previous);
-      void systemDialog.failure('Could not save the result', describeError(error, `The result for ${subject.name} was not changed.`));
+      setSaveError(describeError(error, 'The education progress was not saved.'));
     } finally {
-      setSavingSubjectId(null);
+      setSaving(false);
     }
   };
+
+  const subjectNames = useMemo(() => (progress?.subjects || []).map((s) => s.name.trim().toLowerCase()), [progress]);
 
   const addSubject = async () => {
     const name = newSubject.trim();
     setManageError('');
     if (!name) { setManageError('Type the subject name.'); return; }
-    if (subjects.some((s) => s.name.trim().toLowerCase() === name.toLowerCase())) {
+    if (subjectNames.includes(name.toLowerCase())) {
       setManageError(`"${name}" is already on this level's list.`);
       return;
     }
     setAdding(true);
     try {
-      const sortOrder = subjects.reduce((max, s) => Math.max(max, Number(s.sortOrder) || 0), 0) + 1;
-      const saved = await createResource<EducationSubject>('education-subjects', { educationLevel: level, name, sortOrder } as EducationSubject);
-      setSubjects((list) => [...list, saved]);
+      const list = await request<{ data: EducationSubject[] }>(`/education-subjects?educationLevel=${encodeURIComponent(level)}`);
+      const sortOrder = (Array.isArray(list.data) ? list.data : []).reduce((max, s) => Math.max(max, Number(s.sortOrder) || 0), 0) + 1;
+      await createResource<EducationSubject>('education-subjects', { educationLevel: level, name, sortOrder } as EducationSubject);
       setNewSubject('');
+      setReloadKey((k) => k + 1);
       onChanged?.();
     } catch (error) {
       setManageError(describeError(error, 'The subject was not added.'));
@@ -250,168 +418,241 @@ export function EducationSubjectsDialog({
     }
   };
 
-  const removeSubject = async (subject: EducationSubject) => {
+  const removeSubject = async (subject: SubjectProgress) => {
     const confirmed = await systemDialog.confirm({
       title: `Remove ${subject.name}?`,
-      description: `It will be removed from the subject list for ${learner?.levelLabel || level}, together with every learner's Pass / Fail in it.`,
+      description: `It will be removed from the subject list for ${learner.levelLabel}, together with every learner's progress in it.`,
       confirmLabel: 'Remove subject',
       tone: 'warning',
     });
     if (!confirmed) return;
     try {
-      await deleteResource('education-subjects', subject.id);
-      setSubjects((list) => list.filter((s) => s.id !== subject.id));
-      setResults((rows) => rows.filter((row) => row.subjectId !== subject.id));
+      await deleteResource('education-subjects', subject.subjectId);
+      setReloadKey((k) => k + 1);
       onChanged?.();
     } catch (error) {
       void systemDialog.failure('Could not remove the subject', describeError(error, `${subject.name} is still on the list.`));
     }
   };
 
+  if (loading && !progress) {
+    return (
+      <div className="flex items-center justify-center gap-2 rounded-xl bg-gray-50 py-8 text-sm text-gray-500">
+        <Loader2 className="h-4 w-4 animate-spin" /> Loading education progress…
+      </div>
+    );
+  }
+  if (loadError) {
+    return (
+      <div className="flex items-center gap-2 rounded-xl border border-red-100 bg-red-50 px-3 py-3 text-sm text-red-700">
+        <AlertCircle className="h-4 w-4 shrink-0" /> {loadError}
+      </div>
+    );
+  }
+  if (!progress) return null;
+
   return (
-    <Dialog open={open} onOpenChange={(next) => { if (!next) onClose(); }}>
-      <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto rounded-2xl">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 font-bold text-[#2F3E46]">
-            <BookOpen className="h-5 w-5" /> Subjects
-          </DialogTitle>
-        </DialogHeader>
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-sm font-bold text-[#2F3E46]">Education Progress</p>
+          <p className="text-[11px] text-gray-500">{learner.levelLabel} · {progress.total} subject{progress.total !== 1 ? 's' : ''}/module{progress.total !== 1 ? 's' : ''}</p>
+        </div>
+        {canEdit && !editing && (
+          <Button
+            size="sm"
+            className="gap-1.5 rounded-lg font-bold"
+            style={{ backgroundColor: '#FFD100', color: '#2F3E46' }}
+            onClick={startEdit}
+          >
+            <Pencil className="h-3.5 w-3.5" /> Edit Progress
+          </Button>
+        )}
+      </div>
 
-        {learner && (
-          <div className="space-y-4">
-            {/* The form itself — grey panel, white boxes, as on the reference. */}
-            <div className="rounded-xl border-b-4 border-[#FFD100] bg-[#2F3E46] p-4 shadow-md sm:p-5">
-              <div className="rounded-lg border bg-white px-4 py-2.5 text-xl font-bold text-[#2F3E46]" style={{ borderColor: BOX_BORDER }}>
-                {learner.name}
-              </div>
-
-              <div className="mt-3 flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 px-1 text-sm text-gray-300">
-                <span>
-                  Educational level: <span className="font-semibold text-white">{learner.levelLabel}</span>
-                </span>
-                {learner.idLabel && (
-                  <span className="text-xs sm:text-sm">
-                    {learner.idLabel}: <span className="font-semibold text-white">{learner.idValue || '—'}</span>
-                  </span>
-                )}
-              </div>
-
-              <div className="mt-3 space-y-2">
-                {loading ? (
-                  <div className="flex items-center justify-center gap-2 rounded-lg bg-white/10 py-6 text-sm text-gray-300">
-                    <Loader2 className="h-4 w-4 animate-spin" /> Loading subjects…
-                  </div>
-                ) : loadError ? (
-                  <div className="flex items-center gap-2 rounded-lg bg-white px-3 py-3 text-sm text-red-700">
-                    <AlertCircle className="h-4 w-4 shrink-0" /> {loadError}
-                  </div>
-                ) : subjects.length === 0 ? (
-                  <div className="rounded-lg bg-white/10 px-3 py-5 text-center text-sm text-gray-300">
-                    No subjects have been set for {learner.levelLabel} yet.
-                    {canManage ? ' Use “Manage subjects” below to add them.' : ' The Educator adds them.'}
-                  </div>
-                ) : (
-                  subjects.map((subject) => (
-                    <div key={subject.id} className="grid grid-cols-[minmax(0,1fr)_7.5rem] gap-2 sm:grid-cols-[minmax(0,1fr)_8.5rem] sm:gap-3">
-                      <div
-                        className="flex h-11 min-w-0 items-center gap-2 rounded-lg border bg-white px-3 text-[15px] font-medium text-[#2F3E46]"
-                        style={{ borderColor: BOX_BORDER }}
-                      >
-                        <span className="truncate" title={subject.name}>{subject.name}</span>
-                        {managing && (
-                          <button
-                            type="button"
-                            onClick={() => void removeSubject(subject)}
-                            className="ml-auto shrink-0 rounded p-1 text-red-500 hover:bg-red-50"
-                            aria-label={`Remove ${subject.name}`}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        )}
-                      </div>
-                      <PassFailBox
-                        label={subject.name}
-                        value={resultBySubject.get(subject.id)?.result || null}
-                        onChange={canMark ? (next) => void setResult(subject, next) : undefined}
-                        busy={savingSubjectId === subject.id}
-                      />
-                    </div>
-                  ))
-                )}
-              </div>
-
-              {/* Overall Remark — bottom right, computed, never clicked. */}
-              <div className="mt-5 flex flex-wrap items-center justify-end gap-3">
-                <div className="text-right text-xs text-gray-300">
-                  <p className="text-sm font-bold uppercase tracking-wide text-[#FFD100]">Overall Remark</p>
-                  <p>
-                    {remark ? (
-                      <span className={remark === 'Passed' ? 'font-semibold text-green-400' : 'font-semibold text-red-400'}>{remark}</span>
-                    ) : 'No results yet'}
-                    {subjects.length > 0 && ` · ${passed} passed, ${failed} failed${marked < subjects.length ? `, ${subjects.length - marked} not marked` : ''}`}
-                  </p>
-                </div>
-                <div className="w-[9.5rem]">
-                  <PassFailBox label="Overall remark" value={remark} />
-                </div>
-              </div>
+      {!editing ? (
+        <>
+          {progress.total > 0 && <StatusCounts counts={progress.counts} light />}
+          <ProgressTable
+            subjects={progress.subjects}
+            emptyText={`No subjects have been set for ${learner.levelLabel} yet.${canManageSubjects ? ' Use “Manage subjects” below to add them.' : ''}`}
+          />
+          <MonitoringDetails monitoring={progress.monitoring} />
+        </>
+      ) : (
+        <div className="space-y-4">
+          {/* Same table, with each subject's status and outputs editable. */}
+          <div className="overflow-hidden rounded-xl border-b-4 border-[#FFD100] bg-[#2F3E46] shadow-md">
+            <div className={`${GRID} border-b border-white/15 px-4 py-3 text-sm font-bold text-white`}>
+              <span>Subject / Learning Area</span>
+              <span>Status</span>
+              <span>Outputs <span className="font-normal text-gray-300">(submitted / total)</span></span>
             </div>
-
-            {canMark && subjects.length > 0 && (
-              <p className="text-[11px] text-gray-500">
-                Click Pass or Fail to mark a subject; click the underlined one again to clear it. The Overall Remark is
-                Passed when more subjects are passed than failed, and updates as you mark.
-              </p>
-            )}
-
-            {canManage && (
-              <div className="rounded-xl border border-gray-200 p-3">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-xs font-bold text-[#2F3E46]">
-                    Subjects for {learner.levelLabel}
-                    <span className="block font-normal text-gray-500">Shared by every learner at this level.</span>
-                  </p>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="shrink-0 gap-1.5 rounded-lg"
-                    onClick={() => { setManaging((v) => !v); setManageError(''); }}
-                  >
-                    <Settings2 className="h-3.5 w-3.5" /> {managing ? 'Done' : 'Manage subjects'}
-                  </Button>
-                </div>
-                {managing && (
-                  <div className="mt-3 space-y-1.5">
-                    <div className="flex gap-2">
-                      <Input
-                        value={newSubject}
-                        onChange={(e) => { setNewSubject(e.target.value); setManageError(''); }}
-                        onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void addSubject(); } }}
-                        placeholder="e.g. Mathematics"
-                        maxLength={150}
-                        className="rounded-xl"
-                        autoFocus
+            {draftSubjects.length === 0 ? (
+              <p className="px-4 py-6 text-center text-sm text-gray-300">No subjects have been set for this level yet.</p>
+            ) : (
+              <ul>
+                {draftSubjects.map((row, index) => (
+                  <li key={row.subjectId} className={`${GRID} px-4 py-2.5 text-sm text-gray-100 ${index < draftSubjects.length - 1 ? 'border-b border-white/10' : ''}`}>
+                    <span className="truncate" title={row.name}>{row.name}</span>
+                    <select
+                      value={row.status}
+                      onChange={(e) => setDraft(row.subjectId, { status: e.target.value as ProgressStatus })}
+                      aria-label={`${row.name} status`}
+                      className="h-8 w-full rounded-lg border-0 bg-white px-2 text-xs font-semibold text-[#2F3E46] focus:outline-none focus:ring-2 focus:ring-[#FFD100]"
+                    >
+                      {PROGRESS_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
+                    </select>
+                    <span className="flex items-center gap-1 text-xs text-gray-200">
+                      <input
+                        type="number"
+                        min={0}
+                        max={999}
+                        inputMode="numeric"
+                        value={row.outputsSubmitted}
+                        onChange={(e) => setDraft(row.subjectId, { outputsSubmitted: e.target.value.replace(/[^0-9]/g, '') })}
+                        aria-label={`${row.name} outputs submitted`}
+                        className="h-8 w-11 rounded-lg border-0 bg-white px-1 text-center text-xs font-semibold text-[#2F3E46] focus:outline-none focus:ring-2 focus:ring-[#FFD100]"
                       />
-                      <Button
-                        type="button"
-                        onClick={() => void addSubject()}
-                        disabled={adding}
-                        className="shrink-0 gap-1.5 rounded-xl font-bold"
-                        style={{ backgroundColor: '#FFD100', color: '#2F3E46' }}
-                      >
-                        <Plus className="h-4 w-4" /> Add
-                      </Button>
-                    </div>
-                    {manageError && <p className="text-xs text-red-600">{manageError}</p>}
-                    <p className="text-[11px] text-gray-400">Use the bin beside a subject to remove it from this level.</p>
-                  </div>
-                )}
-              </div>
+                      /
+                      <input
+                        type="number"
+                        min={0}
+                        max={999}
+                        inputMode="numeric"
+                        value={row.outputsTotal}
+                        onChange={(e) => setDraft(row.subjectId, { outputsTotal: e.target.value.replace(/[^0-9]/g, '') })}
+                        aria-label={`${row.name} total outputs`}
+                        className="h-8 w-11 rounded-lg border-0 bg-white px-1 text-center text-xs font-semibold text-[#2F3E46] focus:outline-none focus:ring-2 focus:ring-[#FFD100]"
+                      />
+                    </span>
+                  </li>
+                ))}
+              </ul>
             )}
           </div>
-        )}
-      </DialogContent>
-    </Dialog>
+
+          {/* The monitoring record. */}
+          <div className="space-y-3 rounded-xl border border-gray-200 bg-white p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h4 className="flex items-center gap-2 text-sm font-bold text-[#2F3E46]">
+                <ClipboardList className="h-4 w-4" /> Education Progress Monitoring
+              </h4>
+              {draftSubjects.length > 0 && (
+                <Button type="button" variant="outline" size="sm" className="gap-1.5 rounded-lg text-xs" onClick={fillFromSubjects}>
+                  <Wand2 className="h-3.5 w-3.5" /> Fill from subject statuses
+                </Button>
+              )}
+            </div>
+            <div className="max-w-[12rem]">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-gray-500" htmlFor="monitoring-date">Date of Monitoring *</label>
+              <Input
+                id="monitoring-date"
+                type="date"
+                value={draftMonitoring.monitoringDate || ''}
+                onChange={(e) => setDraftMonitoring((m) => ({ ...m, monitoringDate: e.target.value }))}
+                className="mt-1 rounded-lg border border-gray-200 bg-gray-50"
+              />
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {MONITORING_ROWS.map(({ key, label }) => (
+                <div key={key} className={key === 'participationNotes' || key === 'concerns' ? 'sm:col-span-2' : ''}>
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-gray-500" htmlFor={`monitoring-${key}`}>{label}</label>
+                  <Textarea
+                    id={`monitoring-${key}`}
+                    value={String(draftMonitoring[key] || '')}
+                    onChange={(e) => setDraftMonitoring((m) => ({ ...m, [key]: e.target.value }))}
+                    rows={2}
+                    maxLength={5000}
+                    className="mt-1 rounded-lg border border-gray-200 bg-gray-50 text-sm"
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {saveError && (
+            <p className="flex items-center gap-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">
+              <AlertCircle className="h-4 w-4 shrink-0" /> {saveError}
+            </p>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button variant="outline" className="gap-1.5 rounded-lg" onClick={() => { setEditing(false); setSaveError(''); }} disabled={saving}>
+              <X className="h-4 w-4" /> Cancel
+            </Button>
+            <Button
+              className="gap-1.5 rounded-lg font-bold"
+              style={{ backgroundColor: '#2F3E46', color: 'white' }}
+              onClick={() => void save()}
+              disabled={saving}
+            >
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Save Progress
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {canManageSubjects && !editing && (
+        <div className="rounded-xl border border-gray-200 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs font-bold text-[#2F3E46]">
+              Subjects for {learner.levelLabel}
+              <span className="block font-normal text-gray-500">Shared by every learner at this level.</span>
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="shrink-0 gap-1.5 rounded-lg"
+              onClick={() => { setManaging((v) => !v); setManageError(''); }}
+            >
+              <Settings2 className="h-3.5 w-3.5" /> {managing ? 'Done' : 'Manage subjects'}
+            </Button>
+          </div>
+          {managing && (
+            <div className="mt-3 space-y-2">
+              {progress.subjects.length > 0 && (
+                <ul className="space-y-1">
+                  {progress.subjects.map((subject) => (
+                    <li key={subject.subjectId} className="flex items-center justify-between gap-2 rounded-lg bg-gray-50 px-3 py-1.5 text-sm text-[#2F3E46]">
+                      <span className="truncate">{subject.name}</span>
+                      <button
+                        type="button"
+                        onClick={() => void removeSubject(subject)}
+                        className="shrink-0 rounded p-1 text-red-500 hover:bg-red-50"
+                        aria-label={`Remove ${subject.name}`}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <div className="flex gap-2">
+                <Input
+                  value={newSubject}
+                  onChange={(e) => { setNewSubject(e.target.value); setManageError(''); }}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void addSubject(); } }}
+                  placeholder="e.g. Mathematics"
+                  maxLength={150}
+                  className="rounded-xl"
+                  autoFocus
+                />
+                <Button
+                  type="button"
+                  onClick={() => void addSubject()}
+                  disabled={adding}
+                  className="shrink-0 gap-1.5 rounded-xl font-bold"
+                  style={{ backgroundColor: '#FFD100', color: '#2F3E46' }}
+                >
+                  <Plus className="h-4 w-4" /> Add
+                </Button>
+              </div>
+              {manageError && <p className="text-xs text-red-600">{manageError}</p>}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

@@ -29,7 +29,7 @@ import {
 } from 'lucide-react';
 import { isActiveResident, isClosedResident } from '@/utils/residentStatus';
 import { usePermissions } from '@/app/hooks/usePermissions';
-import { EducationSubjectsDialog, type SubjectsLearner } from './EducationSubjects';
+import { EducationProgressPanel, type LearnerProgress } from './EducationSubjects';
 
 // ── TYPES ────────────────────────────────────────────────────────────────────
 
@@ -71,19 +71,12 @@ export interface EducationFile {
 }
 
 /**
- * A learner's subject results and Overall Remark, computed by the API from the
- * stored subject results (`GET /education-subject-results/summary`). The card,
- * the Passed / Failed tiles and Child Record → Education all read this.
+ * A learner's Education Progress (each subject's progress status and the
+ * monitoring record), computed by the API from the stored rows
+ * (`GET /education-progress/summary`). The card, the progress tiles and
+ * Child Record → Education all read the same rows.
  */
-export interface SubjectSummary {
-  educationRecordId: string;
-  residentId: string | null;
-  passed: number;
-  failed: number;
-  total: number;
-  marked: number;
-  overall: 'Passed' | 'Failed' | null;
-}
+export type SubjectSummary = LearnerProgress;
 
 export interface Student {
   id: string;
@@ -546,25 +539,6 @@ export function Education() {
   const { can } = usePermissions();
   const [activeTab, setActiveTab] = useState('masterlist');
 
-  // Subjects — Pass / Fail per subject. The Educator marks results (edit) and
-  // defines each level's subject list (create).
-  const [subjectsStudent, setSubjectsStudent] = useState<Student | null>(null);
-  const openSubjects = (s: Student) => setSubjectsStudent(s);
-  const subjectsLearner: SubjectsLearner | null = subjectsStudent
-    ? (() => {
-        const identifier = learnerIdentifier(subjectsStudent);
-        return {
-          id: subjectsStudent.id,
-          name: subjectsStudent.name,
-          residentId: subjectsStudent.residentId,
-          educationLevel: subjectsStudent.educationLevel,
-          levelLabel: levelLabel(subjectsStudent.educationLevel),
-          idLabel: identifier?.label,
-          idValue: identifier?.value,
-        };
-      })()
-    : null;
-
   /**
    * A learner whose resident is no longer in the shelter.
    *
@@ -618,16 +592,16 @@ export function Education() {
   // School Visit Reports
   const [visitReports, setVisitReports] = useState<SchoolVisitReport[]>(() => loadVisits());
 
-  // Overall Remark per learner, from the database.
+  // Education Progress per learner, from the database.
   const [subjectSummary, setSubjectSummary] = useState<Record<string, SubjectSummary>>({});
   const loadSubjectSummary = async () => {
     try {
-      const res = await request<{ success: boolean; data: SubjectSummary[] }>('/education-subject-results/summary');
+      const res = await request<{ success: boolean; data: SubjectSummary[] }>('/education-progress/summary');
       const map: Record<string, SubjectSummary> = {};
       for (const row of Array.isArray(res.data) ? res.data : []) map[row.educationRecordId] = row;
       setSubjectSummary(map);
     } catch (error) {
-      console.warn('Education subject summary could not be loaded.', error);
+      console.warn('Education progress could not be loaded.', error);
     }
   };
   useEffect(() => { void loadSubjectSummary(); }, []);
@@ -995,11 +969,11 @@ export function Education() {
   const totalVisits = visitReports.length; // each report = 1 visit
 
 
-  // Learners on the current roster by Overall Remark. Each learner is counted
-  // once, and a learner with no subject marked yet is counted in neither.
+  // Subjects/modules on the current roster by progress status, from the
+  // stored Education Progress (each learner's own subjects, counted once).
   const currentRoster = students.filter(s => !isPastLearner(s));
-  const passCount = currentRoster.filter(s => subjectSummary[s.id]?.overall === 'Passed').length;
-  const failCount = currentRoster.filter(s => subjectSummary[s.id]?.overall === 'Failed').length;
+  const completedCount = currentRoster.reduce((sum, s) => sum + (subjectSummary[s.id]?.counts?.Completed || 0), 0);
+  const pendingCount = currentRoster.reduce((sum, s) => sum + (subjectSummary[s.id]?.counts?.Pending || 0), 0);
 
   const handleSaveProgress = () => {
     if (!progressStudent || !progressForm.subject.trim() || !progressForm.result) return;
@@ -1307,6 +1281,12 @@ export function Education() {
   };
 
   // ── VIEW ──────────────────────────────────────────────────────────────────
+  // The card's Education Progress button: the same View, on its progress tab.
+  const openProgress = (s: Student) => {
+    setViewStudent(s);
+    setProfileTab('progress');
+    setIsViewOpen(true);
+  };
   const openView = (s: Student) => {
     setViewStudent(s);
     setProfileTab('info');
@@ -1403,14 +1383,14 @@ export function Education() {
             <p className="text-[10px] text-gray-400">Total conducted</p>
           </div>
           <div className="bg-white/10 rounded-xl p-3 border border-white/10">
-            <p className="text-[10px] font-bold text-[#4ade80] uppercase tracking-wider">Passed</p>
-            <p className="text-2xl font-black text-white mt-0.5">{passCount}</p>
-            <p className="text-[10px] text-gray-400">Students passed</p>
+            <p className="text-[10px] font-bold text-[#4ade80] uppercase tracking-wider">Completed</p>
+            <p className="text-2xl font-black text-white mt-0.5">{completedCount}</p>
+            <p className="text-[10px] text-gray-400">Subjects/modules completed</p>
           </div>
           <div className="bg-white/10 rounded-xl p-3 border border-white/10">
-            <p className="text-[10px] font-bold text-[#f87171] uppercase tracking-wider">Failed</p>
-            <p className="text-2xl font-black text-white mt-0.5">{failCount}</p>
-            <p className="text-[10px] text-gray-400">Students failed</p>
+            <p className="text-[10px] font-bold text-[#FFD100] uppercase tracking-wider">Pending</p>
+            <p className="text-2xl font-black text-white mt-0.5">{pendingCount}</p>
+            <p className="text-[10px] text-gray-400">Subjects/modules pending</p>
           </div>
         </div>
         <div className="flex gap-2 mt-4 flex-wrap items-center">
@@ -1448,15 +1428,6 @@ export function Education() {
         residents={reportResidentOptions}
         program={EDUCATION_PROGRESS_PROGRAM}
         onSubmitted={() => { void refreshData(); }}
-      />
-
-      <EducationSubjectsDialog
-        open={Boolean(subjectsStudent)}
-        onClose={() => setSubjectsStudent(null)}
-        learner={subjectsLearner}
-        canMark={can('Education', 'edit')}
-        canManage={can('Education', 'create')}
-        onChanged={() => { void loadSubjectSummary(); }}
       />
 
       {/* Toolbar */}
@@ -1556,7 +1527,7 @@ export function Education() {
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filtered.map(student => <StudentCard key={student.id} student={student} onView={openView} onEdit={openEdit} onUpload={openUpload} onSubjects={openSubjects} summary={subjectSummary[student.id]} onDelete={s => { setDeleteTarget(s); setDeleteConfirm(''); setIsDeleteOpen(true); }} />)}
+              {filtered.map(student => <StudentCard key={student.id} student={student} onView={openView} onEdit={openEdit} onUpload={openUpload} onSubjects={openProgress} summary={subjectSummary[student.id]} onDelete={s => { setDeleteTarget(s); setDeleteConfirm(''); setIsDeleteOpen(true); }} />)}
             </div>
           )}
         </TabsContent>
@@ -1848,16 +1819,6 @@ export function Education() {
                         <span className="text-xs text-gray-500">· {viewStudent.id}</span>
                       </div>
                     </div>
-                    {/* Subject results live behind this button — the old
-                        Passed / Failed tab beside Personal Info is gone. */}
-                    <Button
-                      size="sm"
-                      className="shrink-0 gap-1.5 rounded-lg font-bold"
-                      style={{ backgroundColor: '#2F3E46', color: 'white' }}
-                      onClick={() => openSubjects(viewStudent)}
-                    >
-                      <BookOpen className="w-3.5 h-3.5" /> Subjects
-                    </Button>
                   </div>
                 </div>
 
@@ -1865,6 +1826,7 @@ export function Education() {
                   <Tabs value={profileTab} onValueChange={setProfileTab}>
                     <TabsList className="mb-4">
                       <TabsTrigger value="info">Personal Info</TabsTrigger>
+                      <TabsTrigger value="progress">Education Progress</TabsTrigger>
                       <TabsTrigger value="files">
                         Files ({viewStudent.files.length})
                       </TabsTrigger>
@@ -1900,6 +1862,23 @@ export function Education() {
                           </div>
                         )}
                       </div>
+                    </TabsContent>
+
+                    {/* Education Progress Monitoring (replaces Pass / Fail): each
+                        subject's status and outputs, the monitoring record, and
+                        the Educator's Edit. Read from and saved to the API. */}
+                    <TabsContent value="progress">
+                      <EducationProgressPanel
+                        learner={{
+                          id: viewStudent.id,
+                          name: viewStudent.name,
+                          residentId: viewStudent.residentId,
+                          educationLevel: viewStudent.educationLevel,
+                          levelLabel: levelLabel(viewStudent.educationLevel),
+                        }}
+                        canManageSubjects={can('Education', 'create')}
+                        onChanged={() => { void loadSubjectSummary(); }}
+                      />
                     </TabsContent>
 
                     <TabsContent value="files">
@@ -2308,6 +2287,16 @@ export function Education() {
 
 // ── STUDENT CARD ──────────────────────────────────────────────────────────────
 
+// The card's progress bar: one segment per status, in the order a learner
+// moves through them, in the same colours as the Education Progress table.
+const PROGRESS_BAR: { status: keyof LearnerProgress['counts']; color: string }[] = [
+  { status: 'Completed', color: '#10B981' },
+  { status: 'Submitted', color: '#8B5CF6' },
+  { status: 'Ongoing', color: '#38BDF8' },
+  { status: 'Pending', color: '#FFD100' },
+  { status: 'Not Started', color: '#9CA3AF' },
+];
+
 function StudentCard({
   student, onView, onEdit, onUpload, onSubjects, onDelete, summary,
 }: {
@@ -2358,18 +2347,27 @@ function StudentCard({
           <p><span className="font-semibold text-gray-600">Files:</span> {student.files.length} document{student.files.length !== 1 ? 's' : ''}</p>
         </div>
 
-        {/* Overall Remark from the subject results (Subjects button). */}
-        <div className="mb-3 flex items-center justify-between gap-2 rounded-lg bg-gray-50 px-3 py-2">
-          <span className="text-[11px] font-semibold text-gray-600">Overall Remark</span>
-          {summary?.overall ? (
-            <span className="flex items-center gap-1.5">
-              <span className="text-[10px] text-gray-400">{summary.passed}P · {summary.failed}F{summary.total > summary.marked ? ` · ${summary.total - summary.marked} unmarked` : ''}</span>
-              <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${summary.overall === 'Passed' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                {summary.overall}
-              </span>
-            </span>
-          ) : (
-            <span className="text-[10px] italic text-gray-400">No results yet</span>
+        {/* Education Progress, from the stored progress (View → Education Progress). */}
+        <div className="mb-3 rounded-lg bg-gray-50 px-3 py-2">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-[11px] font-semibold text-gray-600">Education Progress</span>
+            {summary && summary.total > 0 ? (
+              <span className="text-[10px] font-bold text-[#2F3E46]">{summary.counts.Completed}/{summary.total} completed</span>
+            ) : (
+              <span className="text-[10px] italic text-gray-400">No subjects yet</span>
+            )}
+          </div>
+          {summary && summary.total > 0 && (
+            <>
+              <div className="mt-1.5 flex h-1.5 overflow-hidden rounded-full bg-gray-200" aria-hidden>
+                {PROGRESS_BAR.map(({ status, color }) => summary.counts[status] > 0 && (
+                  <span key={status} style={{ width: `${(summary.counts[status] / summary.total) * 100}%`, backgroundColor: color }} />
+                ))}
+              </div>
+              <p className="mt-1 text-[10px] text-gray-500">
+                {PROGRESS_BAR.filter(({ status }) => summary.counts[status] > 0).map(({ status }) => `${summary.counts[status]} ${status.toLowerCase()}`).join(' · ')}
+              </p>
+            </>
           )}
         </div>
 
@@ -2380,7 +2378,7 @@ function StudentCard({
           <Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-[#FFD100]/20" onClick={() => onEdit(student)} title="Edit">
             <Edit className="w-3.5 h-3.5 text-[#2F3E46]" />
           </Button>
-          <Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-amber-50" onClick={() => onSubjects(student)} title="Subjects (Pass / Fail)" aria-label="Subjects">
+          <Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-amber-50" onClick={() => onSubjects(student)} title="Education Progress" aria-label="Education Progress">
             <BookOpen className="w-3.5 h-3.5 text-amber-600" />
           </Button>
           <Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-green-50" onClick={() => onUpload(student)} title="Upload File">
