@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import { isActiveResident, isClosedResident } from '@/utils/residentStatus';
 import { usePermissions } from '@/app/hooks/usePermissions';
+import { formatShortDate } from '@/utils/dateFormatter';
 import { EducationProgressPanel, type LearnerProgress } from './EducationSubjects';
 
 // ── TYPES ────────────────────────────────────────────────────────────────────
@@ -101,6 +102,9 @@ export interface Student {
    * Used to scope the Quarterly Education Report to an educator's own learners.
    */
   createdBy?: string;
+  /** Set when the Educator completed the learner and moved them to the Archive. */
+  archivedAt?: string | null;
+  archivedBy?: string | null;
 }
 
 /**
@@ -559,11 +563,19 @@ export function Education() {
     return !isActiveResident(status);
   };
 
-  const pastLearnerCount = students.filter(isPastLearner).length;
+  /**
+   * The Archive: a learner the Educator completed (every subject Completed with
+   * all outputs submitted — stamped `archivedAt` by the API), and, as before,
+   * a learner whose resident has left the shelter. Nothing in it is deleted;
+   * it is simply off the active list.
+   */
+  const isArchived = (student: Student) => Boolean(student.archivedAt) || isPastLearner(student);
+
+  const pastLearnerCount = students.filter(isArchived).length;
   const currentLearnerCount = students.length - pastLearnerCount;
 
   /** The half of the roll the master list is showing, before search and level. */
-  const rosterStudents = students.filter(s => (rosterView === 'past') === isPastLearner(s));
+  const rosterStudents = students.filter(s => (rosterView === 'past') === isArchived(s));
 
   // Student dialog
   const [isStudentDialogOpen, setIsStudentDialogOpen] = useState(false);
@@ -965,13 +977,13 @@ export function Education() {
   };
 
   // Stats
-  const totalLearners = students.filter(s => s.status === 'Active' && !isPastLearner(s)).length;
+  const totalLearners = students.filter(s => s.status === 'Active' && !isArchived(s)).length;
   const totalVisits = visitReports.length; // each report = 1 visit
 
 
   // Subjects/modules on the current roster by progress status, from the
   // stored Education Progress (each learner's own subjects, counted once).
-  const currentRoster = students.filter(s => !isPastLearner(s));
+  const currentRoster = students.filter(s => !isArchived(s));
   const completedCount = currentRoster.reduce((sum, s) => sum + (subjectSummary[s.id]?.counts?.Completed || 0), 0);
   const pendingCount = currentRoster.reduce((sum, s) => sum + (subjectSummary[s.id]?.counts?.Pending || 0), 0);
 
@@ -1281,11 +1293,37 @@ export function Education() {
   };
 
   // ── VIEW ──────────────────────────────────────────────────────────────────
-  // The card's Education Progress button: the same View, on its progress tab.
-  const openProgress = (s: Student) => {
-    setViewStudent(s);
-    setProfileTab('progress');
-    setIsViewOpen(true);
+  // The card's Edit Education Progress button — the one place progress is
+  // edited (the View page's Education Progress tab is read-only).
+  const [progressEditStudent, setProgressEditStudent] = useState<Student | null>(null);
+  const openProgress = (s: Student) => setProgressEditStudent(s);
+
+  // Complete: offered once every subject is Completed with all outputs
+  // submitted; moves the learner to the Archive. The API checks the same rule.
+  const [completingId, setCompletingId] = useState<string | null>(null);
+  const handleComplete = async (s: Student) => {
+    if (!subjectSummary[s.id]?.complete) return;
+    const confirmed = await systemDialog.confirm({
+      title: `Complete ${s.name}?`,
+      description: 'All subjects/modules and outputs are completed. The student will be moved from the active list to the Archive. Their education record, progress, monitoring notes and files are kept and stay viewable there.',
+      confirmLabel: 'Complete and archive',
+    });
+    if (!confirmed) return;
+    setCompletingId(s.id);
+    try {
+      const res = await request<{ success: boolean; data: EducationRecordWire; message?: string }>(
+        `/education-progress/${encodeURIComponent(s.id)}/complete`,
+        { method: 'POST' },
+      );
+      const archivedRecord = normalizeStudent(res.data);
+      persist(students.map(row => (row.id === archivedRecord.id ? archivedRecord : row)));
+      void loadSubjectSummary();
+      void systemDialog.success('Student completed', res.message || `${s.name} was moved to the Archive.`);
+    } catch (error) {
+      void systemDialog.failure('Could not complete the student', describeError(error, `${s.name} was not moved to the Archive.`));
+    } finally {
+      setCompletingId(null);
+    }
   };
   const openView = (s: Student) => {
     setViewStudent(s);
@@ -1473,7 +1511,7 @@ export function Education() {
           <div className="mb-3 inline-flex rounded-lg border border-gray-200 p-0.5">
             {([
               ['current', `Current (${currentLearnerCount})`],
-              ['past', `Past learners (${pastLearnerCount})`],
+              ['past', `Archive (${pastLearnerCount})`],
             ] as const).map(([key, label]) => (
               <button
                 key={key}
@@ -1527,7 +1565,7 @@ export function Education() {
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {filtered.map(student => <StudentCard key={student.id} student={student} onView={openView} onEdit={openEdit} onUpload={openUpload} onSubjects={openProgress} summary={subjectSummary[student.id]} onDelete={s => { setDeleteTarget(s); setDeleteConfirm(''); setIsDeleteOpen(true); }} />)}
+              {filtered.map(student => <StudentCard key={student.id} student={student} onView={openView} onEdit={openEdit} onUpload={openUpload} onSubjects={openProgress} summary={subjectSummary[student.id]} archived={isArchived(student)} canComplete={user?.role === 'educator'} completing={completingId === student.id} onComplete={s => { void handleComplete(s); }} onDelete={s => { setDeleteTarget(s); setDeleteConfirm(''); setIsDeleteOpen(true); }} />)}
             </div>
           )}
         </TabsContent>
@@ -1799,6 +1837,37 @@ export function Education() {
         </DialogContent>
       </Dialog>
 
+      {/* ── EDIT EDUCATION PROGRESS (the card's button) ── */}
+      <Dialog open={Boolean(progressEditStudent)} onOpenChange={open => { if (!open) setProgressEditStudent(null); }}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 font-bold text-[#2F3E46]">
+              <BookOpen className="h-5 w-5" /> Edit Education Progress
+            </DialogTitle>
+          </DialogHeader>
+          {progressEditStudent && (
+            <div className="space-y-4">
+              <div className="rounded-xl bg-gray-50 px-4 py-3">
+                <p className="font-bold text-[#2F3E46]">{progressEditStudent.name}</p>
+                <p className="text-xs text-gray-500">{levelLabel(progressEditStudent.educationLevel)} · {progressEditStudent.id}</p>
+              </div>
+              <EducationProgressPanel
+                startInEdit
+                learner={{
+                  id: progressEditStudent.id,
+                  name: progressEditStudent.name,
+                  residentId: progressEditStudent.residentId,
+                  educationLevel: progressEditStudent.educationLevel,
+                  levelLabel: levelLabel(progressEditStudent.educationLevel),
+                }}
+                canManageSubjects={can('Education', 'create')}
+                onChanged={() => { void loadSubjectSummary(); }}
+              />
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
       {/* ── VIEW / PROFILE DIALOG ── */}
       <Dialog open={isViewOpen} onOpenChange={open => { if (!open) setIsViewOpen(false); }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl p-0">
@@ -1868,7 +1937,10 @@ export function Education() {
                         subject's status and outputs, the monitoring record, and
                         the Educator's Edit. Read from and saved to the API. */}
                     <TabsContent value="progress">
+                      {/* View only: progress is edited from the card's Edit
+                          Education Progress button. */}
                       <EducationProgressPanel
+                        readOnly
                         learner={{
                           id: viewStudent.id,
                           name: viewStudent.name,
@@ -2299,9 +2371,16 @@ const PROGRESS_BAR: { status: keyof LearnerProgress['counts']; color: string }[]
 
 function StudentCard({
   student, onView, onEdit, onUpload, onSubjects, onDelete, summary,
+  archived = false, canComplete = false, completing = false, onComplete,
 }: {
   student: Student;
   summary?: SubjectSummary;
+  /** In the Archive (completed, or the resident has left). */
+  archived?: boolean;
+  /** The Educator — the only role that completes a student. */
+  canComplete?: boolean;
+  completing?: boolean;
+  onComplete?: (s: Student) => void;
   onView: (s: Student) => void;
   onEdit: (s: Student) => void;
   onUpload: (s: Student) => void;
@@ -2378,7 +2457,7 @@ function StudentCard({
           <Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-[#FFD100]/20" onClick={() => onEdit(student)} title="Edit">
             <Edit className="w-3.5 h-3.5 text-[#2F3E46]" />
           </Button>
-          <Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-amber-50" onClick={() => onSubjects(student)} title="Education Progress" aria-label="Education Progress">
+          <Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-amber-50" onClick={() => onSubjects(student)} title="Edit Education Progress" aria-label="Edit Education Progress">
             <BookOpen className="w-3.5 h-3.5 text-amber-600" />
           </Button>
           <Button size="icon" variant="ghost" className="h-8 w-8 hover:bg-green-50" onClick={() => onUpload(student)} title="Upload File">
@@ -2388,6 +2467,36 @@ function StudentCard({
             <Trash2 className="w-3.5 h-3.5 text-red-400" />
           </Button>
         </div>
+
+        {/* Complete: gray and disabled until every subject/module is Completed
+            with all outputs submitted, then green. Moves the student to the
+            Archive. An archived student shows when it happened instead. */}
+        {archived ? (
+          <div className="mt-2 flex items-center justify-center gap-1.5 rounded-lg bg-gray-100 px-3 py-1.5 text-[11px] font-semibold text-gray-600">
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            {student.archivedAt
+              ? `Archived · Completed ${formatShortDate(student.archivedAt)}${student.archivedBy ? ` by ${student.archivedBy}` : ''}`
+              : 'Archived'}
+          </div>
+        ) : (
+          <Button
+            size="sm"
+            className={`mt-2 w-full gap-1.5 rounded-lg text-xs font-bold ${
+              summary?.complete
+                ? 'bg-green-600 text-white hover:bg-green-700'
+                : 'bg-gray-200 text-gray-500 hover:bg-gray-200'
+            }`}
+            disabled={!summary?.complete || !canComplete || completing}
+            onClick={() => onComplete?.(student)}
+            title={
+              !summary?.complete
+                ? 'Available once every subject/module is Completed with all outputs submitted'
+                : canComplete ? 'Complete and move to Archive' : 'Only the Educator can complete a student'
+            }
+          >
+            <CheckCircle2 className="h-3.5 w-3.5" /> {completing ? 'Completing…' : 'Complete'}
+          </Button>
+        )}
       </CardContent>
     </Card>
   );

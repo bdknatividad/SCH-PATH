@@ -790,6 +790,9 @@ const educationModule = requireModule('Education');
 router.get('/education-progress/summary', authenticate, educationModule, educationProgress.summary);
 router.get('/education-progress/:educationRecordId', authenticate, educationModule, educationProgress.getOne);
 router.put('/education-progress/:educationRecordId', authenticate, educationModule, requirePermission('Education', 'edit'), educationProgress.save);
+// Complete: archive a learner whose every subject is Completed with all its
+// outputs submitted. The Educator's alone, checked again on the server.
+router.post('/education-progress/:educationRecordId/complete', authenticate, educationModule, requirePermission('Education', 'edit'), educationProgress.complete);
 
 router.use('/education-records', authenticate, educationModule);
 router.get('/education-records', educationResources.educationRecords.getAll);
@@ -798,9 +801,25 @@ router.get('/education-records/:id', educationResources.educationRecords.getById
 // a student; the add then updates their existing learner record rather than
 // creating a second one for the same resident. Uploaded files and the original
 // author are never overwritten by that update.
+/**
+ * A learner reaches the Archive only through Complete (POST
+ * /education-progress/:id/complete), which checks that their Education Progress
+ * is complete. Every other write has the archive fields removed, so neither the
+ * Add / Edit Student form nor a direct API call can archive — or un-archive —
+ * a learner.
+ */
+function stripArchiveFields(req, res, next) {
+  if (req.body && typeof req.body === 'object') {
+    delete req.body.archivedAt;
+    delete req.body.archivedBy;
+  }
+  next();
+}
+
 router.post(
   '/education-records',
   requirePermission('Education', 'create'),
+  stripArchiveFields,
   requireResidentInCare,
   requireEducationPlacement,
   requireValidLrn,
@@ -812,7 +831,7 @@ router.post(
   educationResources.educationRecords.create,
 );
 router.post('/education-records/:id/files', requirePermission('Education', 'edit'), uploadEducationFile);
-router.put('/education-records/:id', requirePermission('Education', 'edit'), requireEducationPlacement, requireValidLrn, notifyEducationWrite('education_records', 'updated a learner'), educationResources.educationRecords.update);
+router.put('/education-records/:id', requirePermission('Education', 'edit'), stripArchiveFields, requireEducationPlacement, requireValidLrn, notifyEducationWrite('education_records', 'updated a learner'), educationResources.educationRecords.update);
 router.delete('/education-records/:id', requirePermission('Education', 'delete'), notifyEducationWrite('education_records', 'removed a learner'), educationResources.educationRecords.delete);
 
 router.use('/education-progress-reports', authenticate, educationModule);

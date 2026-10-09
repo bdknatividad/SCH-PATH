@@ -42,6 +42,21 @@ function subjectLevelFor(level) {
   return value;
 }
 
+/**
+ * Whether a learner's Education Progress is complete — the one condition for
+ * Complete (archiving): at least one subject, every subject Completed, and
+ * every subject that expects outputs has all of them submitted.
+ *
+ * @returns {{complete: boolean, incomplete: string[]}} the subjects still open
+ */
+function completionOf(subjects) {
+  const incomplete = (subjects || [])
+    .filter((s) => s.status !== 'Completed'
+      || (s.outputsTotal !== null && s.outputsTotal !== undefined && (s.outputsSubmitted ?? 0) < s.outputsTotal))
+    .map((s) => s.name);
+  return { complete: (subjects || []).length > 0 && incomplete.length === 0, incomplete };
+}
+
 function asCount(value) {
   if (value === null || value === undefined || value === '') return null;
   const number = Number(value);
@@ -74,7 +89,7 @@ function monitoringFromRow(row) {
  */
 async function progressSummaries(executor, filter = {}) {
   // `files` is deliberately not selected: it can hold large uploads.
-  let recordSql = 'SELECT id, residentId, educationLevel FROM education_records';
+  let recordSql = 'SELECT id, residentId, educationLevel, archivedAt FROM education_records';
   const params = [];
   if (filter.residentId) {
     recordSql += ' WHERE residentId = ?';
@@ -140,6 +155,9 @@ async function progressSummaries(executor, filter = {}) {
       educationRecordId: record.id,
       residentId: record.residentId || null,
       educationLevel: record.educationLevel,
+      // Complete (archive) is offered only when this is true.
+      complete: completionOf(levelSubjects).complete,
+      archived: Boolean(record.archivedAt),
       total: levelSubjects.length,
       counts,
       outputsSubmitted: levelSubjects.reduce((sum, s) => sum + (s.outputsSubmitted || 0), 0),
@@ -155,5 +173,6 @@ module.exports = {
   DEFAULT_PROGRESS_STATUS,
   MONITORING_FIELDS,
   subjectLevelFor,
+  completionOf,
   progressSummaries,
 };

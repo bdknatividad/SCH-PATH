@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { request, createResource, deleteResource, describeError } from '@/services/api';
 import { systemDialog } from '@/app/components/SystemDialog';
 import { Button } from '@/app/components/ui/button';
@@ -63,6 +63,10 @@ export interface LearnerProgress {
   educationRecordId: string;
   residentId: string | null;
   educationLevel: string;
+  /** Every subject Completed with all outputs submitted — Complete is offered. */
+  complete?: boolean;
+  /** Completed and moved to the Archive. */
+  archived?: boolean;
   total: number;
   counts: Record<ProgressStatus, number>;
   outputsSubmitted: number;
@@ -267,17 +271,26 @@ const toDraft = (s: SubjectProgress): DraftSubject => ({
  */
 export function EducationProgressPanel({
   learner,
-  canManageSubjects,
+  canManageSubjects: mayManageSubjects,
   onChanged,
+  readOnly = false,
+  startInEdit = false,
 }: {
   learner: ProgressLearner;
   /** May add or remove subjects for the level. */
   canManageSubjects: boolean;
   /** Called after progress or the subject list was saved, so other views refresh. */
   onChanged?: () => void;
+  /** View only — no Edit, no subject management (the student View page). */
+  readOnly?: boolean;
+  /** Open straight into editing when the reader may edit (Edit Education Progress). */
+  startInEdit?: boolean;
 }) {
   const [progress, setProgress] = useState<LearnerProgress | null>(null);
-  const [canEdit, setCanEdit] = useState(false);
+  const [mayEdit, setCanEdit] = useState(false);
+  const canEdit = mayEdit && !readOnly;
+  const canManageSubjects = mayManageSubjects && !readOnly && !progress?.archived;
+  const autoEditFor = useRef<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [reloadKey, setReloadKey] = useState(0);
@@ -315,7 +328,7 @@ export function EducationProgressPanel({
   }, [learner.id, reloadKey]);
 
   // A different learner never inherits an open edit.
-  useEffect(() => { setEditing(false); setManaging(false); setSaveError(''); }, [learner.id]);
+  useEffect(() => { setEditing(false); setManaging(false); setSaveError(''); autoEditFor.current = null; }, [learner.id]);
 
   const startEdit = () => {
     if (!progress) return;
@@ -327,6 +340,15 @@ export function EducationProgressPanel({
     setManaging(false);
     setEditing(true);
   };
+
+  // Edit Education Progress opens straight into the edit form, once per learner.
+  useEffect(() => {
+    if (!startInEdit || !canEdit || !progress || loading || autoEditFor.current === learner.id) return;
+    if (progress.educationRecordId !== learner.id) return;
+    autoEditFor.current = learner.id;
+    startEdit();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startInEdit, canEdit, progress, loading, learner.id]);
 
   const setDraft = (subjectId: string, patch: Partial<DraftSubject>) =>
     setDraftSubjects((rows) => rows.map((row) => (row.subjectId === subjectId ? { ...row, ...patch } : row)));
@@ -469,6 +491,14 @@ export function EducationProgressPanel({
           </Button>
         )}
       </div>
+
+      {startInEdit && !canEdit && (
+        <p className="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600">
+          {progress.archived
+            ? 'This student is in the Archive. Their education progress is kept as history and is view-only.'
+            : 'View only — only the Educator can edit a student\'s education progress.'}
+        </p>
+      )}
 
       {!editing ? (
         <>

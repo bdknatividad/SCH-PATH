@@ -2196,6 +2196,20 @@
     "extra": ""
    },
    {
+    "name": "archivedAt",
+    "type": "datetime",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
+    "name": "archivedBy",
+    "type": "varchar(100)",
+    "nullable": true,
+    "default": null,
+    "extra": ""
+   },
+   {
     "name": "createdBy",
     "type": "varchar(100)",
     "nullable": true,

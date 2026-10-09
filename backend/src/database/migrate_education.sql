@@ -18,6 +18,8 @@ CREATE TABLE IF NOT EXISTS education_records (
   lrn VARCHAR(100) NULL,
   traineeNumber VARCHAR(100) NULL,
   files JSON NULL,
+  archivedAt DATETIME NULL,
+  archivedBy VARCHAR(100) NULL,
   createdBy VARCHAR(100) NULL,
   modifiedBy VARCHAR(100) NULL,
   createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,

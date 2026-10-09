@@ -24,7 +24,7 @@ const { ApiError } = require('../middleware/errorHandler');
 const { snapshotFor } = require('../middleware/rbac');
 const { hasPermission } = require('../config/rbac');
 const { normalizeRole } = require('../utils/authorization');
-const { generateId, runInTransactionWithIdRetry } = require('../utils/helpers');
+const { generateId, runInTransactionWithIdRetry, mapRow } = require('../utils/helpers');
 const { RESOURCES } = require('../utils/constants');
 const { isClosedResidentStatus } = require('../utils/residentStatus');
 const { resolveEducationResident } = require('../utils/educationResident');
@@ -33,6 +33,7 @@ const {
   PROGRESS_STATUSES,
   MONITORING_FIELDS,
   subjectLevelFor,
+  completionOf,
   progressSummaries,
 } = require('../utils/educationSubjects');
 
@@ -47,7 +48,7 @@ function mayEditProgress(req) {
 
 async function loadRecord(id) {
   const [rows] = await pool.query(
-    'SELECT id, name, residentId, educationLevel FROM education_records WHERE id = ?',
+    'SELECT id, name, residentId, educationLevel, archivedAt FROM education_records WHERE id = ?',
     [id],
   );
   if (!rows.length) throw new ApiError(404, 'Education record not found');
@@ -68,7 +69,8 @@ async function getOne(req, res, next) {
   try {
     const record = await loadRecord(req.params.educationRecordId);
     const [progress] = await progressSummaries(pool, { recordIds: [record.id] });
-    res.json({ success: true, data: progress, canEdit: mayEditProgress(req) });
+    // An archived learner's progress is history: readable, never edited.
+    res.json({ success: true, data: progress, canEdit: mayEditProgress(req) && !record.archivedAt });
   } catch (error) {
     next(error);
   }
@@ -107,6 +109,9 @@ async function save(req, res, next) {
       throw new ApiError(403, 'Only the Educator can update a student\'s education progress.');
     }
     const record = await loadRecord(req.params.educationRecordId);
+    if (record.archivedAt) {
+      throw new ApiError(409, 'This student is archived. Their education progress is kept as history and can no longer be edited.');
+    }
     const body = req.body || {};
 
     // The learner's resident (linked when the record never was) and the
@@ -241,4 +246,49 @@ async function save(req, res, next) {
   }
 }
 
-module.exports = { summary, getOne, save, mayEditProgress };
+/**
+ * POST /education-progress/:educationRecordId/complete
+ *
+ * Moves a learner from the active Student Master List to the Archive. Allowed
+ * only when every subject is Completed with all of its outputs submitted —
+ * checked here, on the stored rows, whatever the screen showed. Nothing is
+ * deleted: the learner record, its progress, monitoring record and files stay;
+ * the record is stamped `archivedAt` / `archivedBy` and its status becomes
+ * Completed.
+ */
+async function complete(req, res, next) {
+  try {
+    if (!mayEditProgress(req)) {
+      throw new ApiError(403, 'Only the Educator can complete a student.');
+    }
+    const record = await loadRecord(req.params.educationRecordId);
+    if (record.archivedAt) throw new ApiError(409, 'This student is already in the Archive.');
+
+    const [progress] = await progressSummaries(pool, { recordIds: [record.id] });
+    const { complete: done, incomplete } = completionOf(progress?.subjects || []);
+    if (!done) {
+      throw new ApiError(409, (progress?.subjects || []).length === 0
+        ? 'This student has no subjects/modules yet, so their education progress cannot be complete.'
+        : `Education progress is not complete yet: ${incomplete.join(', ')} still ${incomplete.length === 1 ? 'needs' : 'need'} to be Completed with all outputs submitted.`);
+    }
+
+    const [result] = await pool.query(
+      `UPDATE education_records
+          SET archivedAt = NOW(), archivedBy = ?, status = 'Completed', modifiedBy = ?
+        WHERE id = ? AND archivedAt IS NULL`,
+      [req.user?.username || null, req.user?.username || null, record.id],
+    );
+    if (!result.affectedRows) throw new ApiError(409, 'This student is already in the Archive.');
+
+    const [rows] = await pool.query('SELECT * FROM education_records WHERE id = ?', [record.id]);
+    res.json({
+      success: true,
+      data: mapRow('education_records', rows[0]),
+      message: `${record.name} was completed and moved to the Archive.`,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+module.exports = { summary, getOne, save, complete, mayEditProgress };

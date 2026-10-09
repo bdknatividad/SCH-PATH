@@ -2833,6 +2833,10 @@ async function runMigrations() {
   // already exist and cannot fail on a fresh database.
   await ensureColumn('education_records', 'createdAt', 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP');
   await ensureColumn('education_records', 'updatedAt', 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP');
+  // Archive: set when the Educator completes a learner whose Education Progress
+  // is complete (POST /education-progress/:id/complete). NULL = on the active list.
+  await ensureColumn('education_records', 'archivedAt', 'DATETIME NULL', 'files');
+  await ensureColumn('education_records', 'archivedBy', 'VARCHAR(100) NULL', 'archivedAt');
 
   // The same list query has a SECOND failure behind the first.
   //

@@ -178,7 +178,10 @@ const RESOURCES = {
      * reader downstream would have to know about both. Normalised to NULL here.
      */
     blankToNull: ['school', 'enrollmentDate'],
-    columns: ['id', 'residentId', 'name', 'age', 'gender', 'educationLevel', 'gradeSection', 'school', 'enrollmentDate', 'status', 'address', 'guardianName', 'guardianContact', 'notes', 'lrn', 'traineeNumber', 'files', 'createdBy', 'modifiedBy'],
+    // `archivedAt` / `archivedBy`: set only by POST /education-progress/:id/complete
+    // (the routes strip them from every other write), so a learner reaches the
+    // Archive only once their Education Progress is complete.
+    columns: ['id', 'residentId', 'name', 'age', 'gender', 'educationLevel', 'gradeSection', 'school', 'enrollmentDate', 'status', 'address', 'guardianName', 'guardianContact', 'notes', 'lrn', 'traineeNumber', 'files', 'archivedAt', 'archivedBy', 'createdBy', 'modifiedBy'],
   },
   education_progress_reports: {
     prefix: 'EPR',
