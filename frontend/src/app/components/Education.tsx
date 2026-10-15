@@ -1052,20 +1052,37 @@ export function Education() {
 
   // ── ADD / EDIT STUDENT ────────────────────────────────────────────────────
   // The resident dropdown offers only the Child Records module's active
-  // residents, read fresh from the API each time the form opens.
-  const [residentOptions, setResidentOptions] = useState<any[] | null>(null);
+  // residents, and only as the database has them now: the list is read from
+  // the API when the form opens and again every time the dropdown is opened.
+  // There is no fallback to the page's cached resident list — if the read
+  // fails, the dropdown says so and offers nobody.
+  const [residentOptions, setResidentOptions] = useState<any[]>([]);
+  const [residentOptionsState, setResidentOptionsState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const residentOptionsRequest = useRef(0);
+  const loadResidentOptions = () => {
+    const ticket = ++residentOptionsRequest.current;
+    setResidentOptionsState(state => (state === 'ready' ? state : 'loading'));
+    request<{ success: boolean; data: any[] }>('/education-records/resident-options', { cache: 'no-store' })
+      .then(res => {
+        if (ticket !== residentOptionsRequest.current) return;
+        setResidentOptions(Array.isArray(res.data) ? res.data.filter(r => isActiveResident(r.status)) : []);
+        setResidentOptionsState('ready');
+      })
+      .catch(error => {
+        if (ticket !== residentOptionsRequest.current) return;
+        console.warn('Active residents could not be loaded.', error);
+        setResidentOptions([]);
+        setResidentOptionsState('error');
+      });
+  };
   useEffect(() => {
     if (!isStudentDialogOpen) return;
-    let cancelled = false;
-    setResidentOptions(null);
-    request<{ success: boolean; data: any[] }>('/education-records/resident-options')
-      .then(res => { if (!cancelled) setResidentOptions(Array.isArray(res.data) ? res.data : []); })
-      .catch(error => { console.warn('Active residents could not be loaded.', error); });
-    return () => { cancelled = true; };
+    setResidentOptions([]);
+    setResidentOptionsState('loading');
+    loadResidentOptions();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isStudentDialogOpen]);
-  const residentChoices = (residentOptions
-    ?? residents.filter(r => isActiveResident(r.status)))
-    .filter(r => isActiveResident(r.status));
+  const residentChoices = residentOptions;
   const openAdd = () => {
     setEditingStudent(null);
     setStudentForm(EMPTY_STUDENT);
@@ -1714,7 +1731,7 @@ export function Education() {
                     name cannot be confused. Residents already on the Student
                     Master List stay selectable; picking one loads their existing
                     record, and saving updates it rather than listing them twice. */}
-                <Select value={studentForm.residentId || ''} onValueChange={id => {
+                <Select value={studentForm.residentId || ''} onOpenChange={open => { if (open) loadResidentOptions(); }} onValueChange={id => {
                   const res = residents.find(r => r.id === id) || residentChoices.find(r => r.id === id);
                   if (!res) return;
                   const existing = !editingStudent ? existingRecordFor(res.id) : undefined;
@@ -1759,6 +1776,15 @@ export function Education() {
                         {r.name} ({r.id}){existingRecordFor(r.id, editingStudent?.id) ? ' · on master list' : ''}
                       </SelectItem>
                     ))}
+                    {residentChoices.length === 0 && (
+                      <div className="px-3 py-2 text-xs text-gray-500">
+                        {residentOptionsState === 'loading'
+                          ? 'Loading active residents…'
+                          : residentOptionsState === 'error'
+                            ? 'The active resident list could not be loaded. Close and reopen the form to try again.'
+                            : 'No active residents in Child Records.'}
+                      </div>
+                    )}
                   </SelectContent>
                 </Select>
                 {existingForForm && (

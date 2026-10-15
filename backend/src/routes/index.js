@@ -696,6 +696,9 @@ async function educationResidentOptions(req, res, next) {
         WHERE status IS NULL OR TRIM(status) IN ('', 'Active')
         ORDER BY name ASC, id ASC`,
     );
+    // Never served from a cache: a resident discharged a minute ago must not
+    // reappear because a browser or proxy kept the earlier answer.
+    res.set('Cache-Control', 'no-store');
     res.json({ success: true, data: rows.filter((row) => isActiveResidentStatus(row.status)) });
   } catch (error) {
     next(error);
