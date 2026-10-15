@@ -51,7 +51,7 @@ const { residentRowFor } = require('../controllers/childController');
 const notifications = require('../services/notificationService');
 const { createController } = require('../controllers/baseController');
 const { assignedResidentIds } = require('../utils/residentScope');
-const { isClosedResidentStatus } = require('../utils/residentStatus');
+const { isClosedResidentStatus, isActiveResidentStatus } = require('../utils/residentStatus');
 
 // Public health check endpoint (must be before mounting routes)
 /**
@@ -680,6 +680,55 @@ async function requireResidentInCare(req, res, next) {
 }
 
 /**
+ * GET /api/education-records/resident-options
+ *
+ * The residents Add Student may pick: exactly the Child Records module's active
+ * list — status Active (a blank status is Active, as everywhere else). A
+ * discharged, transferred or absconded resident is never offered. Read fresh
+ * each time the form opens, so the dropdown follows the database.
+ */
+async function educationResidentOptions(req, res, next) {
+  try {
+    const [rows] = await pool.query(
+      `SELECT id, name, gender, DATE_FORMAT(birthDate, '%Y-%m-%d') AS birthDate, age,
+              address, guardianName, guardianContact, status
+         FROM children
+        WHERE status IS NULL OR TRIM(status) IN ('', 'Active')
+        ORDER BY name ASC, id ASC`,
+    );
+    res.json({ success: true, data: rows.filter((row) => isActiveResidentStatus(row.status)) });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
+ * A learner may be added for — or moved to — an active resident only: one who
+ * exists and is on the Child Records active list. Same rule as the Add Student
+ * dropdown, enforced where it cannot be bypassed. An update that keeps the
+ * learner's current resident is not re-checked (editing a past learner's
+ * details stays possible).
+ */
+async function requireActiveResident(req, res, next) {
+  try {
+    const residentId = String(req.body?.residentId || '').trim();
+    if (!residentId) return next();
+    if (req.method === 'PUT' && req.params.id) {
+      const [current] = await pool.query('SELECT residentId FROM education_records WHERE id = ?', [req.params.id]);
+      if (current[0] && current[0].residentId === residentId) return next();
+    }
+    const [rows] = await pool.query('SELECT status FROM children WHERE id = ?', [residentId]);
+    if (!rows.length) throw new ApiError(404, 'The selected resident was not found in Child Records.');
+    if (!isActiveResidentStatus(rows[0].status)) {
+      throw new ApiError(409, `This resident is ${String(rows[0].status).toLowerCase()}, so they cannot be added to the Education Module. Only active residents can be selected.`);
+    }
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+}
+
+/**
  * Tell the Center Head about an Education write — and, when a learner is added,
  * the Houseparent assigned to that resident.
  *
@@ -787,6 +836,9 @@ const educationModule = requireModule('Education');
 // learner route so `:educationRecordId` can never claim "summary". Reading
 // follows the Education module; saving is the Educator's alone (checked in the
 // controller as well as by Education: edit here).
+// Add Student's resident dropdown (active residents only). Declared ahead of
+// every parameterised education route so none can read it as an id.
+router.get('/education-records/resident-options', authenticate, educationModule, educationResidentOptions);
 router.get('/education-progress/summary', authenticate, educationModule, educationProgress.summary);
 router.get('/education-progress/:educationRecordId', authenticate, educationModule, educationProgress.getOne);
 router.put('/education-progress/:educationRecordId', authenticate, educationModule, requirePermission('Education', 'edit'), educationProgress.save);
@@ -820,6 +872,7 @@ router.post(
   '/education-records',
   requirePermission('Education', 'create'),
   stripArchiveFields,
+  requireActiveResident,
   requireResidentInCare,
   requireEducationPlacement,
   requireValidLrn,
@@ -831,7 +884,7 @@ router.post(
   educationResources.educationRecords.create,
 );
 router.post('/education-records/:id/files', requirePermission('Education', 'edit'), uploadEducationFile);
-router.put('/education-records/:id', requirePermission('Education', 'edit'), stripArchiveFields, requireEducationPlacement, requireValidLrn, notifyEducationWrite('education_records', 'updated a learner'), educationResources.educationRecords.update);
+router.put('/education-records/:id', requirePermission('Education', 'edit'), stripArchiveFields, requireActiveResident, requireEducationPlacement, requireValidLrn, notifyEducationWrite('education_records', 'updated a learner'), educationResources.educationRecords.update);
 router.delete('/education-records/:id', requirePermission('Education', 'delete'), notifyEducationWrite('education_records', 'removed a learner'), educationResources.educationRecords.delete);
 
 router.use('/education-progress-reports', authenticate, educationModule);

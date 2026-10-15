@@ -27,7 +27,7 @@ import {
   User, FileText, BookOpen, Award, X, Download, AlertCircle,
   ChevronDown, ChevronUp, Paperclip, CalendarDays, CheckCircle2,
 } from 'lucide-react';
-import { isActiveResident, isClosedResident } from '@/utils/residentStatus';
+import { isActiveResident } from '@/utils/residentStatus';
 import { usePermissions } from '@/app/hooks/usePermissions';
 import { formatShortDate } from '@/utils/dateFormatter';
 import { EducationProgressPanel, type LearnerProgress } from './EducationSubjects';
@@ -1051,6 +1051,21 @@ export function Education() {
   };
 
   // ── ADD / EDIT STUDENT ────────────────────────────────────────────────────
+  // The resident dropdown offers only the Child Records module's active
+  // residents, read fresh from the API each time the form opens.
+  const [residentOptions, setResidentOptions] = useState<any[] | null>(null);
+  useEffect(() => {
+    if (!isStudentDialogOpen) return;
+    let cancelled = false;
+    setResidentOptions(null);
+    request<{ success: boolean; data: any[] }>('/education-records/resident-options')
+      .then(res => { if (!cancelled) setResidentOptions(Array.isArray(res.data) ? res.data : []); })
+      .catch(error => { console.warn('Active residents could not be loaded.', error); });
+    return () => { cancelled = true; };
+  }, [isStudentDialogOpen]);
+  const residentChoices = (residentOptions
+    ?? residents.filter(r => isActiveResident(r.status)))
+    .filter(r => isActiveResident(r.status));
   const openAdd = () => {
     setEditingStudent(null);
     setStudentForm(EMPTY_STUDENT);
@@ -1700,7 +1715,7 @@ export function Education() {
                     Master List stay selectable; picking one loads their existing
                     record, and saving updates it rather than listing them twice. */}
                 <Select value={studentForm.residentId || ''} onValueChange={id => {
-                  const res = residents.find(r => r.id === id);
+                  const res = residents.find(r => r.id === id) || residentChoices.find(r => r.id === id);
                   if (!res) return;
                   const existing = !editingStudent ? existingRecordFor(res.id) : undefined;
                   // Pull the rest of the learner's details off the resident
@@ -1731,7 +1746,15 @@ export function Education() {
                 }}>
                   <SelectTrigger className="rounded-xl"><SelectValue placeholder="Select resident..." /></SelectTrigger>
                   <SelectContent>
-                    {residents.filter(r => !isClosedResident(r.status) || r.id === studentForm.residentId).map(r => (
+                    {/* Active residents only (the Child Records active list).
+                        When editing, the learner's own resident stays listed
+                        so the form can show it. */}
+                    {[
+                      ...residentChoices,
+                      ...(editingStudent && studentForm.residentId && !residentChoices.some(r => r.id === studentForm.residentId)
+                        ? residents.filter(r => r.id === studentForm.residentId)
+                        : []),
+                    ].map(r => (
                       <SelectItem key={r.id} value={r.id}>
                         {r.name} ({r.id}){existingRecordFor(r.id, editingStudent?.id) ? ' · on master list' : ''}
                       </SelectItem>
