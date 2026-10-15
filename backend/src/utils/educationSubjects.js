@@ -2,7 +2,7 @@
  * Education Progress, read in one place.
  *
  * Pass / Fail is gone: each subject (module, activity) a learner takes now has
- * a progress status — Not Started, Ongoing, Submitted, Completed or Pending —
+ * a progress status — Pending, Ongoing or Completed —
  * with the outputs submitted against the outputs expected, and every learner
  * has one Education Progress Monitoring record (modules completed / pending,
  * outputs submitted / not submitted, participation notes, date of monitoring,
@@ -14,14 +14,25 @@
  * somewhere else.
  *
  * The subject list belongs to the learner's education level; a subject with no
- * stored row yet reads as Not Started. The old `result` column (Passed /
+ * stored row yet reads as Pending. The old `result` column (Passed /
  * Failed) is left in the table untouched and is no longer read.
  *
  * @module utils/educationSubjects
  */
 
-const PROGRESS_STATUSES = ['Not Started', 'Ongoing', 'Submitted', 'Completed', 'Pending'];
-const DEFAULT_PROGRESS_STATUS = 'Not Started';
+const PROGRESS_STATUSES = ['Pending', 'Ongoing', 'Completed'];
+const DEFAULT_PROGRESS_STATUS = 'Pending';
+
+/**
+ * The two retired statuses, read as their replacements: Not Started is now
+ * Pending, and Submitted (outputs handed in, not yet complete) is Ongoing.
+ * The boot migration rewrites stored rows the same way.
+ */
+const LEGACY_PROGRESS_STATUS = { 'Not Started': 'Pending', Submitted: 'Ongoing' };
+function progressStatusOf(value) {
+  const status = LEGACY_PROGRESS_STATUS[value] || value;
+  return PROGRESS_STATUSES.includes(status) ? status : DEFAULT_PROGRESS_STATUS;
+}
 
 /** The monitoring record's own fields, in the order the screens show them. */
 const MONITORING_FIELDS = [
@@ -140,7 +151,7 @@ async function progressSummaries(executor, filter = {}) {
       .filter((s) => s.educationLevel === level)
       .map((s) => {
         const row = stored.get(s.id);
-        const status = PROGRESS_STATUSES.includes(row?.progressStatus) ? row.progressStatus : DEFAULT_PROGRESS_STATUS;
+        const status = progressStatusOf(row?.progressStatus);
         return {
           subjectId: s.id,
           name: s.name,

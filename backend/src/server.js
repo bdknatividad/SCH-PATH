@@ -2724,6 +2724,10 @@ async function runMigrations() {
     await ensureColumn('education_subject_results', 'progressStatus', 'VARCHAR(20) NULL', 'result');
     await ensureColumn('education_subject_results', 'outputsSubmitted', 'INT NULL', 'progressStatus');
     await ensureColumn('education_subject_results', 'outputsTotal', 'INT NULL', 'outputsSubmitted');
+    // The progress statuses are Pending, Ongoing and Completed: Not Started
+    // became Pending and Submitted became Ongoing.
+    await pool.query("UPDATE education_subject_results SET progressStatus = 'Pending' WHERE progressStatus = 'Not Started'");
+    await pool.query("UPDATE education_subject_results SET progressStatus = 'Ongoing' WHERE progressStatus = 'Submitted'");
     await pool.query(`
       CREATE TABLE IF NOT EXISTS education_progress_monitoring (
         id VARCHAR(40) PRIMARY KEY,

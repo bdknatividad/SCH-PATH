@@ -2412,10 +2412,8 @@ export function Education() {
 // moves through them, in the same colours as the Education Progress table.
 const PROGRESS_BAR: { status: keyof LearnerProgress['counts']; color: string }[] = [
   { status: 'Completed', color: '#10B981' },
-  { status: 'Submitted', color: '#8B5CF6' },
   { status: 'Ongoing', color: '#38BDF8' },
   { status: 'Pending', color: '#FFD100' },
-  { status: 'Not Started', color: '#9CA3AF' },
 ];
 
 function StudentCard({

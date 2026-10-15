@@ -11,7 +11,7 @@ import { Plus, Settings2, Trash2, AlertCircle, Loader2, Pencil, Save, X, Clipboa
  * Education Progress Monitoring — replaces Pass / Fail.
  *
  * Every subject (module, activity) on the learner's level list carries its own
- * progress status — Not Started, Ongoing, Submitted, Completed or Pending — and
+ * progress status — Pending, Ongoing or Completed — and
  * the outputs submitted against the outputs expected. Each learner also has one
  * monitoring record: modules / activities completed and pending, outputs
  * submitted and not submitted, progress / participation notes, the date of
@@ -26,7 +26,7 @@ import { Plus, Settings2, Trash2, AlertCircle, Loader2, Pencil, Save, X, Clipboa
  * against the same list.
  */
 
-export const PROGRESS_STATUSES = ['Not Started', 'Ongoing', 'Submitted', 'Completed', 'Pending'] as const;
+export const PROGRESS_STATUSES = ['Pending', 'Ongoing', 'Completed'] as const;
 export type ProgressStatus = typeof PROGRESS_STATUSES[number];
 
 export interface EducationSubject {
@@ -99,15 +99,13 @@ export function subjectLevelFor(level: string): string {
  * always printed).
  */
 const STATUS_STYLE: Record<ProgressStatus, { pill: string; dot: string; light: string }> = {
-  'Not Started': { pill: 'bg-white/10 text-gray-200 ring-white/20', dot: 'bg-gray-400', light: 'bg-gray-100 text-gray-700' },
-  Ongoing: { pill: 'bg-sky-400/15 text-sky-200 ring-sky-300/30', dot: 'bg-sky-400', light: 'bg-sky-100 text-sky-800' },
-  Submitted: { pill: 'bg-violet-400/15 text-violet-200 ring-violet-300/30', dot: 'bg-violet-400', light: 'bg-violet-100 text-violet-800' },
-  Completed: { pill: 'bg-emerald-400/15 text-emerald-200 ring-emerald-300/30', dot: 'bg-emerald-400', light: 'bg-emerald-100 text-emerald-800' },
   Pending: { pill: 'bg-[#FFD100]/15 text-[#FFD100] ring-[#FFD100]/40', dot: 'bg-[#FFD100]', light: 'bg-amber-100 text-amber-800' },
+  Ongoing: { pill: 'bg-sky-400/15 text-sky-200 ring-sky-300/30', dot: 'bg-sky-400', light: 'bg-sky-100 text-sky-800' },
+  Completed: { pill: 'bg-emerald-400/15 text-emerald-200 ring-emerald-300/30', dot: 'bg-emerald-400', light: 'bg-emerald-100 text-emerald-800' },
 };
 
 export function statusStyle(status: ProgressStatus) {
-  return STATUS_STYLE[status] || STATUS_STYLE['Not Started'];
+  return STATUS_STYLE[status] || STATUS_STYLE.Pending;
 }
 
 /** "3/5 submitted", "3 submitted", or "—" when nothing is recorded. */
@@ -406,7 +404,7 @@ export function EducationProgressPanel({
     setDraftMonitoring((m) => ({
       ...m,
       modulesCompleted: names(['Completed']),
-      modulesPending: names(['Pending', 'Ongoing', 'Not Started', 'Submitted']),
+      modulesPending: names(['Pending', 'Ongoing']),
       outputsSubmitted: submitted,
       outputsNotSubmitted: missing,
     }));
