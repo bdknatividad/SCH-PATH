@@ -153,7 +153,12 @@ async function save(req, res, next) {
         if (outputsSubmitted !== null && outputsTotal !== null && outputsSubmitted > outputsTotal) {
           throw new ApiError(400, `${name}: outputs submitted cannot be more than the total outputs.`);
         }
-        subjects.push({ subjectId, status, outputsSubmitted, outputsTotal });
+        // A Total above 0 decides the status: Completed once every output is
+        // submitted, Ongoing until then. With no Total the chosen status stands.
+        const derivedStatus = outputsTotal !== null && outputsTotal > 0
+          ? ((outputsSubmitted ?? 0) >= outputsTotal ? 'Completed' : 'Ongoing')
+          : status;
+        subjects.push({ subjectId, status: derivedStatus, outputsSubmitted, outputsTotal });
       }
     }
 

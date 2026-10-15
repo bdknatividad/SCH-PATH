@@ -252,17 +252,37 @@ interface DraftSubject {
   subjectId: string;
   name: string;
   status: ProgressStatus;
+  /** The status the subject had when editing began — kept while Total is 0. */
+  initialStatus: ProgressStatus;
   outputsSubmitted: string;
   outputsTotal: string;
 }
 
+// Submitted and Total start at 0 (a subject with nothing recorded yet).
 const toDraft = (s: SubjectProgress): DraftSubject => ({
   subjectId: s.subjectId,
   name: s.name,
   status: s.status,
-  outputsSubmitted: s.outputsSubmitted === null || s.outputsSubmitted === undefined ? '' : String(s.outputsSubmitted),
-  outputsTotal: s.outputsTotal === null || s.outputsTotal === undefined ? '' : String(s.outputsTotal),
+  initialStatus: s.status,
+  outputsSubmitted: s.outputsSubmitted === null || s.outputsSubmitted === undefined ? '0' : String(s.outputsSubmitted),
+  outputsTotal: s.outputsTotal === null || s.outputsTotal === undefined ? '0' : String(s.outputsTotal),
 });
+
+/**
+ * The status the outputs decide. A Total above 0 sets it: Completed once every
+ * output is submitted, Ongoing until then. With a Total of 0 the outputs say
+ * nothing, so the subject keeps the status it had.
+ */
+export function statusFromOutputs(submitted: number, total: number, current: ProgressStatus): ProgressStatus {
+  if (total > 0) return submitted >= total ? 'Completed' : 'Ongoing';
+  return current;
+}
+
+/** A count as a non-negative whole number (blank or junk is 0). */
+const wholeNumber = (value: string): number => {
+  const n = parseInt(String(value).replace(/[^0-9]/g, ''), 10);
+  return Number.isFinite(n) ? Math.min(n, 999) : 0;
+};
 
 /**
  * The Education module's Education Progress view for one learner: the table,
@@ -353,6 +373,24 @@ export function EducationProgressPanel({
   const setDraft = (subjectId: string, patch: Partial<DraftSubject>) =>
     setDraftSubjects((rows) => rows.map((row) => (row.subjectId === subjectId ? { ...row, ...patch } : row)));
 
+  /**
+   * Submitted or Total changed: keep both whole numbers, never let Submitted
+   * pass Total, and recompute the status from them (see `statusFromOutputs`).
+   */
+  const setOutputs = (subjectId: string, field: 'outputsSubmitted' | 'outputsTotal', raw: string) =>
+    setDraftSubjects((rows) => rows.map((row) => {
+      if (row.subjectId !== subjectId) return row;
+      const total = field === 'outputsTotal' ? wholeNumber(raw) : wholeNumber(row.outputsTotal);
+      let submitted = field === 'outputsSubmitted' ? wholeNumber(raw) : wholeNumber(row.outputsSubmitted);
+      if (submitted > total) submitted = total;
+      return {
+        ...row,
+        outputsTotal: String(total),
+        outputsSubmitted: String(submitted),
+        status: statusFromOutputs(submitted, total, total > 0 ? row.status : row.initialStatus),
+      };
+    }));
+
   /** Fill the four list fields from the statuses set above (the Educator can then edit them). */
   const fillFromSubjects = () => {
     const names = (statuses: ProgressStatus[]) =>
@@ -378,7 +416,7 @@ export function EducationProgressPanel({
     setSaveError('');
     if (!draftMonitoring.monitoringDate) { setSaveError('Enter the Date of Monitoring.'); return; }
     for (const row of draftSubjects) {
-      if (row.outputsSubmitted !== '' && row.outputsTotal !== '' && Number(row.outputsSubmitted) > Number(row.outputsTotal)) {
+      if (wholeNumber(row.outputsSubmitted) > wholeNumber(row.outputsTotal)) {
         setSaveError(`${row.name}: outputs submitted cannot be more than the total outputs.`);
         return;
       }
@@ -390,9 +428,9 @@ export function EducationProgressPanel({
         body: JSON.stringify({
           subjects: draftSubjects.map((row) => ({
             subjectId: row.subjectId,
-            status: row.status,
-            outputsSubmitted: row.outputsSubmitted === '' ? null : Number(row.outputsSubmitted),
-            outputsTotal: row.outputsTotal === '' ? null : Number(row.outputsTotal),
+            status: statusFromOutputs(wholeNumber(row.outputsSubmitted), wholeNumber(row.outputsTotal), row.status),
+            outputsSubmitted: wholeNumber(row.outputsSubmitted),
+            outputsTotal: wholeNumber(row.outputsTotal),
           })),
           monitoring: {
             monitoringDate: draftMonitoring.monitoringDate,
@@ -525,11 +563,15 @@ export function EducationProgressPanel({
                 {draftSubjects.map((row, index) => (
                   <li key={row.subjectId} className={`${GRID} px-4 py-2.5 text-sm text-gray-100 ${index < draftSubjects.length - 1 ? 'border-b border-white/10' : ''}`}>
                     <span className="truncate" title={row.name}>{row.name}</span>
+                    {/* Set automatically from the outputs once Total is above 0
+                        (Ongoing, then Completed when all are submitted). */}
                     <select
                       value={row.status}
-                      onChange={(e) => setDraft(row.subjectId, { status: e.target.value as ProgressStatus })}
+                      onChange={(e) => setDraft(row.subjectId, { status: e.target.value as ProgressStatus, initialStatus: e.target.value as ProgressStatus })}
+                      disabled={wholeNumber(row.outputsTotal) > 0}
+                      title={wholeNumber(row.outputsTotal) > 0 ? 'Set automatically from the outputs' : undefined}
                       aria-label={`${row.name} status`}
-                      className="h-8 w-full rounded-lg border-0 bg-white px-2 text-xs font-semibold text-[#2F3E46] focus:outline-none focus:ring-2 focus:ring-[#FFD100]"
+                      className="h-8 w-full rounded-lg border-0 bg-white px-2 text-xs font-semibold text-[#2F3E46] focus:outline-none focus:ring-2 focus:ring-[#FFD100] disabled:cursor-not-allowed disabled:opacity-90"
                     >
                       {PROGRESS_STATUSES.map((status) => <option key={status} value={status}>{status}</option>)}
                     </select>
@@ -540,7 +582,7 @@ export function EducationProgressPanel({
                         max={999}
                         inputMode="numeric"
                         value={row.outputsSubmitted}
-                        onChange={(e) => setDraft(row.subjectId, { outputsSubmitted: e.target.value.replace(/[^0-9]/g, '') })}
+                        onChange={(e) => setOutputs(row.subjectId, 'outputsSubmitted', e.target.value)}
                         aria-label={`${row.name} outputs submitted`}
                         className="h-8 w-11 rounded-lg border-0 bg-white px-1 text-center text-xs font-semibold text-[#2F3E46] focus:outline-none focus:ring-2 focus:ring-[#FFD100]"
                       />
@@ -551,7 +593,7 @@ export function EducationProgressPanel({
                         max={999}
                         inputMode="numeric"
                         value={row.outputsTotal}
-                        onChange={(e) => setDraft(row.subjectId, { outputsTotal: e.target.value.replace(/[^0-9]/g, '') })}
+                        onChange={(e) => setOutputs(row.subjectId, 'outputsTotal', e.target.value)}
                         aria-label={`${row.name} total outputs`}
                         className="h-8 w-11 rounded-lg border-0 bg-white px-1 text-center text-xs font-semibold text-[#2F3E46] focus:outline-none focus:ring-2 focus:ring-[#FFD100]"
                       />
