@@ -173,6 +173,60 @@ async function getByResident(req, res, next) {
 }
 
 /**
+ * GET /api/phases/resident/:residentId/documents
+ *
+ * The review status of the resident's Phase Timeline documents — one shared
+ * answer, read from the `documents` rows, the same for every user who may open
+ * this Phase Timeline.
+ *
+ * The timeline used to take its statuses from the reader's own document list,
+ * which is scoped by document category: a Psychological Support Staff member
+ * cannot read a Physical Examination, so a document the Center Head had approved
+ * showed as MISSING on their timeline while the Social Worker saw Approved.
+ *
+ * This returns the status *metadata* only — title, phase, status, who reviewed
+ * it and when — never the file or its description, and only for the documents a
+ * phase requires (any phase, required or optional, with their legacy titles).
+ * Opening the file still goes through `GET /documents/:id/file` and its own
+ * read check, so nobody gains access to a document they could not open before.
+ * Access to this route is the Phase Timeline's own: the resident must be one the
+ * caller may open (`canAccessResident`, as `getByResident`), and the route
+ * requires the Child Records → Phase Timeline section.
+ */
+async function getDocumentStatuses(req, res, next) {
+  try {
+    const { residentId } = req.params;
+    if (!await canAccessResident(req.user, residentId, { area: 'child-records' })) {
+      throw new ApiError(403, 'You are not assigned to this resident');
+    }
+
+    const titles = new Set();
+    for (const phase of Object.values(PHASE_REQUIREMENTS)) {
+      for (const title of [...(phase.requiredDocuments || []), ...(phase.optionalDocuments || [])]) {
+        titles.add(String(title).trim().toLowerCase());
+        for (const alias of LEGACY_DOCUMENT_ALIASES[title] || []) titles.add(String(alias).trim().toLowerCase());
+      }
+    }
+    if (!titles.size) return res.json({ success: true, data: [] });
+
+    const list = [...titles];
+    const [rows] = await pool.query(
+      `SELECT id, residentId, admissionId, title, phase, status, revision,
+              uploadedBy, uploadedAt, submittedBy, submittedAt,
+              reviewedBy, reviewedAt, approvedBy, approvedAt, rejectedBy, rejectedAt
+         FROM documents
+        WHERE residentId = ? AND LOWER(TRIM(title)) IN (${list.map(() => '?').join(', ')})
+        ORDER BY createdAt DESC, id DESC`,
+      [residentId, ...list],
+    );
+    res.set('Cache-Control', 'no-store');
+    res.json({ success: true, data: rows.map((row) => mapRow('documents', row)) });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/**
  * GET /api/phases/resident/:residentId/current
  */
 async function getCurrent(req, res, next) {
@@ -792,5 +846,6 @@ module.exports = {
   returnToPhase,
   validate,
   validateByResident,
+  getDocumentStatuses,
   toggleTask,
 };

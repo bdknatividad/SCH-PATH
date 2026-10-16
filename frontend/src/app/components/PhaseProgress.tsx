@@ -260,6 +260,26 @@ export function PhaseProgress({ residentId, currentPhase, onPhaseAdvanced }: Pro
   const [currentRecord, setCurrentRecord] = useState<PhaseRecord | null>(null);
   const [requirements, setRequirements] = useState<PhaseRequirements>({});
   // Derive residentDocs live from DataContext — no separate state needed
+
+  /**
+   * The shared review status of this resident's phase documents, from the API
+   * (GET /phases/resident/:id/documents) — the same answer for every user who
+   * may open this timeline. The reader's own document list is scoped by
+   * category, so on its own it showed a document approved by the Center Head as
+   * MISSING to, say, the Psychological Support Staff. Re-read whenever the
+   * documents change (another session's upload or review signals this page
+   * through DataContext), so a new status shows without a reload. Status only:
+   * the file itself still opens through the reader's own access.
+   */
+  const [sharedPhaseDocs, setSharedPhaseDocs] = useState<any[] | null>(null);
+  useEffect(() => {
+    if (!residentId) return;
+    let cancelled = false;
+    request<{ success: boolean; data: any[] }>(`/phases/resident/${encodeURIComponent(residentId)}/documents`, { cache: 'no-store' })
+      .then(res => { if (!cancelled) setSharedPhaseDocs(Array.isArray(res.data) ? res.data : []); })
+      .catch(() => { if (!cancelled) setSharedPhaseDocs(null); });
+    return () => { cancelled = true; };
+  }, [residentId, allDocuments]);
   const [loading, setLoading] = useState(true);
   const [validating, setValidating] = useState(false);
   const [advancing, setAdvancing] = useState(false);
@@ -1361,7 +1381,20 @@ ${admissionHistorySection}
     }
     return true;
   };
-  const residentDocs: ResidentDoc[] = allDocuments
+  // The reader's own documents, with each one's status taken from the shared
+  // record, plus the phase documents the reader cannot open (status only).
+  const phaseDocsForStatus = (() => {
+    if (!sharedPhaseDocs) return allDocuments;
+    const shared = new Map(sharedPhaseDocs.map(d => [d.id, d]));
+    const own = allDocuments.map(d => {
+      const row = shared.get(d.id);
+      return row ? { ...d, status: row.status, phase: row.phase, uploadedAt: row.uploadedAt ?? d.uploadedAt, approvedBy: row.approvedBy ?? (d as any).approvedBy } : d;
+    });
+    const ownIds = new Set(allDocuments.map(d => d.id));
+    const statusOnly = sharedPhaseDocs.filter(d => !ownIds.has(d.id)).map(d => ({ ...d, fileData: undefined }));
+    return [...own, ...statusOnly] as typeof allDocuments;
+  })();
+  const residentDocs: ResidentDoc[] = phaseDocsForStatus
     .filter(belongsToCurrentAdmission)
     .map(d => ({
       title: d.title,

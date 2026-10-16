@@ -1267,6 +1267,8 @@ async function submit(req, res, next) {
       }
     }
 
+    signalDocumentsChanged();
+
     res.json({
       success: true,
       data: mapRow('documents', updated),
@@ -1373,6 +1375,10 @@ async function approve(req, res, next) {
       console.error('[DocumentController] Approval notification failed (non-fatal):', notifyErr.message);
     }
 
+    // Every other open session re-reads its documents (and its Phase
+    // Timeline), so the new status shows for everyone at once.
+    signalDocumentsChanged();
+
     res.json({
       success: true,
       message: 'Document approved',
@@ -1455,6 +1461,10 @@ async function reject(req, res, next) {
         console.error('[DocumentController] Rejection notification failed (non-fatal):', notifyErr.message);
       }
     }
+
+    // Every other open session re-reads its documents (and its Phase
+    // Timeline), so the new status shows for everyone at once.
+    signalDocumentsChanged();
 
     res.json({
       success: true,

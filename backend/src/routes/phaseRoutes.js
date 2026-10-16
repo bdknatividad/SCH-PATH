@@ -11,6 +11,7 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const { authenticate, authorize, authorizeNonHouseparent } = require('../middleware/auth');
 // An absconded resident's Phase Timeline is frozen: every write below refuses.
 const { blockAbscondedPhaseWrites } = require('../utils/abscond');
+const { requireSubModule } = require('../middleware/rbac');
 
 /**
  * GET /api/phases
@@ -29,6 +30,17 @@ router.get('/resident/:residentId', asyncHandler(phaseController.getByResident))
  * Get current phase for resident
  */
 router.get('/resident/:residentId/current', asyncHandler(phaseController.getCurrent));
+
+/**
+ * GET /api/phases/resident/:residentId/documents
+ * The shared review status of the resident's phase documents (metadata only),
+ * the same for everyone who may open the Phase Timeline.
+ */
+router.get(
+  '/resident/:residentId/documents',
+  requireSubModule('Child Records', 'Phase Timeline'),
+  asyncHandler(phaseController.getDocumentStatuses),
+);
 
 /**
  * GET /api/phases/requirements
