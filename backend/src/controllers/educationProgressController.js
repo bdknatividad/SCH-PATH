@@ -34,14 +34,22 @@ const {
   MONITORING_FIELDS,
   subjectLevelFor,
   completionOf,
+  derivedMonitoringFields,
   progressSummaries,
 } = require('../utils/educationSubjects');
 
 const TEXT_LIMIT = 5000;
 const MAX_OUTPUTS = 999;
 
-/** Only the Educator updates a learner's progress. */
+/** The Educator and the Center Head update a learner's progress. */
+const PROGRESS_EDITOR_ROLES = ['educator', 'centerhead'];
 function mayEditProgress(req) {
+  if (!PROGRESS_EDITOR_ROLES.includes(normalizeRole(req.user?.role))) return false;
+  return hasPermission(snapshotFor(req), 'Education', 'edit');
+}
+
+/** Complete (archive) stays the Educator's alone. */
+function mayCompleteStudent(req) {
   if (normalizeRole(req.user?.role) !== 'educator') return false;
   return hasPermission(snapshotFor(req), 'Education', 'edit');
 }
@@ -106,7 +114,7 @@ function cleanText(value, label) {
 async function save(req, res, next) {
   try {
     if (!mayEditProgress(req)) {
-      throw new ApiError(403, 'Only the Educator can update a student\'s education progress.');
+      throw new ApiError(403, 'Only the Educator or the Center Head can update a student\'s education progress.');
     }
     const record = await loadRecord(req.params.educationRecordId);
     if (record.archivedAt) {
@@ -209,6 +217,10 @@ async function save(req, res, next) {
       }
 
       if (monitoring) {
+        // The four subject-based fields are filled in here, from the subjects as
+        // just saved; Notes and Concerns stay as the user typed them.
+        const [saved] = await progressSummaries(connection, { recordIds: [record.id] });
+        Object.assign(monitoring, derivedMonitoringFields(saved?.subjects || []));
         const [existing] = await connection.query(
           'SELECT id FROM education_progress_monitoring WHERE educationRecordId = ? FOR UPDATE',
           [record.id],
@@ -263,7 +275,7 @@ async function save(req, res, next) {
  */
 async function complete(req, res, next) {
   try {
-    if (!mayEditProgress(req)) {
+    if (!mayCompleteStudent(req)) {
       throw new ApiError(403, 'Only the Educator can complete a student.');
     }
     const record = await loadRecord(req.params.educationRecordId);

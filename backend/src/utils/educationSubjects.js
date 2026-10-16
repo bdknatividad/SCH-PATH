@@ -53,6 +53,38 @@ function subjectLevelFor(level) {
   return value;
 }
 
+/** "3/5 submitted", "3 submitted", or "" when nothing is recorded. */
+function outputsText(submitted, total) {
+  if (total !== null && total !== undefined) return `${submitted ?? 0}/${total} submitted`;
+  if (submitted !== null && submitted !== undefined) return `${submitted} submitted`;
+  return '';
+}
+
+/**
+ * The four monitoring fields that follow from the subjects, filled in on every
+ * save: Modules/Activities Completed and Pending (by status) and Outputs
+ * Submitted and Not Submitted (by count). Progress/Participation Notes and
+ * Education-Related Concerns are never derived — they are the Educator's own.
+ * An empty list is null, so a field never holds an empty string.
+ */
+function derivedMonitoringFields(subjects) {
+  const list = subjects || [];
+  const join = (items, sep) => (items.length ? items.join(sep) : null);
+  return {
+    modulesCompleted: join(list.filter((s) => s.status === 'Completed').map((s) => s.name), ', '),
+    modulesPending: join(list.filter((s) => s.status !== 'Completed').map((s) => s.name), ', '),
+    outputsSubmitted: join(
+      list.filter((s) => (s.outputsSubmitted || 0) > 0).map((s) => `${s.name}: ${outputsText(s.outputsSubmitted, s.outputsTotal)}`),
+      '\n',
+    ),
+    outputsNotSubmitted: join(
+      list.filter((s) => (s.outputsTotal || 0) > (s.outputsSubmitted || 0))
+        .map((s) => `${s.name}: ${(s.outputsTotal || 0) - (s.outputsSubmitted || 0)} not submitted`),
+      '\n',
+    ),
+  };
+}
+
 /**
  * Whether a learner's Education Progress is complete — the one condition for
  * Complete (archiving): at least one subject, every subject Completed, and
@@ -185,5 +217,6 @@ module.exports = {
   MONITORING_FIELDS,
   subjectLevelFor,
   completionOf,
+  derivedMonitoringFields,
   progressSummaries,
 };

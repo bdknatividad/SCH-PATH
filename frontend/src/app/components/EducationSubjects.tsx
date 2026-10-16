@@ -5,7 +5,7 @@ import { Button } from '@/app/components/ui/button';
 import { Input } from '@/app/components/ui/input';
 import { Textarea } from '@/app/components/ui/textarea';
 import { formatShortDate } from '@/utils/dateFormatter';
-import { Plus, Settings2, Trash2, AlertCircle, Loader2, Pencil, Save, X, ClipboardList, Wand2 } from 'lucide-react';
+import { Plus, Settings2, Trash2, AlertCircle, Loader2, Pencil, Save, X, ClipboardList } from 'lucide-react';
 
 /**
  * Education Progress Monitoring — replaces Pass / Fail.
@@ -389,26 +389,25 @@ export function EducationProgressPanel({
       };
     }));
 
-  /** Fill the four list fields from the statuses set above (the Educator can then edit them). */
-  const fillFromSubjects = () => {
-    const names = (statuses: ProgressStatus[]) =>
-      draftSubjects.filter((s) => statuses.includes(s.status)).map((s) => s.name).join(', ');
-    const submitted = draftSubjects
-      .filter((s) => Number(s.outputsSubmitted) > 0)
-      .map((s) => `${s.name}: ${outputsLabel(Number(s.outputsSubmitted), s.outputsTotal === '' ? null : Number(s.outputsTotal))}`)
-      .join('\n');
-    const missing = draftSubjects
-      .filter((s) => s.outputsTotal !== '' && Number(s.outputsTotal) > Number(s.outputsSubmitted || 0))
-      .map((s) => `${s.name}: ${Number(s.outputsTotal) - Number(s.outputsSubmitted || 0)} not submitted`)
-      .join('\n');
-    setDraftMonitoring((m) => ({
-      ...m,
-      modulesCompleted: names(['Completed']),
-      modulesPending: names(['Pending', 'Ongoing']),
-      outputsSubmitted: submitted,
-      outputsNotSubmitted: missing,
-    }));
-  };
+  /**
+   * The four subject-based monitoring fields, previewed live from the rows
+   * above. They are not typed in: the server fills them in from the saved
+   * subjects on every save (same rules), so they can never disagree with the
+   * table. Notes and Concerns stay manual.
+   */
+  const autoFields = useMemo(() => {
+    const rows = draftSubjects.map((s) => {
+      const total = wholeNumber(s.outputsTotal);
+      const submitted = wholeNumber(s.outputsSubmitted);
+      return { name: s.name, status: statusFromOutputs(submitted, total, s.status), submitted, total };
+    });
+    return {
+      modulesCompleted: rows.filter((r) => r.status === 'Completed').map((r) => r.name).join(', '),
+      modulesPending: rows.filter((r) => r.status !== 'Completed').map((r) => r.name).join(', '),
+      outputsSubmitted: rows.filter((r) => r.submitted > 0).map((r) => `${r.name}: ${outputsLabel(r.submitted, r.total)}`).join('\n'),
+      outputsNotSubmitted: rows.filter((r) => r.total > r.submitted).map((r) => `${r.name}: ${r.total - r.submitted} not submitted`).join('\n'),
+    } as Partial<Record<keyof ProgressMonitoring, string>>;
+  }, [draftSubjects]);
 
   const save = async () => {
     setSaveError('');
@@ -532,7 +531,7 @@ export function EducationProgressPanel({
         <p className="rounded-lg bg-gray-50 px-3 py-2 text-xs text-gray-600">
           {progress.archived
             ? 'This student is in the Archive. Their education progress is kept as history and is view-only.'
-            : 'View only — only the Educator can edit a student\'s education progress.'}
+            : 'View only — only the Educator or the Center Head can edit a student\'s education progress.'}
         </p>
       )}
 
@@ -608,11 +607,7 @@ export function EducationProgressPanel({
               <h4 className="flex items-center gap-2 text-sm font-bold text-[#2F3E46]">
                 <ClipboardList className="h-4 w-4" /> Education Progress Monitoring
               </h4>
-              {draftSubjects.length > 0 && (
-                <Button type="button" variant="outline" size="sm" className="gap-1.5 rounded-lg text-xs" onClick={fillFromSubjects}>
-                  <Wand2 className="h-3.5 w-3.5" /> Fill from subject statuses
-                </Button>
-              )}
+              <span className="text-[11px] text-gray-500">Completed / Pending and Outputs are filled in automatically when you save.</span>
             </div>
             <div className="max-w-[12rem]">
               <label className="text-[10px] font-bold uppercase tracking-wider text-gray-500" htmlFor="monitoring-date">Date of Monitoring *</label>
@@ -628,14 +623,25 @@ export function EducationProgressPanel({
               {MONITORING_ROWS.map(({ key, label }) => (
                 <div key={key} className={key === 'participationNotes' || key === 'concerns' ? 'sm:col-span-2' : ''}>
                   <label className="text-[10px] font-bold uppercase tracking-wider text-gray-500" htmlFor={`monitoring-${key}`}>{label}</label>
-                  <Textarea
-                    id={`monitoring-${key}`}
-                    value={String(draftMonitoring[key] || '')}
-                    onChange={(e) => setDraftMonitoring((m) => ({ ...m, [key]: e.target.value }))}
-                    rows={2}
-                    maxLength={5000}
-                    className="mt-1 rounded-lg border border-gray-200 bg-gray-50 text-sm"
-                  />
+                  {key in autoFields ? (
+                    // Filled in automatically from the subjects — not typed.
+                    <div
+                      id={`monitoring-${key}`}
+                      aria-readonly="true"
+                      className="mt-1 min-h-[3.5rem] whitespace-pre-wrap rounded-lg border border-dashed border-gray-200 bg-gray-50 px-3 py-2 text-sm text-[#2F3E46]"
+                    >
+                      {autoFields[key] || <span className="italic text-gray-400">None</span>}
+                    </div>
+                  ) : (
+                    <Textarea
+                      id={`monitoring-${key}`}
+                      value={String(draftMonitoring[key] || '')}
+                      onChange={(e) => setDraftMonitoring((m) => ({ ...m, [key]: e.target.value }))}
+                      rows={2}
+                      maxLength={5000}
+                      className="mt-1 rounded-lg border border-gray-200 bg-gray-50 text-sm"
+                    />
+                  )}
                 </div>
               ))}
             </div>
